@@ -1,0 +1,22 @@
+# Secrets & local machine config — NEVER commit
+.mcp.json
+.env
+.env.*
+*.local
+
+# Live working file (gitignored per ops/ convention in CLAUDE.md)
+ops/STATE.md
+
+# OS / tooling noise
+.DS_Store
+node_modules/
+__pycache__/
+*.pyc
+
+# Session scratch — never publish
+.claude/tmp/
+
+# Resume build fonts: if you keep per-application font copies, they're build inputs, not
+# deliverables (the PDF is) — uncomment if that gets noisy:
+# applications/*/resume/fonts/
+# applications/*/cover-letter/fonts/

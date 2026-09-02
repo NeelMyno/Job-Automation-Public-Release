@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Résumé</title>
+<style>
+  /* Font paths are RELATIVE to this file, resolving to the fonts/ folder that sits beside it.
+     When you copy this file into a dossier (applications/<co>/resume/resume.html), also copy
+     resume/fonts/ into that same dossier folder — see knowledge-base/07-master-resume.md and
+     STRUCTURE.md. A relative path here (unlike an absolute /Users/... path) works identically on
+     any machine and in any dossier copy, which is the whole point. */
+  @font-face { font-family:'Inter'; font-weight:400; font-style:normal;
+    src:url('fonts/Inter-Regular.ttf'); }
+  @font-face { font-family:'Inter'; font-weight:700; font-style:normal;
+    src:url('fonts/Inter-Bold.ttf'); }
+  @font-face { font-family:'Inter'; font-weight:400; font-style:italic;
+    src:url('fonts/Inter-Italic.ttf'); }
+
+  @page { size: A4; margin: 11mm 12mm 10mm 12mm; }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { hyphens:none; }
+  body {
+    font-family:'Inter', sans-serif; color:#1a1a1a;
+    font-size:9pt; line-height:1.34; font-weight:400;
+    -weasy-font-variant-numeric: tabular-nums;
+  }
+  a { color:#0b6e47; text-decoration:none; }
+
+  /* ---- header ---- */
+  .name {
+    font-size:20pt; font-weight:700; letter-spacing:-0.02em;
+    color:#0a0a0a; line-height:1.0;
+  }
+  .title { font-size:10.5pt; font-weight:700; color:#0b6e47; margin-top:2.5pt; letter-spacing:-0.005em; }
+  .tag { font-size:8.6pt; color:#555; margin-top:2pt; }
+  .contact { font-size:8.6pt; color:#333; margin-top:4pt; letter-spacing:-0.002em; }
+  .contact a { color:#333; }
+  .rule-strong { border:0; border-top:1.4pt solid #0b6e47; margin-top:7pt; }
+
+  /* ---- sections ---- */
+  section { margin-top:8.5pt; }
+  h2 {
+    font-size:8.6pt; font-weight:700; text-transform:uppercase; letter-spacing:0.045em;
+    color:#0a0a0a; padding-bottom:2pt; border-bottom:0.6pt solid #d8d8d8; margin-bottom:4.5pt;
+  }
+
+  /* ---- skills ---- */
+  .skill { margin-bottom:2.5pt; }
+  .skill b { color:#0a0a0a; font-weight:700; }
+
+  /* ---- experience ---- */
+  .job { margin-bottom:6pt; }
+  .job:last-child { margin-bottom:0; }
+  .job-head { display:flex; justify-content:space-between; align-items:baseline; }
+  .job-title { font-weight:700; color:#0a0a0a; font-size:9.2pt; }
+  .job-title .co { color:#0a0a0a; }
+  .job-dates { font-size:8.4pt; color:#6b6b6b; white-space:nowrap; padding-left:8pt; }
+  ul { list-style:none; margin-top:1.5pt; }
+  li { position:relative; padding-left:9pt; margin-bottom:1.6pt; }
+  li:before { content:"›"; position:absolute; left:0; top:-0.4pt; color:#0b6e47; font-weight:700; }
+  b, strong { font-weight:700; color:#0a0a0a; }
+
+  .two { display:flex; justify-content:space-between; gap:14pt; }
+  .two > div { flex:1; }
+  .meta { font-size:8.4pt; color:#6b6b6b; }
+  .proj b { color:#0a0a0a; }
+</style>
+</head>
+<body>
+
+  <div class="name">YOUR NAME</div>
+  <div class="title">Your Title</div>
+  <div class="tag">A one-line tagline — the 2-4 things you want a 6-second reader to register</div>
+  <div class="contact">City, State · +1 (555) 555-5555 · you@example.com · <a href="https://example.com">yourportfolio.com</a> · <a href="https://linkedin.com/in/yourhandle">linkedin.com/in/yourhandle</a></div>
+  <hr class="rule-strong">
+
+  <section>
+    <h2>Skills</h2>
+    <div class="skill"><b>Category one:</b> comma-separated list, pulled from knowledge-base/05-skills-competencies.md.</div>
+    <div class="skill"><b>Category two:</b> comma-separated list.</div>
+  </section>
+
+  <section>
+    <h2>Experience</h2>
+
+    <div class="job">
+      <div class="job-head">
+        <div class="job-title"><span class="co">Employer Name</span> · Your Title</div>
+        <div class="job-dates">Mon YYYY – Present · City</div>
+      </div>
+      <ul>
+        <li>Bullet one — verb-first, specific, a real number beats a vague adjective.</li>
+        <li>Bullet two.</li>
+        <li>Bullet three.</li>
+      </ul>
+    </div>
+
+    <div class="job">
+      <div class="job-head">
+        <div class="job-title"><span class="co">Previous Employer</span> · Your Title</div>
+        <div class="job-dates">Mon YYYY – Mon YYYY</div>
+      </div>
+      <ul>
+        <li>Bullet.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Selected Projects</h2>
+    <ul>
+      <li class="proj"><b>Project name, your role (year).</b> One or two sentences, honest about scope. Case study at <a href="https://example.com/project">yourportfolio.com/project</a>.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="two">
+      <div>
+        <h2>Education</h2>
+        <div style="margin-bottom:2.5pt"><b>Institution</b> · Degree, Field <span class="meta">· Mon YYYY – Mon YYYY</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Certifications &amp; Recognition</h2>
+    <div class="skill">List, or delete this section if none.</div>
+  </section>
+
+</body>
+</html>

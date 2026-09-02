@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+
+  "_why": [
+    "A rule that lives only in a doc, with nothing enforcing it, eventually gets violated — someone",
+    "has to remember to run the check every time, and eventually no one does. So the checks below",
+    "run from the harness itself (SessionStart / PostToolUse / Stop), never from an agent choosing",
+    "to type a command. Each hook fails OPEN (a crash never blocks the session) and is scoped to",
+    "files the session actually touched, so pre-existing debt never holds a session hostage."
+  ],
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks.py\" --session-start",
+            "timeout": 30,
+            "statusMessage": "Deriving live job-search state"
+          }
+        ]
+      }
+    ],
+
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks.py\" --post-edit",
+            "timeout": 25
+          }
+        ]
+      }
+    ],
+
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks.py\" --stop",
+            "timeout": 40
+          }
+        ]
+      }
+    ]
+  },
+
+  "permissions": {
+    "allow": [
+      "Bash(python3 scripts/verify_claims.py:*)",
+      "Bash(python3 scripts/canon.py:*)",
+      "Bash(python3 scripts/visa_gate.py:*)",
+      "Bash(python3 scripts/check_law.py:*)",
+      "Bash(python3 scripts/adr_debt.py:*)",
+      "Bash(python3 scripts/presubmit_check.py:*)",
+      "Bash(python3 scripts/hooks.py:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Read(./.mcp.json)",
+      "Read(./.env)",
+      "Read(./.env.*)"
+    ]
+  },
+
+  "_pluginNote": "If a plugin injects instructions unrelated to your prompt, disable it here, e.g. \"enabledPlugins\": { \"<plugin-name>\": false }."
+}

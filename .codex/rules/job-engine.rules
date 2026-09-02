@@ -1,0 +1,37 @@
+# Repository command policy. The PreToolUse hook also checks these invariants
+# because prefix rules cannot catch a dangerous flag placed later in a command.
+
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Force-push is forbidden in this repository. Pull with rebase and use a normal push.",
+    match = ["git push --force"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Force-push is forbidden in this repository. Pull with rebase and use a normal push.",
+    match = ["git push -f"],
+)
+
+prefix_rule(
+    pattern = ["git", "add", "-A"],
+    decision = "forbidden",
+    justification = "Stage explicit paths only; this repository can contain ignored and sensitive local material.",
+    match = ["git add -A"],
+)
+
+prefix_rule(
+    pattern = ["git", "add", "."],
+    decision = "forbidden",
+    justification = "Stage explicit paths only; never sweep the entire working tree into a commit.",
+    match = ["git add ."],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Preserve user and parallel-session changes; use a scoped, recoverable alternative.",
+    match = ["git reset --hard"],
+)

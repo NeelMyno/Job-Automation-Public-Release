@@ -1,0 +1,8 @@
+# Codex compatibility for this repo.
+# CLAUDE.md remains the single owner of repository instructions. Codex loads it
+# as a fallback instead of maintaining a second, drifting AGENTS.md copy.
+project_doc_fallback_filenames = ["CLAUDE.md"]
+project_doc_max_bytes = 131072
+
+[features]
+hooks = true

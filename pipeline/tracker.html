@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Job Search · Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ── Semantic tokens (role-named; see DESIGN.md) ─────────────────────
+     Instrument-panel register: near-black neutral canvas (never green-tinted,
+     never #000), ONE accent (Spring-Green) for live/selection only, status by
+     dot+label, tabular numerals, hairlines over shadows. */
+  :root{
+    --bg:#0C0C0D; --surface:#131414; --surface-2:#191A1A; --raised:#1E1F1F;
+    --line:#242525; --line-soft:#1C1D1D;
+    --ink:#E6E7E3; --ink-dim:#9A9B96; --ink-faint:#62635E;
+    --accent:#37D98C; --accent-ink:#06140D;
+    --status-live:var(--accent); --status-attention:#E4B24A; --status-negative:#D9655B;
+    --status-neutral:var(--ink-dim); --status-muted:var(--ink-faint);
+    --r:11px;
+    --num:"Manrope",-apple-system,system-ui,sans-serif;
+    --sans:"Manrope",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    font-size:13.5px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    font-feature-settings:"tnum" 1,"lnum" 1; font-variant-numeric:tabular-nums lining-nums;
+  }
+  .wrap{max-width:1280px; margin:0 auto; padding:36px 30px 90px}
+
+  header{display:flex; align-items:baseline; justify-content:space-between; gap:20px; flex-wrap:wrap}
+  h1{font-size:20px; font-weight:600; letter-spacing:-.015em; margin:0}
+  h1 .yr{color:var(--accent)}
+  .sub{color:var(--ink-dim); font-size:12.5px; margin-top:3px}
+  .updated{color:var(--ink-faint); font-size:11.5px; letter-spacing:.02em}
+
+  /* Lead with ONE number. Never a 3-5-up identical stat-tile grid (DESIGN.md). */
+  .summary{display:flex; align-items:baseline; gap:16px; margin:26px 0 30px; padding-bottom:22px; border-bottom:1px solid var(--line)}
+  .summary .big{font-size:38px; font-weight:600; letter-spacing:-.03em; color:var(--accent); line-height:1}
+  .summary .big-l{font-size:11px; text-transform:uppercase; letter-spacing:.13em; color:var(--ink-dim); align-self:flex-end; padding-bottom:5px}
+  .summary .rule{width:1px; height:26px; background:var(--line); align-self:center; margin:0 6px}
+  .summary .bd{display:flex; gap:22px; flex-wrap:wrap; align-self:center}
+  .summary .bd b{font-weight:600; color:var(--ink); font-size:15px}
+  .summary .bd span{color:var(--ink-faint); font-size:11px; text-transform:uppercase; letter-spacing:.08em; margin-left:5px}
+
+  .tabs{display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:20px}
+  .tab{appearance:none; background:none; border:none; color:var(--ink-dim); font:inherit; font-weight:500;
+    padding:9px 13px; cursor:pointer; border-bottom:1.5px solid transparent; margin-bottom:-1px; min-height:28px}
+  .tab:hover{color:var(--ink)}
+  .tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+  .tab .count{color:var(--ink-faint); font-size:11.5px; margin-left:5px}
+
+  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px}
+  .search{flex:1; min-width:220px; background:var(--surface); border:1px solid var(--line); border-radius:9px;
+    color:var(--ink); font:inherit; font-size:16px; padding:8px 12px; min-height:36px}
+  .search::placeholder{color:var(--ink-faint)}
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{appearance:none; background:var(--surface); border:1px solid var(--line); color:var(--ink-dim);
+    font:inherit; font-size:12px; font-weight:500; padding:5px 11px; border-radius:999px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px; min-height:26px}
+  .chip:hover{color:var(--ink); border-color:var(--ink-faint)}
+  .chip[aria-pressed="true"]{background:var(--accent); border-color:transparent; color:var(--accent-ink); font-weight:600}
+  .chip .dot{width:6px; height:6px; border-radius:50%}
+  .chip[aria-pressed="true"] .dot{display:none}
+
+  :focus{outline:none}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:6px}
+
+  /* ── Table. Fixed layout: a column may never be crushed by another's content. ── */
+  .frame{border:1px solid var(--line-soft); border-radius:var(--r); overflow:hidden; background:var(--surface)}
+  .scroll{overflow-x:auto}          /* safety net only; the table is designed to fit its container */
+  table{width:100%; border-collapse:collapse; table-layout:fixed}
+
+  /* Column widths live on the header cells (fixed layout reads them there).
+     No min-width: columns DROP OUT at breakpoints rather than forcing a
+     sideways scroll, and every dropped fact reappears in the detail drawer. */
+  /* Content columns are fixed px (a date/money band never clips); the flexible
+     text columns (company, location, next, context) are % so Next always gets
+     an explicit share and can never be starved to a sliver. */
+  th.c-disc{width:44px} th.c-status{width:110px}
+  th.c-co{width:22%} th.c-loc{width:12%} th.c-posted{width:106px}
+  th.c-comp{width:130px} th.c-fit{width:118px} th.c-next{width:32%}
+  th.c-name{width:26%} th.c-netco{width:20%} th.c-context{width:40%}
+
+  thead th{position:sticky; top:0; background:var(--surface-2); text-align:left; padding:0;
+    border-bottom:1px solid var(--line); white-space:nowrap; z-index:2}
+  th.num{text-align:right}
+  .sortbtn{appearance:none; background:none; border:none; color:var(--ink-dim); font:inherit;
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; cursor:pointer;
+    padding:11px 14px; width:100%; text-align:inherit; display:inline-flex; align-items:center; gap:5px; min-height:26px}
+  th.num .sortbtn{justify-content:flex-end}
+  .sortbtn:hover{color:var(--ink)}
+  .plain{color:var(--ink-dim); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; padding:11px 14px; display:block}
+  .arrow{color:var(--accent); font-size:9px}
+  th[aria-sort] .sortbtn{color:var(--ink)}
+
+  tbody td{padding:12px 14px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+  tbody tr.row td:not(.c-disc){overflow:hidden}   /* no cell may ever widen the table */
+  td.c-disc{padding-left:12px; padding-right:4px}
+  tr.row:hover td{background:var(--surface-2)}
+  tr.row.open td{background:var(--surface-2)}
+  td.num{text-align:right; font-variant-numeric:tabular-nums; color:var(--ink); white-space:nowrap}
+
+  /* company + role share one cell: hierarchy by type, not by another column.
+     Every long field clamps; that is what stops one cell blowing out the table. */
+  .co{font-weight:600; color:var(--ink); font-size:13.5px; line-height:1.35;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .role{color:var(--ink-dim); font-size:12px; line-height:1.4; margin-top:2px}
+  .loc{color:var(--ink-faint); font-size:12.5px; line-height:1.4}
+  /* Clamp an inner div, NEVER the <td>: display:-webkit-box on a table-cell destroys the cell box. */
+  .clamp2{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+  td.posted{color:var(--ink-dim); font-variant-numeric:tabular-nums; white-space:nowrap; font-size:12.5px}
+
+  /* The next-action cell holds ONE short imperative, clamped to two lines.
+     Anything longer lives in the expanded detail drawer. A cell holds a fact,
+     never a paragraph. */
+  .next{color:var(--ink); font-size:12.5px; line-height:1.45}
+
+  .pill{display:inline-flex; align-items:center; gap:7px; padding:3px 9px 3px 7px; border-radius:999px;
+    background:var(--surface); border:1px solid var(--line); font-size:11.5px; font-weight:500; white-space:nowrap; color:var(--ink); max-width:100%; overflow:hidden}
+  .pill .dot{width:7px; height:7px; border-radius:50%; flex:none}
+  /* fit chip: dot + rating + score on ONE line; the full rationale lives in the drawer */
+  .fit{display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--ink-dim); max-width:100%; min-width:0; white-space:nowrap; overflow:hidden}
+  .fit .dot{width:7px; height:7px; border-radius:50%; flex:none}
+  .fit .lbl{overflow:hidden; text-overflow:ellipsis}
+  .fit .score{color:var(--ink-faint); font-variant-numeric:tabular-nums; flex:none}
+  .cband{display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom}
+
+  /* disclosure control: a real button, 28px hit area, instant (100x/day surface) */
+  .disc{appearance:none; background:none; border:none; color:var(--ink-faint); cursor:pointer;
+    width:28px; height:28px; display:grid; place-items:center; border-radius:7px; font-size:10px; line-height:1}
+  .disc:hover{color:var(--ink)}
+  .disc svg{width:9px; height:9px; transform:rotate(0deg)}
+  tr.row.open .disc{color:var(--accent)}
+  tr.row.open .disc svg{transform:rotate(90deg)}
+
+  /* the detail drawer: full row width, prose lives HERE, and it never scrolls sideways */
+  tr.det > td{padding:0; border-bottom:1px solid var(--line-soft); background:var(--bg)}
+  tr.det[hidden]{display:none}
+  .det-in{padding:18px 20px 22px 54px; display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:30px; align-items:start}
+  .det-main{min-width:0}
+  .det-note{color:var(--ink-dim); font-size:12.5px; line-height:1.7; overflow-wrap:anywhere}
+  .det-note + .det-note{margin-top:11px}
+  .det-note b{color:var(--ink); font-weight:600}
+  .det-note a{color:var(--accent); text-decoration:none; overflow-wrap:anywhere}
+  .det-note a:hover{text-decoration:underline}
+  .det-side{border-left:1px solid var(--line-soft); padding-left:22px; min-width:0}
+  .det-side dl{margin:0; display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; align-items:baseline}
+  .det-side dt{color:var(--ink-faint); font-size:11px; text-transform:uppercase; letter-spacing:.07em; white-space:nowrap}
+  .det-side dd{margin:0; color:var(--ink-dim); font-size:12.5px; font-variant-numeric:tabular-nums; min-width:0; overflow-wrap:anywhere}
+  .det-links{display:flex; flex-wrap:wrap; gap:8px; margin-top:16px}
+  .det-links a{display:inline-flex; align-items:center; min-height:28px; padding:4px 11px; border-radius:7px;
+    border:1px solid var(--line); background:var(--surface); color:var(--ink-dim); text-decoration:none; font-size:12px; font-weight:500}
+  .det-links a:hover{color:var(--ink); border-color:var(--ink-faint)}
+  .src{display:inline-block; font-size:11px; color:var(--ink-dim); background:var(--surface-2);
+    border:1px solid var(--line); border-radius:6px; padding:2px 7px; white-space:normal; overflow-wrap:anywhere}
+  .none{color:var(--ink-faint)}
+
+  /* the ONE signature motion: a slow live pulse. Everything else is instant. */
+  @keyframes live-pulse{0%,100%{opacity:1} 50%{opacity:.4}}
+  .dot.live{animation:live-pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite}
+  @media (prefers-reduced-motion:reduce){ .dot.live{animation:none} }
+
+  .empty{padding:54px 24px; text-align:center}
+  .empty b{color:var(--ink); font-weight:600; font-size:14px}
+  .empty p{color:var(--ink-faint); font-size:12.5px; margin:8px auto 0; max-width:440px; line-height:1.6}
+  .foot{color:var(--ink-faint); font-size:11.5px; margin-top:20px; line-height:1.65; max-width:820px}
+  .foot b{color:var(--ink-dim); font-weight:600}
+
+  /* On a phone the summary stacks: number + label first, the four counts below. */
+  @media (max-width:640px){
+    .summary{flex-wrap:wrap; gap:12px 16px; margin:22px 0 26px}
+    .summary .rule{display:none}
+    .summary .bd{flex-basis:100%; gap:10px 20px}
+  }
+
+  /* Responsive: drop the least-critical columns as width shrinks. The facts
+     they carried are always available in the detail drawer. Never a sideways scroll. */
+  @media (max-width:1080px){ .c-posted{display:none} }
+  @media (max-width:960px){ .c-loc{display:none} }
+  @media (max-width:860px){ .c-fit{display:none} }
+  @media (max-width:820px){
+    .wrap{padding:24px 16px 70px}
+    .det-in{grid-template-columns:minmax(0,1fr); gap:18px; padding:16px 16px 20px 46px}
+    .det-side{border-left:none; border-top:1px solid var(--line-soft); padding-left:0; padding-top:16px}
+  }
+  @media (max-width:720px){ .c-comp, .c-netco{display:none} }
+  @media (max-width:520px){
+    .det-in{padding-left:16px}
+    thead th, tbody td{padding-left:8px; padding-right:8px}
+    thead th, .sortbtn, .plain{white-space:normal}   /* long headers wrap instead of clipping */
+    .sortbtn, .plain{padding-left:8px; padding-right:8px}
+    td.c-disc{padding-left:8px; padding-right:2px}
+    th.c-co{width:30%} th.c-next{width:26%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Job Search <span class="yr">Tracker</span></h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="updated" id="updated"></div>
+  </header>
+
+  <section class="summary" id="summary" aria-label="Pipeline summary"></section>
+
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" id="tab-apps" role="tab" aria-selected="true" aria-controls="panel">Applications <span class="count" id="c-apps"></span></button>
+    <button class="tab" id="tab-net" role="tab" aria-selected="false" aria-controls="panel">Network &amp; referrals <span class="count" id="c-net"></span></button>
+  </div>
+
+  <div class="controls">
+    <input class="search" id="q" type="search" placeholder="Search company, role, person, note..." aria-label="Search the tracker" />
+    <div class="chips" id="chips" role="group" aria-label="Filter by status"></div>
+  </div>
+
+  <div id="panel" role="tabpanel">
+    <div class="frame"><div class="scroll"><table id="table"></table></div></div>
+  </div>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script>
+const UPDATED = "2026-01-01";  // bump this whenever you edit the rows below (CLAUDE.md §9)
+
+const APPLICATIONS = [
+];
+
+const NETWORK = [
+];
+
+
+const STATUS = {
+  lead:     {label:"Lead",      c:"var(--status-neutral)"},
+  active:   {label:"Active",    c:"var(--status-live)", live:true},
+  applied:  {label:"Applied",   c:"var(--status-live)", live:true},
+  interview:{label:"Interview", c:"var(--status-live)", live:true},
+  offer:    {label:"Offer",     c:"var(--status-live)", live:true},
+  rejected: {label:"Rejected",  c:"var(--status-negative)"},
+  passed:   {label:"Passed",    c:"var(--status-muted)"},
+};
+const NET_STATUS = {
+  lead:     {label:"To contact", c:"var(--status-attention)"},
+  active:   {label:"In touch",   c:"var(--status-live)", live:true},
+  passed:   {label:"Closed",     c:"var(--status-muted)"},
+};
+// Fit rendering lives in parseFit()/fitChip() below — a `fit` value is a rich
+// string ("strong 9/10 - reason"), not one of three fixed codes, so it is parsed.
+
+const el=s=>document.querySelector(s);
+const esc=s=>(s==null?"":String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dot=(c,live)=>`<span class="dot${live?' live':''}" style="background:${c}"></span>`;
+const pill=(m,k)=>{const s=m[k]||{label:k,c:"var(--status-neutral)"}; return `<span class="pill">${dot(s.c,s.live)}${esc(s.label)}</span>`;};
+const dash='<span class="none">&mdash;</span>';
+// A missing value renders as a no-data glyph, never a fake zero, never a blank that reads as data.
+// Legacy rows carry a literal em-dash string; treat it as missing too.
+const val=v=>(v===null||v===undefined||v===""||v==="—")?dash:esc(v);
+// A column shows the FACT; annotations are provenance and live in the drawer.
+// comp/posted carry rich strings ("Search found $238K-$265K printed ...",
+// "live 2026-07-23"), so pull the money band and the date for the columns.
+function compBand(v){
+  if(v==null) return "";
+  const s=String(v).trim();
+  const m=s.match(/~?\$?\s*[\d.,]+\s*[KkMm]?(?:\s*[-–—]\s*\$?\s*[\d.,]+\s*[KkMm]?)?(?:\s*\+\s*[A-Za-z]+)?/);
+  if(m && /\d/.test(m[0])) return m[0].replace(/\s+/g,"");
+  return s.split(/\s*[(,]/)[0].split(/\s+/).slice(0,2).join(" ");
+}
+const postedShort=v=>{
+  if(v==null) return "";
+  const s=String(v).trim();
+  const m=s.match(/\d{4}-\d{2}(?:-\d{2})?/);
+  return m?m[0]:s.split(" (")[0];
+};
+
+// A `fit` value is a rich string ("strong 9/10 - reason ..."). Parse the rating
+// word and score for the compact column chip; the full rationale goes to the drawer.
+// This is what stops the long strings blowing out the table.
+function parseFit(raw){
+  const s=(raw==null?"":String(raw)).trim();
+  if(!s) return {label:"", score:"", c:"var(--status-muted)", full:""};
+  const m=s.match(/^(bullseye|very strong|strong|stretch|clean|good|medium|watch|weak|low|pass)/i);
+  const rating=m?m[1]:(s.split(/[\s(]/)[0]||s);
+  const score=(s.match(/(\d+(?:\.\d+)?)\s*\/\s*10/)||[])[1]||"";
+  const n=rating.toLowerCase();
+  const c=/bullseye|strong|clean/.test(n)?"var(--status-live)"
+        :/good|medium|watch/.test(n)?"var(--status-attention)"
+        :"var(--status-muted)";
+  return {label:rating.charAt(0).toUpperCase()+rating.slice(1), score, c, full:s};
+}
+function fitChip(raw){
+  const f=parseFit(raw);
+  if(!f.label) return dash;
+  return `<span class="fit"><span class="dot" style="background:${f.c}"></span>`+
+    `<span class="lbl">${esc(f.label)}</span>${f.score?`<span class="score">${esc(f.score)}</span>`:""}</span>`;
+}
+// Make URLs in drawer prose clickable. esc() runs FIRST, so we only ever wrap
+// already-escaped text — no raw markup can slip through.
+function linkify(raw){
+  return esc(raw).replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]])/g,
+    u=>`<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+}
+
+let view="apps", q="", statusFilter="all", sortKey="compK", sortDir=-1;
+const open=new Set();
+
+function rows(){ return view==="apps"?APPLICATIONS:NETWORK; }
+function key(r){ return view==="apps" ? r.co+"|"+r.role : r.name; }
+
+function renderSummary(){
+  const a=APPLICATIONS;
+  const inPlay=a.filter(r=>!["passed","rejected"].includes(r.status)).length;
+  const live=a.filter(r=>["applied","active","interview","offer"].includes(r.status)).length;
+  const leads=a.filter(r=>r.status==="lead").length;
+  const refs=a.reduce((n,r)=>n+(r.refs||0),0);
+  el("#summary").innerHTML=
+    `<span class="big">${inPlay}</span><span class="big-l">in pipeline</span>`+
+    `<span class="rule"></span>`+
+    `<div class="bd">`+
+      `<div><b>${live}</b><span>in progress</span></div>`+
+      `<div><b>${leads}</b><span>leads</span></div>`+
+      `<div><b>${refs}</b><span>referral contacts</span></div>`+
+      `<div><b>${NETWORK.length}</b><span>network</span></div>`+
+    `</div>`;
+}
+
+function renderChips(){
+  const m=view==="apps"?STATUS:NET_STATUS;
+  const present=[...new Set(rows().map(r=>r.status))];
+  el("#chips").innerHTML=
+    `<button class="chip" data-s="all" aria-pressed="${statusFilter==="all"}">All</button>`+
+    present.map(k=>{const s=m[k]||{label:k,c:"var(--status-neutral)"};
+      return `<button class="chip" data-s="${k}" aria-pressed="${statusFilter===k}">${dot(s.c)}${esc(s.label)}</button>`;}).join("");
+  el("#chips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{statusFilter=b.dataset.s; render();});
+}
+
+function th(k,label,cls){
+  const on=sortKey===k, ar=on?(sortDir===1?"▲":"▼"):"";
+  return `<th class="${cls||''}"${on?` aria-sort="${sortDir===1?'ascending':'descending'}"`:''}>`+
+    `<button class="sortbtn" data-k="${k}">${label}${ar?`<span class="arrow">${ar}</span>`:''}</button></th>`;
+}
+
+const CHEV='<svg viewBox="0 0 8 12" aria-hidden="true"><path d="M1 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function appRow(r,i){
+  const id=`det-${i}`, isOpen=open.has(key(r)), f=parseFit(r.fit);
+  const links=[
+    r.jd    ? `<a href="${esc(r.jd)}" target="_blank" rel="noopener">Job description</a>`:"",
+    r.apply ? `<a href="${esc(r.apply)}" target="_blank" rel="noopener">Apply</a>`:"",
+    r.folder? `<a href="${esc("../"+r.folder)}" target="_blank" rel="noopener">Dossier</a>`:"",
+    (!r.jd&&!r.apply&&r.link)?`<a href="${esc(r.link)}" target="_blank" rel="noopener">Open</a>`:"",
+  ].filter(Boolean).join("");
+  const spon = r.spon==="no"?"Posting says it will not sponsor"
+             : r.spon==="yes"?"Files H-1Bs"
+             : (r.spon&&r.spon!=="unknown")?esc(r.spon)
+             : "Not stated in the posting";
+  return `
+  <tr class="row${isOpen?' open':''}">
+    <td class="c-disc"><button class="disc" data-k="${esc(key(r))}" aria-expanded="${isOpen}" aria-controls="${id}" aria-label="${isOpen?'Hide':'Show'} details for ${esc(r.co)}">${CHEV}</button></td>
+    <td class="c-co"><div class="co">${esc(r.co)}</div><div class="role clamp2">${esc(r.role)}</div></td>
+    <td class="c-loc loc"><div class="clamp2">${val(r.loc)}</div></td>
+    <td class="c-posted posted">${val(postedShort(r.posted))}</td>
+    <td class="c-comp num"><span class="cband">${val(compBand(r.comp))}</span></td>
+    <td class="c-status">${pill(STATUS,r.status)}</td>
+    <td class="c-fit">${fitChip(r.fit)}</td>
+    <td class="c-next"><div class="next clamp2">${esc(r.next)}</div></td>
+  </tr>
+  <tr class="det" id="${id}"${isOpen?"":" hidden"}><td colspan="8"><div class="det-in">
+    <div class="det-main">
+      ${f.full?`<div class="det-note"><b>Fit:</b> ${linkify(f.full)}</div>`:""}
+      <div class="det-note"><b>Next:</b> ${linkify(r.next)}</div>
+      ${r.notes&&r.notes!==r.next?`<div class="det-note">${linkify(r.notes)}</div>`:""}
+    </div>
+    <div class="det-side"><dl>
+      <dt>Comp</dt><dd>${val(r.comp)}</dd>
+      <dt>Location</dt><dd>${val(r.loc)}</dd>
+      <dt>Posted</dt><dd>${val(r.posted)}</dd>
+      <dt>Found via</dt><dd>${r.source?`<span class="src">${esc(r.source)}</span>`:dash}</dd>
+      <dt>Sponsorship</dt><dd>${spon}</dd>
+      <dt>E-Verify</dt><dd>${r.everify&&r.everify!=="unknown"?esc(r.everify):dash}</dd>
+      <dt>Referrals</dt><dd>${r.refs?esc(r.refs)+" contact"+(r.refs===1?"":"s"):dash}</dd>
+    </dl><div class="det-links">${links||'<span class="none">No links yet</span>'}</div></div>
+  </div></td></tr>`;
+}
+
+function netRow(r,i){
+  const id=`ndet-${i}`, isOpen=open.has(key(r));
+  // Real schema is {name, company, role, status, note, link}; ~20 legacy rows
+  // still carry {howMet, ask, event, contact, next, notes}. Handle both.
+  const context = r.note || r.next || r.notes || r.ask || "";
+  const company = r.company || "";
+  const howMet  = r.howMet || r.event || "";
+  const link    = r.link ? (r.link.startsWith("http")?r.link:"https://"+r.link) : "";
+  const c=(r.contact&&r.contact!=="—")?String(r.contact):"";
+  const contactHtml = c
+    ? c.split(/\s*·\s*/).map(p=>{
+        const t=p.trim();
+        if(!t) return "";
+        if(t.includes("@")) return `<a href="mailto:${esc(t)}">${esc(t)}</a>`;
+        if(/^(https?:\/\/|linkedin\.com)/i.test(t)) return `<a href="${esc(t.startsWith("http")?t:"https://"+t)}" target="_blank" rel="noopener">${esc(t)}</a>`;
+        return esc(t);
+      }).filter(Boolean).join('<br>')
+    : "";
+  return `
+  <tr class="row${isOpen?' open':''}">
+    <td class="c-disc"><button class="disc" data-k="${esc(key(r))}" aria-expanded="${isOpen}" aria-controls="${id}" aria-label="${isOpen?'Hide':'Show'} details for ${esc(r.name)}">${CHEV}</button></td>
+    <td class="c-name"><div class="co">${esc(r.name)}</div><div class="role clamp2">${val(r.role)}</div></td>
+    <td class="c-netco loc"><div class="clamp2">${company?esc(company):dash}</div></td>
+    <td class="c-status">${pill(NET_STATUS,r.status)}</td>
+    <td class="c-context"><div class="next clamp2">${context?esc(context):""}</div></td>
+  </tr>
+  <tr class="det" id="${id}"${isOpen?"":" hidden"}><td colspan="5"><div class="det-in">
+    <div class="det-main">
+      ${context?`<div class="det-note">${linkify(context)}</div>`:'<div class="det-note"><span class="none">No notes yet</span></div>'}
+      ${r.ask?`<div class="det-note"><b>The ask:</b> ${linkify(r.ask)}</div>`:""}
+    </div>
+    <div class="det-side"><dl>
+      <dt>Company</dt><dd>${company?esc(company):dash}</dd>
+      <dt>Role</dt><dd>${val(r.role)}</dd>
+      ${howMet?`<dt>How met</dt><dd>${esc(howMet)}</dd>`:""}
+      ${contactHtml?`<dt>Contact</dt><dd>${contactHtml}</dd>`:""}
+    </dl>${link?`<div class="det-links"><a href="${esc(link)}" target="_blank" rel="noopener">Open profile</a></div>`:""}</div>
+  </div></td></tr>`;
+}
+
+function sortRows(list){
+  return list.slice().sort((x,y)=>{
+    let vx=x[sortKey], vy=y[sortKey];
+    if(vx===null||vx===undefined) return 1;
+    if(vy===null||vy===undefined) return -1;
+    if(typeof vx==="string") return sortDir*vx.localeCompare(vy);
+    return sortDir*(vx-vy);
+  });
+}
+const matchQ=r=>!q||Object.values(r).join(" ").toLowerCase().includes(q.toLowerCase());
+
+function render(){
+  renderSummary(); renderChips();
+  el("#updated").textContent="Updated "+UPDATED;
+  el("#sub").textContent="Job search tracker";
+  el("#c-apps").textContent=APPLICATIONS.length;
+  el("#c-net").textContent=NETWORK.length;
+  el("#tab-apps").setAttribute("aria-selected", view==="apps");
+  el("#tab-net").setAttribute("aria-selected", view==="net");
+
+  let list=rows().filter(matchQ).filter(r=>statusFilter==="all"||r.status===statusFilter);
+  if(view==="apps" && !["co","role","loc","posted","compK"].includes(sortKey)) sortKey="compK";
+  if(view==="net" && !["name","status"].includes(sortKey)) { sortKey="name"; sortDir=1; }
+  list=sortRows(list);
+
+  const head = view==="apps"
+    ? `<thead><tr>`+
+      `<th class="c-disc"><span class="plain" aria-hidden="true"></span></th>`+
+      th("co","Company","c-co")+
+      `<th class="c-loc"><span class="plain">Location</span></th>`+
+      th("posted","Posted","c-posted")+
+      th("compK","Comp","c-comp num")+
+      `<th class="c-status"><span class="plain">Status</span></th>`+
+      `<th class="c-fit"><span class="plain">Fit</span></th>`+
+      `<th class="c-next"><span class="plain">Next action</span></th>`+
+      `</tr></thead>`
+    : `<thead><tr>`+
+      `<th class="c-disc"><span class="plain" aria-hidden="true"></span></th>`+
+      th("name","Name","c-name")+
+      `<th class="c-netco"><span class="plain">Company</span></th>`+
+      `<th class="c-status"><span class="plain">Status</span></th>`+
+      `<th class="c-context"><span class="plain">Context / next</span></th>`+
+      `</tr></thead>`;
+
+  const cols = view==="apps"?8:5;
+  const body = list.length
+    ? `<tbody>${list.map((r,i)=>view==="apps"?appRow(r,i):netRow(r,i)).join("")}</tbody>`
+    : `<tbody><tr><td colspan="${cols}"><div class="empty"><b>Nothing matches</b><p>Clear the search or pick a different status. Every real lead lives here; nothing is hidden.</p></div></td></tr></tbody>`;
+
+  el("#table").innerHTML=head+body;
+
+  el("#table").querySelectorAll(".sortbtn").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k;
+    if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir = (k==="compK"||k==="posted")?-1:1;}
+    render();
+  });
+  el("#table").querySelectorAll(".disc").forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k;
+    if(open.has(k)) open.delete(k); else open.add(k);
+    render();
+  });
+}
+
+el("#q").addEventListener("input",e=>{q=e.target.value; render();});
+el("#tab-apps").onclick=()=>{view="apps"; statusFilter="all"; open.clear(); render();};
+el("#tab-net").onclick=()=>{view="net"; statusFilter="all"; open.clear(); render();};
+
+el("#foot").innerHTML=
+  `Sponsorship posture is shown per row from the crawler's soft "no-sponsor" flag. Whether that `+
+  `rules a role out depends on your own situation, see knowledge-base/02-work-authorization.md and `+
+  `knowledge-base/12-application-answers.md §3 before answering any form question. Full detail per `+
+  `role: open a row.`;
+
+render();
+</script>
+</body>
+</html>

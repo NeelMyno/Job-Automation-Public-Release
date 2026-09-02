@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy this file to .mcp.json (which is gitignored — never commit real config/keys) to enable optional MCP servers. Nothing here is required for the core pipeline (knowledge-base + gates + crawler + dossiers) to work; these are only needed for specific features noted below.",
+
+  "mcpServers": {
+    "chrome-devtools": {
+      "_comment": "Needed for CLAUDE.md §14 form-filling (the /wave fill stage). A public npm package — no account or key required. Runs on its own dedicated browser profile, never your main browser.",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    }
+
+    ,"_optional_example_web_research": {
+      "_comment": "Example only, not wired up — delete this key or replace it with whatever web-research/search MCP you actually use. Never commit a real API_TOKEN; reference it via an environment variable instead.",
+      "command": "npx",
+      "args": ["-y", "@some-provider/mcp"],
+      "env": { "API_TOKEN": "${SOME_PROVIDER_API_TOKEN}" }
+    }
+  }
+}

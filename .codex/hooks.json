@@ -1,0 +1,82 @@
+{
+  "description": "Codex lifecycle enforcement for this repo. scripts/hooks.py remains the gate owner; codex_hook_adapter.py translates Codex payloads and enforces Codex-specific policy.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/hooks.py\" --session-start",
+            "timeout": 45,
+            "statusMessage": "Deriving live repo state",
+            "additionalContextLimit": 5000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --timestamp-inject",
+            "timeout": 10,
+            "additionalContextLimit": 1200
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --pre-tool",
+            "timeout": 10,
+            "statusMessage": "Checking repository safety policy"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/pace-gate.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --post-edit",
+            "timeout": 45,
+            "statusMessage": "Checking edited files"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/hooks.py\" --stop",
+            "timeout": 45
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --timestamp-stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,151 @@
+# ============================================================================
+# Job-crawler filters. This is the ONE file you edit to point the crawler at your
+# own role, in any industry. Honest by construction: this file only DECIDES WHICH
+# REAL POSTINGS TO KEEP — it never writes, invents, or embellishes anything about a job.
+# ============================================================================
+
+# Keep only postings published/updated within this window.
+lookback_hours: 72
+
+# TITLE gate: keep only if the job title contains one of these (case-insensitive substring).
+# THIS IS THE FIELD THAT ACTUALLY TARGETS THE CRAWLER — put your own role titles here.
+# Example shape (delete these and write your own):
+include_titles:
+  - example title one          # e.g. "product designer"
+  - example title two          # e.g. "design engineer"
+
+# SIGNAL boosters (optional): presence in the title/description bumps a match's score;
+# not required for a match, purely a ranking aid.
+include_keywords:
+  - example keyword            # e.g. "figma", "react", "0 to 1"
+
+# ============================================================================
+# REJECT vs FLAG — two DIFFERENT gates. Keep them separate rather than merging one into
+# the other: exclude_patterns DROPS a posting outright (a hard wall you define), while
+# flag_patterns SURFACES a posting with a warning rather than hiding it (a soft caveat).
+# What belongs in which bucket depends entirely on YOUR OWN situation — there is no
+# universal answer, which is why both ship empty/example here rather than pre-filled.
+# ============================================================================
+
+# HARD REJECT gate: DROP if title OR description contains any of these (case-insensitive
+# substring). Put here only what is a genuine dead end for you specifically — e.g. a role
+# family you don't do, or a hard legal requirement you can't meet.
+#
+# Two worked examples, commented out, showing opposite real situations:
+#   - if you do NOT hold a security clearance and can't get one quickly, you might exclude
+#     "security clearance", "top secret", "ts/sci", "polygraph", "dod clearance"
+#   - if you DO hold a clearance or are eligible, you'd not only skip that exclusion, you
+#     might instead ADD those same terms to include_keywords so cleared roles rank higher
+# Work-authorization-specific walls (citizenship-only, green-card-only, no-sponsorship-ever)
+# belong here too, IF they're genuinely a hard wall for you — see
+# knowledge-base/02-work-authorization.md before deciding. They are NOT prefilled, because
+# assuming everyone needs this filter (or that nobody does) would be wrong for someone.
+exclude_patterns: []
+
+# SOFT FLAG gate: the posting says something you want surfaced with a caveat, not hidden.
+# The canonical use case is a "no visa sponsorship" line when your own situation means that
+# claim doesn't actually rule you out (e.g. you're already authorized to work without
+# needing anything from the employer) — see knowledge-base/02-work-authorization.md and
+# knowledge-base/12-application-answers.md §3 before relying on this. Leave empty to disable
+# the feature entirely; crawl.py's sponsorship_flagged() simply never matches anything.
+# Worked example (commented out):
+#   - no sponsorship
+#   - not eligible for sponsorship
+#   - unable to sponsor
+flag_patterns: []
+
+# Companies to skip entirely, for any reason of your own (already applied, not hiring where
+# you can work, actively avoiding, etc.).
+exclude_companies: []
+
+# LOCATION gate: keep only if the posting doesn't clearly name a place outside your target
+# region AND doesn't already carry a rescuing marker. Remote/unknown locations are always
+# kept. Set require_us: false to disable this gate entirely (e.g. if you're not US-based, or
+# you want every location). The two lists below are matched on WORD BOUNDARIES, not bare
+# substrings — this is what stops a blocked term like "india" from also matching the
+# unrelated US city "Indianapolis," or "mexico" from matching "New Mexico." They're generic
+# US-geography data, not tied to any specific role, so they're left filled in as a starting
+# point — trim or extend them for your own target region.
+require_us: true
+us_markers:
+  - united states
+  - usa
+  - "u.s."
+  - " us"
+  - "us,"
+  - "us/"
+  - "us "
+  - ", ca"
+  - ", ny"
+  - ", wa"
+  - ", tx"
+  - ", ma"
+  - ", il"
+  - ", co"
+  - ", ga"
+  - ", fl"
+  - ", nm"          # New Mexico (state abbrev) — pairs with 'new mexico' to beat the 'mexico' block
+  - new mexico      # US state; overrides the whole-word 'mexico' location_block match
+  - san francisco
+  - new york
+  - seattle
+  - austin
+  - los angeles
+  - boston
+  - chicago
+  - denver
+  - portland
+  - atlanta
+  - miami
+  - bay area
+  - nyc
+location_block:
+  - london
+  - united kingdom
+  - " uk"
+  - ireland
+  - dublin
+  - berlin
+  - germany
+  - munich
+  - france
+  - paris
+  - spain
+  - madrid
+  - barcelona
+  - netherlands
+  - amsterdam
+  - tel aviv
+  - israel
+  - india
+  - bangalore
+  - bengaluru
+  - singapore
+  - tokyo
+  - japan
+  - sydney
+  - australia
+  - melbourne
+  - toronto
+  - vancouver
+  - mexico
+  - brazil
+  - poland
+  - warsaw
+  - romania
+  - portugal
+  - lisbon
+  - sweden
+  - stockholm
+  - zurich
+  - switzerland
+  - dubai
+  - hong kong
+  - seoul
+  - korea
+  - taiwan
+  - philippines
+  - manila
+  - emea
+  - apac
+  - latam
