@@ -1,4 +1,4 @@
-# Interview prep — Company · Role Title
+# Interview prep: Company · Role Title
 
 ## What they screen for
 

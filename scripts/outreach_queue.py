@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-outreach_queue.py — THE DERIVED OUTREACH QUEUE. Computed fresh from the shared records,
+outreach_queue.py: THE DERIVED OUTREACH QUEUE. Computed fresh from the shared records,
 never maintained as a file.
 
 Outreach runs in its own session type off ONE command, and deliberately does not maintain its
-own records — every piece of state lives in one of the four shared surfaces below, updated the
+own records: every piece of state lives in one of the four shared surfaces below, updated the
 same turn something changes. The failure this design kills: a hand-maintained "pending outreach"
-file rots the moment any other session sends a message, since nothing keeps it in sync — a stale
+file rots the moment any other session sends a message, since nothing keeps it in sync, and a stale
 queue can still list an already-contacted person, with nothing standing between that and a
 double-message except whoever happens to notice.
 
 THE SSOT SURFACES (this script READS them; it never writes anything):
-  pipeline/tracker.html          — APPLICATIONS (which dossiers are live) + NETWORK (people state)
-  applications/*/referrals.md    — the per-company roster + drafted messages (outreach_format's grammar)
-  pipeline/sent-ledger.md        — what actually left (append-only)
-  pipeline/inmail-ledger.md      — the InMail balance
+  pipeline/tracker.html          : APPLICATIONS (which dossiers are live) + NETWORK (people state)
+  applications/*/referrals.md    : the per-company roster + drafted messages (outreach_format's grammar)
+  pipeline/sent-ledger.md        : what actually left (append-only)
+  pipeline/inmail-ledger.md      : the InMail balance
 
 A "pending outreach" file is a defect by definition: the queue below is derivable, so any
 maintained copy of it is a second source of truth that will drift. (Legacy queue files are
@@ -28,7 +28,7 @@ known-people and known-company sets instead of trusting column position.
 Not checked: a social platform's own connection/reply state (acceptance/replies are knowable
 only from the ledger, tracker notes, or your own word), and message QUALITY (outreach_format.py +
 verify_claims.py own that). FOLLOW-UP-DUE uses a 4-day/one-nudge default (config.py's
-FOLLOWUP_DAYS — you can override per thread).
+FOLLOWUP_DAYS; you can override per thread).
 """
 from __future__ import annotations
 
@@ -42,13 +42,13 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import outreach_format  # person_blocks + scan_text: ONE owner of the person grammar (§8)
 
-# scripts/config.py is optional — see that file's own docstring. Falls back to this script's
+# scripts/config.py is optional. See that file's own docstring. Falls back to this script's
 # historical defaults (4-day nudge threshold, 3/day small-basket cap) if it has never been created.
 try:
     import config
 except ImportError:
     class config:  # type: ignore[no-redef]
-        """Fallback when scripts/config.py has not been created yet — safe defaults only."""
+        """Fallback when scripts/config.py has not been created yet (safe defaults only)."""
         FOLLOWUP_DAYS = 4
         SMALL_BASKET_CAP = 3
 
@@ -62,9 +62,9 @@ FOLLOWUP_RE = re.compile(r"follow[- ]?up|nudge", re.I)
 # The warm-lead reminder engine. A NETWORK row carries an optional structured follow-up state so
 # an owed action surfaces BY NAME every session instead of dissolving into a passive "N replied"
 # count. Format: fu:"<state>|<YYYY-MM-DD>|<what>", state ∈ {me, them, rest}.
-#   me   = you owe the next move (reply / send the referral details) — ALWAYS surfaced, loud.
-#   them = waiting on them — becomes a nudge after FOLLOWUP_DAYS of silence.
-#   rest = the one permitted nudge is spent, or the thread is parked — tracked, never surfaced as
+#   me   = you owe the next move (reply / send the referral details); ALWAYS surfaced, loud.
+#   them = waiting on them; becomes a nudge after FOLLOWUP_DAYS of silence.
+#   rest = the one permitted nudge is spent, or the thread is parked: tracked, never surfaced as
 #          due (the one-nudge rule). It re-surfaces only by a reply flipping it back to "me".
 FU_RE = re.compile(r"^(me|them|rest)\|([^|]+)\|(.*)$", re.S)  # date validated in build() so a bad one surfaces
 def _fu_rank(what: str) -> int:
@@ -116,7 +116,7 @@ def tracker_rows(tracker_text: str) -> tuple[list[dict], list[dict]]:
         apps.append({"co": m.group("co"), "status": m.group("st"),
                      "folder": fm.group(1).rstrip("/") if fm else None})
     # Match the whole NETWORK object so a fu: field found anywhere in it (before or after note:)
-    # is captured. Fields are extracted by name, not position — robust to extra keys (reply:, note2:).
+    # is captured. Fields are extracted by name, not position, which is robust to extra keys (reply:, note2:).
     for m in re.finditer(r'\{name:"(?P<name>[^"]+)"[^}]*?\}', tracker_text):
         obj = m.group(0)
         co = re.search(r'company:"([^"]*)"', obj)
@@ -168,7 +168,7 @@ def parse_ledger(text: str, known_people: set[str], known_companies: set[str]) -
 # ── inmail balance ───────────────────────────────────────────────────────────────────────
 def inmail_balance(text: str) -> str:
     rows = re.findall(r"\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*\*{0,2}(\d+)\*{0,2}\s*\|", text)
-    return f"{rows[-1][1]} (as of {rows[-1][0]})" if rows else "UNKNOWN — read pipeline/inmail-ledger.md"
+    return f"{rows[-1][1]} (as of {rows[-1][0]})" if rows else "UNKNOWN: read pipeline/inmail-ledger.md"
 
 
 # ── the queue itself ─────────────────────────────────────────────────────────────────────
@@ -179,10 +179,10 @@ class Queue:
     ready: list = field(default_factory=list)          # (person, dossier)
     fire_on_accept: list = field(default_factory=list) # (person, company, note_date)
     followup_due: list = field(default_factory=list)   # (person, company, last_date, days)
-    owed_reply: list = field(default_factory=list)     # (person, company, since, days, what, rank) — YOU owe the move
-    untagged_reply: list = field(default_factory=list) # (person, company) — REPLIED note, no fu tag (safety net)
+    owed_reply: list = field(default_factory=list)     # (person, company, since, days, what, rank): YOU owe the move
+    untagged_reply: list = field(default_factory=list) # (person, company): REPLIED note, no fu tag (safety net)
     replied: list = field(default_factory=list)        # (person, company)
-    unmatched: list = field(default_factory=list)      # (person, company, why) — reconcile surface
+    unmatched: list = field(default_factory=list)      # (person, company, why): reconcile surface
     holds: list = field(default_factory=list)          # (file, first hold line)
     budget: dict = field(default_factory=dict)         # company -> sends today
     inmail: str = ""
@@ -219,7 +219,7 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
         nn = _norm(s.person)
         if nn not in known_people:
             # Ledger rows decorate names ('Fei H. (surname unverified — addressed as "Fei")');
-            # unresolved, that decoration made Fei look never-contacted — a double-message risk.
+            # unresolved, that decoration made Fei look never-contacted: a double-message risk.
             prefix = _norm(short_name(s.person))
             if prefix in known_people:
                 nn = prefix
@@ -266,7 +266,7 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
 
     # ── the warm-lead reminder engine: make an owed action surface BY NAME ──
     # Dropping every replied person into a passive count and treating the thread as "live, no
-    # action needed" is exactly how a real warm lead quietly goes cold — nothing distinguishes a
+    # action needed" is exactly how a real warm lead quietly goes cold: nothing distinguishes a
     # thread where you owe the next move from one where you're just waiting. The fu field makes
     # the owed move explicit, dated and value-ranked so it can never dissolve into "N replied".
     for n in net:
@@ -282,9 +282,9 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
                 q.owed_reply.append((n["name"], n["company"], since_s, days, what, _fu_rank(what)))
             elif state == "them" and days >= FOLLOWUP_DAYS:
                 q.followup_due.append((n["name"], n["company"], since_s, days))
-            # state == "rest": nudge spent / parked — tracked, never surfaced as due
+            # state == "rest": nudge spent / parked (tracked, never surfaced as due)
         elif n["status"] == "active" and REPLY_RE.search(n.get("note") or ""):
-            q.untagged_reply.append((n["name"], n["company"]))  # replied, no fu tag — never let it hide
+            q.untagged_reply.append((n["name"], n["company"]))  # replied, no fu tag: never let it hide
 
     # pacing budget: today's per-company send counts (small-basket cap, config.SMALL_BASKET_CAP)
     for s in sends:
@@ -292,7 +292,7 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
             q.budget[s.company] = q.budget.get(s.company, 0) + 1
 
     # holds: any pipeline file whose first lines carry a hold stamp. A hold is the operator's word
-    # and survives the file being OUTDATED as a queue — only they lift it (strike the line / say so).
+    # and survives the file being OUTDATED as a queue; only they lift it (strike the line / say so).
     for f in sorted((repo / "pipeline").glob("*.md")):
         head = "\n".join(f.read_text(errors="ignore").splitlines()[:10])
         if re.search(r"ON HOLD", head, re.I) and not re.search(r"HOLD LIFTED|~~.*ON HOLD.*~~", head, re.I):
@@ -313,7 +313,7 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
 
 
 def report(q: Queue) -> str:
-    L = ["outreach_queue.py — the DERIVED queue (SSOT: tracker + referrals.md + sent-ledger + inmail-ledger)",
+    L = ["outreach_queue.py: the DERIVED queue (SSOT: tracker + referrals.md + sent-ledger + inmail-ledger)",
          "  never maintained as a file; re-derive every run",
          "  NOT checked: a social platform's own connection/reply state, and message quality (outreach_format/verify_claims own it)", ""]
     def sec(title, rows, fmt):
@@ -321,26 +321,26 @@ def report(q: Queue) -> str:
         L.extend(fmt(r) for r in rows)
         L.append("")
     if q.owed_reply:
-        L.append(f"🔴🔴 YOU OWE A REPLY — warm leads going cold, act NOW ({len(q.owed_reply)}):")
-        L.extend(f"   • {nm} ({co}) — {what} — owed {days}d (since {since})"
+        L.append(f"🔴🔴 YOU OWE A REPLY: warm leads going cold, act NOW ({len(q.owed_reply)}):")
+        L.extend(f"   • {nm} ({co}): {what} (owed {days}d, since {since})"
                  for nm, co, since, days, what, _rank in q.owed_reply)
         L.append("")
-    sec(f"🔴 NO-ROSTER — live application, zero outreach people ({len(q.no_roster)}):", q.no_roster,
-        lambda r: f"   {r[1]} [{r[2]}] — {r[0]} has no referrals.md people; research + roster first")
-    sec(f"✍️ NEEDS-DRAFT — rostered, message incomplete ({len(q.needs_draft)}):", q.needs_draft,
-        lambda r: f"   {r[0]} — {r[1]} ({r[2]})")
-    sec(f"📮 READY-TO-SEND — gated copy exists, never contacted ({len(q.ready)}):", q.ready,
-        lambda r: f"   {r[0]} — {r[1]}")
-    sec(f"⏳ FIRE-ON-ACCEPT — note sent, DM waits on their accept ({len(q.fire_on_accept)}):", q.fire_on_accept,
-        lambda r: f"   {r[0]} ({r[1]}) — note {r[2]}; if accepted, the DM goes")
-    sec(f"⏰ FOLLOW-UP-DUE — ≥{FOLLOWUP_DAYS} days silent, no nudge yet, max one ever ({len(q.followup_due)}):",
-        q.followup_due, lambda r: f"   {r[0]} ({r[1]}) — last touch {r[2]}, {r[3]}d ago")
-    sec(f"✅ REPLIED — live threads, next move is theirs/yours ({len(q.replied)}):", q.replied,
+    sec(f"🔴 NO-ROSTER: live application, zero outreach people ({len(q.no_roster)}):", q.no_roster,
+        lambda r: f"   {r[1]} [{r[2]}]: {r[0]} has no referrals.md people; research + roster first")
+    sec(f"✍️ NEEDS-DRAFT: rostered, message incomplete ({len(q.needs_draft)}):", q.needs_draft,
+        lambda r: f"   {r[0]}: {r[1]} ({r[2]})")
+    sec(f"📮 READY-TO-SEND: gated copy exists, never contacted ({len(q.ready)}):", q.ready,
+        lambda r: f"   {r[0]}: {r[1]}")
+    sec(f"⏳ FIRE-ON-ACCEPT: note sent, DM waits on their accept ({len(q.fire_on_accept)}):", q.fire_on_accept,
+        lambda r: f"   {r[0]} ({r[1]}): note {r[2]}; if accepted, the DM goes")
+    sec(f"⏰ FOLLOW-UP-DUE: ≥{FOLLOWUP_DAYS} days silent, no nudge yet, max one ever ({len(q.followup_due)}):",
+        q.followup_due, lambda r: f"   {r[0]} ({r[1]}): last touch {r[2]}, {r[3]}d ago")
+    sec(f"✅ REPLIED: live threads, next move is theirs/yours ({len(q.replied)}):", q.replied,
         lambda r: f"   {r[0]} ({r[1]})")
-    sec(f"⚠️ UNTAGGED REPLIES — a live thread replied but has no fu state; triage it ({len(q.untagged_reply)}):",
-        q.untagged_reply, lambda r: f'   {r[0]} ({r[1]}) — set fu:"me|<date>|<what>" (you owe) or "them|<date>|<what>"')
-    sec(f"❓ UNRESOLVED LEDGER ROWS — reconcile by hand, never silently ({len(q.unmatched)}):", q.unmatched,
-        lambda r: f"   {r[0]} ({r[1]}) — {r[2]}")
+    sec(f"⚠️ UNTAGGED REPLIES: a live thread replied but has no fu state; triage it ({len(q.untagged_reply)}):",
+        q.untagged_reply, lambda r: f'   {r[0]} ({r[1]}): set fu:"me|<date>|<what>" (you owe) or "them|<date>|<what>"')
+    sec(f"❓ UNRESOLVED LEDGER ROWS: reconcile by hand, never silently ({len(q.unmatched)}):", q.unmatched,
+        lambda r: f"   {r[0]} ({r[1]}): {r[2]}")
     if q.holds:
         L.append("⏸️ HOLD STAMPS FOUND (you lift these, never the agent):")
         L.extend(f"   {f}: {h}" for f, h in q.holds)
@@ -380,7 +380,7 @@ def selftest() -> int:
         def block(nm, handle):
             return (f"### {nm} — designer · https://www.linkedin.com/in/{handle} · *ask = refer*\n"
                     f"- **Note:** I read your work, {nm.split()[0]}. My work is at example.com. Would you be open to referring me?\n"
-                    f"- **DM:** Use InMail: NO — free path.\n\n"
+                    f"- **DM:** Use InMail: NO (free path).\n\n"
                     f"Hi {nm.split()[0]}, I read your case study on onboarding and the retention detail stuck with me.\n\n"
                     f"My work is at example.com.\n\nWould you be open to referring me? A no with a reason helps too.\n\nJordan\n")
         (r / "applications" / "acme-designer" / "referrals.md").write_text(
@@ -397,7 +397,7 @@ def selftest() -> int:
             f'| {old} | Dee Delta (surname unverified — addressed as "Dee") | Acme | LinkedIn DIRECT DM | x | ok | Jordan |\n'  # decorated name
             f"| {old} | Acme | Zzz Unknown Corp | LinkedIn DM | x | ok | Jordan |\n")                     # unresolvable row
         (r / "pipeline" / "inmail-ledger.md").write_text("| As of | Credits left | Source |\n|---|---|---|\n| 2026-07-20 | **2** | Jordan |\n")
-        (r / "pipeline" / "old-queue.md").write_text("# ⏸️ ON HOLD — do not send\nstuff\n")
+        (r / "pipeline" / "old-queue.md").write_text("# ⏸️ ON HOLD: do not send\nstuff\n")
         q = build(r, today=today)
         check("no-roster catches the live dossier with no referrals.md (and not the dead one)",
               [x[1] for x in q.no_roster] == ["Beta"])
@@ -424,7 +424,7 @@ def selftest() -> int:
               all("Ref Refnandez" not in str(x) for x in q.replied))
         check("a malformed fu date surfaces in UNRESOLVED, never silently dropped",
               any("Bad Date" in u[0] for u in q.unmatched))
-        check("fu=rest is parked — never surfaced as due even past the threshold (one-nudge rule)",
+        check("fu=rest is parked: never surfaced as due even past the threshold (one-nudge rule)",
               "Rest Restman" not in [x[0] for x in q.followup_due]
               and "Rest Restman" not in [x[0] for x in q.owed_reply])
         check("today's sends count toward the per-company budget", q.budget.get("Acme") == 1)

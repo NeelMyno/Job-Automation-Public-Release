@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""presubmit_check.py — the blocking-actions gate.
+"""presubmit_check.py: the blocking-actions gate.
 
 A dossier's review-passes.md records mandatory operator actions as:
 
@@ -10,7 +10,7 @@ An unchecked BLOCKING line means a review found something that MUST happen befor
 submit and it has not happened. This script exits 2 naming each unchecked item;
 the fill/submit stage refuses to open the browser on exit 2. Checked lines
 (`- [x] BLOCKING:`) pass. This gate exists because an unenforced checklist item
-once reached a live form before this gate existed — nothing was reading
+once reached a live form before this gate existed; nothing was reading
 review-passes.md. Now something does.
 
 Usage:
@@ -58,18 +58,18 @@ def scan_dossier(dossier):
         return 2
     files = sorted(set(root.rglob("review-passes.md")))
     if not files:
-        print(f"presubmit_check: OK — no review-passes.md in {dossier} (nothing to block on)")
+        print(f"presubmit_check: OK. No review-passes.md in {dossier} (nothing to block on)")
         return 0
     hits = []
     for f in files:
         hits.extend(scan_text(f.read_text(encoding="utf-8"), str(f)))
     if hits:
-        print(f"presubmit_check: BLOCKED — {len(hits)} unchecked BLOCKING item(s). Do not open the browser.")
+        print(f"presubmit_check: BLOCKED. {len(hits)} unchecked BLOCKING item(s). Do not open the browser.")
         for label, lineno, item in hits:
             print(f"  {label}:{lineno}  - [ ] BLOCKING: {item}")
         return 2
     scanned = ", ".join(str(f) for f in files)
-    print(f"presubmit_check: OK — no unchecked BLOCKING items ({scanned})")
+    print(f"presubmit_check: OK. No unchecked BLOCKING items ({scanned})")
     return 0
 
 

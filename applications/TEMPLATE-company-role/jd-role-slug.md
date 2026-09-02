@@ -1,21 +1,21 @@
-# JD — Company · Role Title
+# JD: Company · Role Title
 
 ```
 source: [apply URL]
-fetched: [YYYY-MM-DD, how — e.g. "fetched live via browser"]
+fetched: [YYYY-MM-DD, how (e.g. "fetched live via browser")]
 ats: [Greenhouse / Ashby / Lever / other]
-req id: [exact id, or "none — own-site form, never invent one"]
+req id: [exact id, or "none" for an own-site form; never invent one]
 title (verbatim): [exact title as printed]
 location: [as printed]
 type: [FT/PT/Contract]
 team/category: [if stated]
 comp: [as printed, or "not displayed"]
-liveness: [confirmed live — how]
+liveness: [confirmed live, and how]
 media: [confirm every attached image was checked for requirements text-extraction would miss]
 ```
 
 <!--
-Everything below is copied EXACTLY from the real posting — never paraphrased, never summarized.
+Everything below is copied EXACTLY from the real posting, never paraphrased, never summarized.
 This is the grounding law's primary source of record for what the employer actually asked for.
 Read the primary posting yourself; never tailor from a summary or a recruiter's paraphrase.
 -->
@@ -36,4 +36,4 @@ Read the primary posting yourself; never tailor from a summary or a recruiter's 
 
 - [optional "nice to have" list, if the posting has one]
 
-## [Any further verbatim sections the real posting has — "Things to know", "Benefits", "How we hire"]
+## [Any further verbatim sections the real posting has, such as "Things to know", "Benefits", "How we hire"]

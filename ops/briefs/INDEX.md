@@ -1,4 +1,4 @@
-# briefs/ — Index
+# briefs/ Index
 
 A brief is a work order for whenever you delegate a piece of work to a subagent or hand it to a
 separate session: it names the mission, what to read first, the phases of the work, and exactly what

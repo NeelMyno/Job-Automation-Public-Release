@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""throughput.py — the gates that guard the GOAL, not the truth.
+"""throughput.py: the gates that guard the GOAL, not the truth.
 
 WHY THIS EXISTS
 ---------------
@@ -32,7 +32,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# scripts/config.py is optional (see that file's own docstring) — every gate below stays safe by
+# scripts/config.py is optional (see that file's own docstring); every gate below stays safe by
 # default if it has never been created. sys.path is seeded explicitly (not just relying on argv[0]
 # placement) so `import config` also resolves if this module is ever imported rather than run
 # directly, matching the pattern outreach_queue.py already uses for its own sibling import.
@@ -41,19 +41,19 @@ try:
     import config
 except ImportError:
     class config:  # type: ignore[no-redef]
-        """Fallback when scripts/config.py has not been created yet — safe defaults only."""
+        """Fallback when scripts/config.py has not been created yet: safe defaults only."""
         OPERATOR_NAME = None
         SITE_CHECKOUT_PATH = None
         RECRUITER_PLATFORM_KEYWORDS = []
 
 REPO = Path(__file__).resolve().parents[1]
-# The checkout of your published site/portfolio repo — the one a recruiter actually downloads your
+# The checkout of your published site/portfolio repo, the one a recruiter actually downloads your
 # résumé from, if you keep one separate from this repo. Optional: set SITE_CHECKOUT_PATH in
 # scripts/config.py to enable the live-site-drift check; left unset (the default), that check is
 # silently skipped rather than crashing or guessing at a path (see site_matches_repo() below).
 SITE = Path(config.SITE_CHECKOUT_PATH).expanduser().resolve() if config.SITE_CHECKOUT_PATH else None
 
-# "by <you>" if OPERATOR_NAME is set in config.py, else name-independent fallback phrasing — used
+# "by <you>" if OPERATOR_NAME is set in config.py, else name-independent fallback phrasing, used
 # as ONE alternative among several inside _Submitted.search's positive-evidence window (a date or
 # a ✅ still count on their own). Sharpens with zero configuration required.
 _OPERATOR_BY = (r"\bby " + re.escape(config.OPERATOR_NAME) + r"\b") if config.OPERATOR_NAME \
@@ -70,7 +70,7 @@ class _Submitted:
     """Truthy only where the text really claims a submission.
 
     A dossier that reads "**NOT SUBMITTED.** Blocked on a pending go/no-go" contains the bare word
-    SUBMITTED inside its own negation — a naive \\bSUBMITTED\\b match would misread it as sent.
+    SUBMITTED inside its own negation, and a naive \\bSUBMITTED\\b match would misread it as sent.
     That's the same polarity risk any status-detection regex runs: reading a negation as its own
     confirmation fails OPEN, silently, on exactly the case it exists to catch.
     """
@@ -82,7 +82,7 @@ class _Submitted:
             if _NOT_NEAR.search(before):
                 continue
             # POSITIVE evidence, not merely the absence of a negation. Chasing negations is a
-            # losing game — the first version missed "nothing was submitted", "no field was
+            # losing game: the first version missed "nothing was submitted", "no field was
             # filled… submitted", and "before this is submitted", and flagged four correct
             # dossiers as self-contradicting. Every REAL submission record in this repo carries a
             # date or an explicit confirmation ("SUBMITTED 2026-07-21 by <you>", "✅ SUBMITTED",
@@ -98,7 +98,7 @@ NOT_APPLIED = re.compile(r"\bNOT[ _]APPLIED\b|\bnot yet applied\b|\bawaiting (?:
 DEAD = re.compile(r"\brejected\b|\bwithdrawn\b|\bclosed\b|\bpassed\b|\bdead\b", re.I)
 
 # EXAMPLE-*/TEMPLATE-* dossiers are scaffolding (verify_claims.py's own fixture, and the blank
-# starter copy-from) — never a real application. Every check below that sweeps applications/* for
+# starter copy-from), never a real application. Every check below that sweeps applications/* for
 # things that were "supposed to be sent" must skip these, or it fails forever on a fresh clone for
 # work nobody ever intended to submit.
 SCAFFOLD_DOSSIER_PREFIXES = ("EXAMPLE-", "TEMPLATE-")
@@ -139,7 +139,7 @@ def ready_but_never_sent() -> list[Finding]:
     # The tracker is the repo's designated source of truth for status (CLAUDE.md §9, kept live as a
     # reflex), so ask IT whether an application went out, don't infer it from prose. A dossier's own
     # notes can describe which résumé VERSION went out without being a dated submission record, and
-    # the tracker may already correctly say applied/rejected — a gate that argues with the source of
+    # the tracker may already correctly say applied/rejected, and a gate that argues with the source of
     # truth instead of deferring to it is the gate that's wrong.
     sent_folders = set()
     tracker = REPO / "pipeline" / "tracker.html"
@@ -167,17 +167,17 @@ def ready_but_never_sent() -> list[Finding]:
         if not blob:
             # A rendered résumé with NO application.md and NO README is MORE suspicious, not less:
             # it means no record of this application exists anywhere. The first version of this
-            # check did `continue` here and so skipped two of the eight idle dossiers — failing
+            # check did `continue` here and so skipped two of the eight idle dossiers, failing
             # open on the strongest signal it had. Absence of a record is a finding.
             out.append(Finding(
                 "HIGH", "ready-but-never-sent",
-                f"{d.name} — has a rendered résumé PDF and NO application.md or README.md at all",
+                f"{d.name}: has a rendered résumé PDF and NO application.md or README.md at all",
                 "no record exists that this was ever sent, or ever will be. §13.3 requires both."))
             continue
         if SUBMITTED.search(blob) or DEAD.search(blob):
             continue
         out.append(Finding(
-            "HIGH", "ready-but-never-sent", f"{d.name} — has a rendered résumé PDF, no submit recorded",
+            "HIGH", "ready-but-never-sent", f"{d.name}: has a rendered résumé PDF, no submit recorded",
             "finished work sitting idle. §0: progress is interviews booked, not artifacts produced."))
     return out
 
@@ -186,9 +186,9 @@ def cover_missing() -> list[Finding]:
     """A dossier with a rendered résumé PDF but NO cover-letter PDF.
 
     A cover letter PDF is treated as MANDATORY in every application bundle, exactly like the
-    résumé, and travels with it — a cover letter left optional is one that quietly never gets
+    résumé, and travels with it. A cover letter left optional is one that quietly never gets
     attached. If a dossier is real enough to have a tailored résumé PDF, it's real enough to have a
-    cover PDF. Dead dossiers (rejected/withdrawn/closed/passed — never applying) are exempt.
+    cover PDF. Dead dossiers (rejected/withdrawn/closed/passed, never applying) are exempt.
     """
     out: list[Finding] = []
     for pdf in sorted(REPO.glob("applications/*/resume/*.pdf")):
@@ -206,7 +206,7 @@ def cover_missing() -> list[Finding]:
         if not covers:
             out.append(Finding(
                 "HIGH", "cover-missing",
-                f"{d.name} — has a résumé PDF but NO cover-letter PDF",
+                f"{d.name}: has a résumé PDF but NO cover-letter PDF",
                 "a cover letter PDF is mandatory in every application bundle, like the résumé. "
                 "Render + gate the cover BEFORE the form is filled."))
     return out
@@ -282,7 +282,7 @@ def duplicate_application() -> list[Finding]:
             out.append(Finding(
                 "HIGH", "duplicate-application",
                 f'{row["folder"]} → a req ALREADY {hit[2]}: {hit[0]} / {hit[1]} (same apply URL)',
-                "same posting twice wastes a slot and reads as spray-and-pray — do NOT re-apply "
+                "same posting twice wastes a slot and reads as spray-and-pray; do NOT re-apply "
                 "If it is genuinely a different req, the apply URL is wrong; fix it."))
             continue
         crhit = applied_cr.get((row["co"].lower().strip(), row["role"].lower().strip()))
@@ -291,7 +291,7 @@ def duplicate_application() -> list[Finding]:
                 "MEDIUM", "duplicate-application",
                 f'{row["folder"]}: {row["co"]} / {row["role"]} matches an already-{crhit[2]} row by '
                 "company+title (apply URLs differ)",
-                "likely the same posting re-listed, or a real second role — confirm the two apply "
+                "likely the same posting re-listed, or a real second role; confirm the two apply "
                 "URLs are different reqs before applying."))
     return out
 
@@ -305,7 +305,7 @@ def status_contradicts_itself() -> list[Finding]:
 
     DEAD dossiers (tracker status rejected/passed/withdrawn/closed) are EXEMPT: a wave never
     re-works them and CLAUDE.md §13.8 rule 3 makes them read-only forever, so an internal header/body
-    disagreement there is harmless to the one decision this check protects — while flagging a defect
+    disagreement there is harmless to the one decision this check protects, while flagging a defect
     that is by-rule unfixable just trains agents to scroll past a red gate. A rejected dossier whose
     header still says "active" and a passed one whose body still reads "in progress" are the standing
     examples of the shape this exemption covers.
@@ -331,16 +331,16 @@ def status_contradicts_itself() -> list[Finding]:
         if NOT_APPLIED.search(head) and SUBMITTED.search(body):
             out.append(Finding(
                 "HIGH", "status-contradiction",
-                f"{f.parent.name}/{f.name} — header says NOT APPLIED, body says SUBMITTED",
+                f"{f.parent.name}/{f.name}: header says NOT APPLIED, body says SUBMITTED",
                 "the header is what a wave reads first; fix the header or the body so they agree."))
     return out
 
 
-# A REAL, dated submission record — deliberately TIGHTER than the module-level SUBMITTED that
+# A REAL, dated submission record, deliberately TIGHTER than the module-level SUBMITTED that
 # ready_but_never_sent uses. That one anchors on "a date OR a by-hand marker OR ✅ somewhere near
 # the word", which can misread "To be submitted by hand once it's ready" (a genuinely UNSENT
 # dossier) as a submission, because that marker sits in its window. For a check that will FLIP
-# a tracker row that governs the §0 count, that false positive is unacceptable — so this requires
+# a tracker row that governs the §0 count, that false positive is unacceptable, so this requires
 # SUBMITTED (or "Applied on") to be immediately followed by an ISO date, and refuses a future lead-in.
 _SUB_DATED = re.compile(
     r"\bSUBMITTED\b\s*(?:on\b\s*)?[:\-—]?\s*20\d\d-\d\d-\d\d"
@@ -353,7 +353,7 @@ _FUTURE_LEADIN = re.compile(
 def _dated_submission(blob: str):
     """The first REAL dated-submission marker in a dossier, or None.
 
-    A submission record here is a heading or status line carrying a date — '✅ SUBMITTED 2026-08-27
+    A submission record here is a heading or status line carrying a date: '✅ SUBMITTED 2026-08-27
     by hand', '**Applied on:** 2026-07-22', 'applied_on: 2026-07-23'. Future-tense prose ('To be
     submitted by hand once it's ready') is not one, so a ~24-char future lead-in vetoes the match.
     """
@@ -368,13 +368,13 @@ def tracker_behind_dossier() -> list[Finding]:
     """A dossier that records a REAL submission while its tracker row still says lead/active.
 
     This guards against a real failure mode: a tracker regeneration that reverts `applied → lead`
-    without reading the dossiers first, so real submissions sit mislabeled as leads — an undercount of
+    without reading the dossiers first, so real submissions sit mislabeled as leads: an undercount of
     the ONE metric §0 cares about, and it makes throughput's own `ready-but-never-sent` flag fire on
     applications that had ALREADY gone out. There is no script that reverts a status (crawl.py only
     APPENDS deduped `lead` rows), so the defence is not a source patch but a reconciliation that fails
     LOUD the moment the tracker disagrees with a dossier's own submission record. A hand-regenerated
     tracker can flip many rows back correctly and still miss one whose object carries a `folder:null`
-    decoy BEFORE the real folder key — which is exactly why this must be mechanical, not manual.
+    decoy BEFORE the real folder key, which is exactly why this must be mechanical, not manual.
 
     Only FOLDER-LINKED rows are checked. A large number of legitimately-applied rows carry an empty
     `folder:` and are still counted correctly, so keying an "undercount" on a missing folder would
@@ -405,7 +405,7 @@ def tracker_behind_dossier() -> list[Finding]:
         marker = blob[max(0, blob.rfind("\n", 0, m.start()) + 1):blob.find("\n", m.end())].strip()
         out.append(Finding(
             "HIGH", "tracker-behind-dossier",
-            f'{folder} — dossier records a real submission, tracker row says "{sm.group(1)}"',
+            f'{folder}: dossier records a real submission, tracker row says "{sm.group(1)}"',
             f"the tracker UNDERCOUNTS a sent application (dossier says sent, tracker still says "
             f"{sm.group(1)!r}). Flip the row to applied (or its true later status). Marker: {marker[:80]}"))
     return out
@@ -416,7 +416,7 @@ def tracker_renders() -> list[Finding]:
 
     2026-08-05: an unescaped double-quote in one NETWORK row (`name:"Janelle "Nell" Lawless"`,
     introduced 2026-07-25) terminated the JS string, threw inside the <script>, and rendered the whole
-    tracker BLANK — for ELEVEN days. hooks.py reads the arrays by regex and never executes the JS, so
+    tracker BLANK for ELEVEN days. hooks.py reads the arrays by regex and never executes the JS, so
     every session's counts stayed correct and the break was invisible to all of them. The fix was one
     character; the lesson is that a data file the browser RUNS needs a syntax gate, or it can lie
     silently for as long as no human happens to open it. Best-effort: where node is absent (cron/CI)
@@ -445,7 +445,7 @@ def tracker_renders() -> list[Finding]:
                  out.strip()[:160])
     return [Finding(
         "HIGH", "tracker-unparseable",
-        f"pipeline/tracker.html <script> has a SYNTAX ERROR — the page renders BLANK: {first[:110]}",
+        f"pipeline/tracker.html <script> has a SYNTAX ERROR, the page renders BLANK: {first[:110]}",
         "hooks.py parses the arrays by regex and never runs the JS, so a broken string is invisible "
         "to every session (the 2026-08-05 '\"Nell\"' quote blanked the tracker for 11 days). Fix the "
         "string; a data file the browser executes needs a syntax gate.")]
@@ -455,16 +455,16 @@ def site_matches_repo() -> list[Finding]:
     """The artifact a recruiter downloads vs the artifact this repo believes it ships.
 
     STRUCTURE.md-equivalent docs assert the built PDF IS the live-site file. This repo caught that
-    assertion being false for four days straight — nothing had ever checked it, because every OTHER
+    assertion being false for four days straight; nothing had ever checked it, because every OTHER
     check here reads files inside this repo.
 
     Optional: set SITE_CHECKOUT_PATH in scripts/config.py to a sibling checkout of your published
-    site/portfolio repo. Left unset (the default), this check is a silent no-op — "not configured"
+    site/portfolio repo. Left unset (the default), this check is a silent no-op: "not configured"
     is deliberately not a Finding, so a fresh clone with no config.py customization stays clean.
     """
     out: list[Finding] = []
     if SITE is None:
-        return out  # not configured — optional feature, degrades gracefully (see config.py)
+        return out  # not configured: optional feature, degrades gracefully (see config.py)
     if not SITE.is_dir():
         return [Finding("MEDIUM", "site-unchecked",
                         f"public site checkout not found at {SITE}",
@@ -488,7 +488,7 @@ def site_matches_repo() -> list[Finding]:
 def unpushed() -> list[Finding]:
     """Commits sitting locally that a parallel or future session can't see.
 
-    Whether you push automatically or hold for review is your own call (CLAUDE.md §10) — this
+    Whether you push automatically or hold for review is your own call (CLAUDE.md §10); this
     check doesn't take a position on that. It just surfaces the count, since a pile of unpushed
     work is easy to lose track of either way.
     """
@@ -507,7 +507,7 @@ def unpushed() -> list[Finding]:
 
 
 # "<you> filled/typed" if OPERATOR_NAME is set in config.py, else name-independent first-person
-# phrasing ("filled it myself") — sharpens with zero configuration required, same pattern as
+# phrasing ("filled it myself"), sharpens with zero configuration required, same pattern as
 # _OPERATOR_BY above.
 _OPERATOR_FILLED = (re.escape(config.OPERATOR_NAME) + r" (?:filled|typed)") if config.OPERATOR_NAME \
     else r"(?:filled|typed) it myself"
@@ -524,12 +524,12 @@ def agent_fill_without_dom_evidence() -> list[Finding]:
 
     §14 documents the class in blunt terms: **the tool lies.** `fill_form` and `click` return
     "Successfully filled" / "Successfully clicked" for operations that did not happen. Both failure
-    modes were caught in one session — a required checkbox that reported success and never
+    modes were caught in one session: a required checkbox that reported success and never
     registered, and a free-text field that reported success and stayed empty while a second field
     silently had its line breaks stripped.
 
     A script cannot see a browser, so it cannot verify a fill. What it CAN do is refuse to let the
-    record *claim* an agent-verified fill with no evidence behind the claim — which is the same
+    record *claim* an agent-verified fill with no evidence behind the claim, which is the same
     discipline CLAUDE.md §0.1 applies to a quotation. If you filled it in yourself or it went out
     via a paste kit, no agent-side DOM check applies and this stays quiet.
     """
@@ -544,7 +544,7 @@ def agent_fill_without_dom_evidence() -> list[Finding]:
             continue
         out.append(Finding(
             "MEDIUM", "fill-claimed-not-evidenced",
-            f"{app.parent.name} — records an agent-driven fill with no DOM-verification evidence",
+            f"{app.parent.name}: records an agent-driven fill with no DOM-verification evidence",
             "§14: the tool reports success for fills that did not happen. Record the check "
             "(required-empty count, _valueTracker parity, file bytes) or say you filled it "
             "yourself."))
@@ -555,7 +555,7 @@ def agent_fill_without_dom_evidence() -> list[Finding]:
 # Recruiter-list availability is an AUTH-WALLED-surface claim.
 #
 # A recruiter's own curated shortlist platform, of the kind several exist in the market, is something only the
-# operator can actually see — the agent has no login and cannot check it. A stale name carried
+# operator can actually see; the agent has no login and cannot check it. A stale name carried
 # forward from an earlier note and silently assumed still-current, never re-checked, can turn into
 # a real recommendation built on a phantom. This is the CLAUDE.md §0.1 grounding law applied to the
 # tracker: a positive availability claim about a surface the agent cannot see must cite the operator
@@ -566,7 +566,7 @@ _AVAIL_POS = re.compile(
     r"\bAVAILABLE\b"
     r"|\bon (?:the )?(?:current )?(?:recruiter|curated) list\b"
     r"|\bstill (?:open|available)\b", re.I)
-# "per <you>" / "<you> confirmed" only matches your own configured name — with no config.py, this
+# "per <you>" / "<you> confirmed" only matches your own configured name; with no config.py, this
 # degrades to name-agnostic phrasing, so a fresh clone's selftest exercises exactly what a default
 # install actually recognizes.
 _OPERATOR_VERIFY_WORDS = (
@@ -591,8 +591,8 @@ _AVAIL_VERIFIED = re.compile(
     r"|\bcould not find\b", re.I)
 
 
-# Recruiter/agency platform keywords this repo cannot see for itself (config-driven — see
-# scripts/config.py) — empty by default. "recruiter" is checked unconditionally below as the
+# Recruiter/agency platform keywords this repo cannot see for itself (config-driven, see
+# scripts/config.py), empty by default. "recruiter" is checked unconditionally below as the
 # generic fallback that already covers most cases; add your own platform's name in config.py
 # only if you use one by name and want the check to recognize it too.
 _RECRUITER_KEYWORDS = [kw.lower() for kw in config.RECRUITER_PLATFORM_KEYWORDS]
@@ -630,8 +630,8 @@ def recruiter_availability_unsourced() -> list[Finding]:
             co = re.search(r'co:\s*"([^"]*)"', rec)
             out.append(Finding(
                 "HIGH", "recruiter-availability-unsourced",
-                f'{co.group(1) if co else "?"} — recruiter-list availability asserted with no operator-confirmed source',
-                "auth-walled surface — only you can see it. Cite a screenshot / your own live check "
+                f'{co.group(1) if co else "?"}: recruiter-list availability asserted with no operator-confirmed source',
+                "auth-walled surface: only you can see it. Cite a screenshot / your own live check "
                 "/ 'confirmed by me', or mark UNCONFIRMED. Never let a remembered preference stand "
                 "in for a live check (CLAUDE.md §0.1)."))
     return out
@@ -655,7 +655,7 @@ CHECKS = [
 
 def selftest() -> int:
     """Every case is a real shape from this repo. Includes a coverage assertion so a rule cannot
-    be silently neutered while this still prints OK — the failure a red team proved on the other
+    be silently neutered while this still prints OK, the failure a red team proved on the other
     gates by deleting a fixture and watching the denominator shrink to match."""
     import tempfile, os, shutil
     passed = failed = 0
@@ -689,7 +689,7 @@ def selftest() -> int:
           not SUBMITTED.search("Read-only in the browser. No field was filled. Nothing was submitted."))
     check("'before this is submitted' is future tense, not a record (stripe)",
           not SUBMITTED.search("Re-point into Web Presence & Platform before this is submitted"))
-    check("'— NOT SUBMITTED' after a date does not read as submitted (grafana)",
+    check("an em dash right before 'NOT SUBMITTED' after a date does not read as submitted (grafana)",
           not SUBMITTED.search("form answers (as filled, 2026-07-21, REBUILD #2) — NOT SUBMITTED"))
     check("a real dated record still reads as submitted",
           bool(SUBMITTED.search("✅ SUBMITTED 2026-07-22 by hand — success confirmation seen")))
@@ -711,7 +711,7 @@ def selftest() -> int:
                 "# Probe\nStatus: **SUBMITTED 2026-07-22**\n" + "\n" * 12 + "All good.\n",
                 encoding="utf-8")
             check("a consistent dossier is not flagged", len(status_contradicts_itself()) == 0)
-            # a DEAD dossier (tracker rejected/passed) is exempt — read-only per CLAUDE.md §13.8 rule 3,
+            # a DEAD dossier (tracker rejected/passed) is exempt: read-only per CLAUDE.md §13.8 rule 3,
             # and a wave never re-works it, so its internal contradiction is harmless once dead.
             (d / "README.md").write_text(
                 "# Probe\nStatus: **NOT APPLIED**\n" + "\n" * 12 + "✅ SUBMITTED 2026-07-22 by hand\n",
@@ -758,7 +758,7 @@ def selftest() -> int:
 
     # duplicate-application: an active dossier pointing at an already-applied req.
     # The dup row reaches the applied req by a DIFFERENT-looking URL (the job-job-boards typo, the
-    # boards↔job-boards host, a stripped ?gh_jid query) — so this also exercises _norm_ats_url.
+    # boards↔job-boards host, a stripped ?gh_jid query), so this also exercises _norm_ats_url.
     with tempfile.TemporaryDirectory() as td:
         pl = Path(td) / "pipeline"
         pl.mkdir(parents=True)
@@ -811,14 +811,14 @@ def selftest() -> int:
           not _dated_submission("- Not yet applied. To be submitted by hand once ready"))
     check("'will be submitted 2026-09-01' (future tense + a date) does NOT read as submitted",
           not _dated_submission("The form will be submitted 2026-09-01 once the operator reviews it."))
-    check("'NOT SUBMITTED — dossier building' does NOT read as submitted",
+    check("'NOT SUBMITTED: dossier building' does NOT read as submitted",
           not _dated_submission("**Status: NOT SUBMITTED — dossier building.**"))
     with tempfile.TemporaryDirectory() as td:
         pl = Path(td) / "pipeline"
         pl.mkdir(parents=True)
         for name, body in (
             # the folder:null-decoy shape: a lead row whose object carries a folder:null key BEFORE
-            # the real folder key — the exact structure a naive "has a folder key" check would miss.
+            # the real folder key: the exact structure a naive "has a folder key" check would miss.
             ("acme-designer", "**Status: SUBMITTED 2026-08-27 by hand (DOM-confirmed).**\n"),
             ("beta-designer", "**Status: NOT SUBMITTED.**\n- To be submitted by hand once ready.\n"),
             ("gamma-designer", "✅ SUBMITTED 2026-08-01 by hand — success page seen\n"),
@@ -862,7 +862,7 @@ def selftest() -> int:
             finally:
                 REPO = saved
     else:
-        check("tracker-unparseable selftest skipped (node absent) — the guard is best-effort", True)
+        check("tracker-unparseable selftest skipped (node absent); the guard is best-effort", True)
 
     # Coverage: every registered check must be exercised above.
     exercised = {"ready-but-never-sent", "status-contradiction", "live-site-drift",
@@ -873,14 +873,14 @@ def selftest() -> int:
     missing = registered - exercised
     check(f"every registered check is exercised (missing: {sorted(missing) or 'none'})", not missing)
 
-    print("throughput.py selftest — real shapes from this repo\n")
+    print("throughput.py selftest: real shapes from this repo\n")
     for label, ok, _ in results:
         print(f"  {'✓' if ok else '✗'} {label}")
     print()
     if failed:
-        print(f"SELFTEST FAILED — {failed} of {passed + failed} wrong")
+        print(f"SELFTEST FAILED: {failed} of {passed + failed} wrong")
         return 1
-    print(f"SELFTEST OK — {passed}/{passed + failed}")
+    print(f"SELFTEST OK: {passed}/{passed + failed}")
     return 0
 
 
@@ -891,13 +891,13 @@ def main(argv: list[str]) -> int:
     for _, fn in CHECKS:
         findings.extend(fn())
 
-    print("throughput.py — the gates that guard the GOAL (interview calls), not the truth")
+    print("throughput.py: the gates that guard the GOAL (interview calls), not the truth")
     print("  checks: a finished résumé that never went out · a dossier that contradicts itself ·")
     print("          the live site drifting from the repo · commits held back")
     print("  NOT checked: whether a submitted application was any good, and whether a form's fields")
-    print("               were really filled — only a browser sees that (§14 DOM verification).")
+    print("               were really filled; only a browser sees that (§14 DOM verification).")
     if not findings:
-        print("\nCLEAN — nothing finished is sitting idle, and the live site matches the repo.")
+        print("\nCLEAN: nothing finished is sitting idle, and the live site matches the repo.")
         return 0
     order = {"HIGH": 0, "MEDIUM": 1}
     print(f"\n{len(findings)} ITEM(S) COSTING YOU APPLICATIONS:\n")

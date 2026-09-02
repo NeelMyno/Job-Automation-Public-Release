@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""visa_gate.py — the work-authorization answer gate.
+"""visa_gate.py: the work-authorization answer gate.
 
 WHY THIS EXISTS
 ---------------
 Work-authorization / sponsorship answers are the single highest-stakes category on a job
 application: a wrong one isn't just a lost offer, it can be caught by a background check after
 you've already started a job. Different employers phrase the same underlying question differently,
-and the honest answer can differ by phrasing — "are you authorized to work without sponsorship"
+and the honest answer can differ by phrasing: "are you authorized to work without sponsorship"
 and "will you ever need sponsorship" are not always the same yes/no for the same real person. Three
 distinct question shapes recur across real ATS forms, and blurring them together is the defect this
 gate exists to catch.
 
 THE RULE IT ENFORCES (knowledge-base/12-application-answers.md §3)
 --------------------------------------------------------------------
-This script reads your own answers from a fenced ```work-authorization``` block in that file — it
+This script reads your own answers from a fenced ```work-authorization``` block in that file; it
 does not hardcode anyone's specific situation. Fill in that block once, honestly, and this gate
 checks every dossier's recorded answers against it. If the block isn't filled in yet, the gate says
 so plainly and checks nothing, rather than silently assuming a default that might be wrong for you.
@@ -25,7 +25,7 @@ The three question classes:
 
 A fourth class, "authorized to work WITHOUT RESTRICTION" (no sponsorship word, no timeframe word),
 is a rephrasing of #1 whose honest answer depends on whether your authorization is itself tied to a
-specific status/employer (see the `restricted-authorization` key in the same KB block) — it is NOT
+specific status/employer (see the `restricted-authorization` key in the same KB block); it is NOT
 simply the opposite of your #1 answer, which is exactly the subtlety a naive "just invert it" rule
 gets wrong for some users and not others.
 
@@ -33,7 +33,7 @@ USAGE
     python3 scripts/visa_gate.py                     # every applications/*/application.md
     python3 scripts/visa_gate.py <path> ...          # specific files (used by the hook)
     python3 scripts/visa_gate.py --selftest          # a fixed, fictional regression suite
-Exit 0 = clean (or not yet configured — see below). Exit 1 = at least one wrong or missing answer.
+Exit 0 = clean (or not yet configured; see below). Exit 1 = at least one wrong or missing answer.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ INVERTED = re.compile(
 
 # "The form never asked" is a RECORD, not a gap. A dossier that states plainly that no
 # work-authorization question was on the form is reporting a positive, checkable fact about the
-# form — treating that as a missing answer trains people to stop trusting the gate.
+# form; treating that as a missing answer trains people to stop trusting the gate.
 NO_QUESTION = re.compile(
     r"(?:\bno\b|\bnot\s+present\b|\bnone\b|\babsent\b|\bdid\s*n[o']?t\s+ask\b|\bdoes\s+not\s+ask\b)"
     r"[^.\n]{0,60}?"
@@ -117,24 +117,24 @@ NO_QUESTION = re.compile(
     re.I,
 )
 
-# The citizenship phrasing of the same underlying question — "Are you a US Citizen or Green Card
-# holder?" — is a work-authorization record even though it names neither "visa" nor "sponsor".
+# The citizenship phrasing of the same underlying question ("Are you a US Citizen or Green Card
+# holder?") is a work-authorization record even though it names neither "visa" nor "sponsor".
 CITIZENSHIP = re.compile(r"\b(?:u\.?s\.?\s+)?citizen(?:ship)?\b|\bgreen\s*card\b|\bpermanent\s+resident\b", re.I)
 
 # --- an already-shipped answer you've decided not to correct -------------------------------
 # This does NOT relax the gate and CANNOT be used to pre-authorize a wrong answer. It exists for
 # one shape only: an application that is ALREADY SUBMITTED, whose recorded answer contradicts your
 # own KB §3, where the only remaining question is whether to go back and correct the employer's
-# record — a call that belongs to you and to nobody else.
+# record: a call that belongs to you and to nobody else.
 #
 # Four walls, each pinned by a selftest case:
 #   1. The marker must name an ADR, so the decision is auditable and attached to a written record.
-#   2. It only applies where the dossier records a SUBMITTED application — an unsent form's wrong
+#   2. It only applies where the dossier records a SUBMITTED application; an unsent form's wrong
 #      answer can never be pre-authorized.
-#   3. It is LINE-SCOPED (the flagged line, or the line right after) — it can never blanket a file.
+#   3. It is LINE-SCOPED (the flagged line, or the line right after); it can never blanket a file.
 #   4. The finding still PRINTS, as an acknowledged note carrying its ADR. Nothing goes silent.
 #
-#     <!-- visa:decided ADR-0007 — my call 2026-01-01: not correcting the submitted answer -->
+#     <!-- visa:decided ADR-0007 - my call 2026-01-01: not correcting the submitted answer -->
 DECIDED = re.compile(r"<!--\s*visa:decided\s+(ADR-\d{4})\s*(?:—|--|-)\s*(.*?)\s*-->", re.I)
 SUBMITTED = re.compile(r"\b(?:SUBMITTED|✅\s*Applied|applied[_ ]on\s*:\s*20\d\d-)")
 
@@ -142,7 +142,7 @@ SUBMITTED = re.compile(r"\b(?:SUBMITTED|✅\s*Applied|applied[_ ]on\s*:\s*20\d\d
 def load_expected() -> dict | None:
     """Read your own EXPECTED/RATIONALE/restricted-authorization values from the KB file.
 
-    Returns None if the file is missing or the fenced block isn't (fully) filled in yet — the
+    Returns None if the file is missing or the fenced block isn't (fully) filled in yet; the
     caller must treat that as "not configured", never as license to guess a default.
     """
     if not KB_ANSWERS.is_file():
@@ -170,10 +170,10 @@ def load_expected() -> dict | None:
         val = val.strip().upper()
         reason = reason.strip()
         if placeholder.match(val) or val not in ("YES", "NO"):
-            continue  # still a template placeholder like "[YES/NO]" — not filled in
+            continue  # still a template placeholder like "[YES/NO]", not filled in
         if key in key_map:
             expected[key_map[key]] = val
-            rationale[key_map[key]] = reason or "(no reason recorded — add one in the KB file)"
+            rationale[key_map[key]] = reason or "(no reason recorded, add one in the KB file)"
         elif key == "restricted-authorization":
             restricted = val == "YES"
     if len(expected) < 3 or restricted is None:
@@ -185,7 +185,7 @@ def classify(question: str) -> tuple[str, bool] | None:
     """(question kind, inverted?) or None if this isn't a work-authorization question.
 
     `inverted` means the question asks the negative ("authorized WITHOUT sponsorship" / "WITHOUT
-    restriction"), so the expected answer needs special handling — see `expected_answer()`.
+    restriction"), so the expected answer needs special handling: see `expected_answer()`.
     """
     has_sponsor = bool(SPONSOR.search(question))
     inv = bool(INVERTED.search(question))
@@ -197,7 +197,7 @@ def classify(question: str) -> tuple[str, bool] | None:
         # "Authorized to work WITHOUT sponsorship" is the sponsorship question wearing an
         # authorization coat, so route it by its timeframe. But "authorized to work WITHOUT
         # RESTRICTION", with no sponsorship word and no timeframe, is the *authorization* question
-        # itself, inverted — and its honest answer depends on whether your authorization is tied to
+        # itself, inverted, and its honest answer depends on whether your authorization is tied to
         # a specific status (see `restricted-authorization` in the KB block), not on flipping your
         # plain authorized-now answer.
         if inv and (has_sponsor or BEGIN.search(question)):
@@ -213,7 +213,7 @@ def classify(question: str) -> tuple[str, bool] | None:
 def expected_answer(kind: str, inverted: bool, cfg: dict) -> str:
     """The honest answer for this (kind, inverted) pair, given the user's own configured facts."""
     if kind == Q_AUTH and inverted:
-        # The "without restriction" phrasing — not a flip of the plain authorized-now answer, a
+        # The "without restriction" phrasing is not a flip of the plain authorized-now answer; it's a
         # direct read of whether your authorization is itself restricted.
         return "NO" if cfg["restricted"] else "YES"
     want = cfg["expected"][kind]
@@ -243,7 +243,7 @@ class Finding:
                 f"  [DECIDED] {self.path}:{self.line_no}  ({self.kind})\n"
                 f"      recorded: {self.got}   rule says: {self.expected}\n"
                 f"      line:     {snippet}\n"
-                f"      decision: {adr} — {why}\n"
+                f"      decision: {adr} ({why})\n"
                 f"      status:   already submitted; you've ruled on it. Not open work, and not a "
                 f"precedent for any unsent form."
             )
@@ -283,7 +283,7 @@ def _decision_on(lines: list[str], i: int, is_submitted: bool) -> tuple[str, str
 
 
 def _adr_exists(adr: str) -> bool:
-    """The named ADR must actually be on disk — a well-formed but invented id must not count."""
+    """The named ADR must actually be on disk; a well-formed but invented id must not count."""
     num = adr.split("-")[-1]
     return any((REPO / "ops" / "decisions").glob(f"{num}-*.md"))
 
@@ -335,14 +335,14 @@ def targets() -> list[Path]:
 
 
 # --- selftest -------------------------------------------------------------------------------
-# A fixed, self-contained fictional configuration — the selftest never reads the real KB file, so
+# A fixed, self-contained fictional configuration: the selftest never reads the real KB file, so
 # it works identically on a fresh clone before anyone has filled in their own answers.
 _TEST_CFG = {
     "expected": {Q_AUTH: "YES", Q_BEGIN: "NO", Q_FUTURE: "YES"},
     "rationale": {
         Q_AUTH: "example: authorized to work today under the fixture's assumed status.",
         Q_BEGIN: "example: no sponsorship needed to start.",
-        Q_FUTURE: "example: will need sponsorship eventually — this answer never flips.",
+        Q_FUTURE: "example: will need sponsorship eventually; this answer never flips.",
     },
     "restricted": True,
 }
@@ -350,19 +350,19 @@ _TEST_CFG = {
 CASES: list[tuple[str, str, bool]] = [
     ("hard-stop answered correctly",
      "- Will you now or in the future require sponsorship for employment visa status? **Yes**", False),
-    ("hard-stop flipped to No — the lie this gate exists to stop",
+    ("hard-stop flipped to No: the lie this gate exists to stop",
      "- Will you now or in the future require sponsorship for employment visa status? **No**", True),
-    ("'to begin' answered No — correct and must NOT fire",
+    ("'to begin' answered No: correct and must NOT fire",
      "- Do you require sponsorship to begin employment with us? **No**", False),
-    ("'to begin' answered Yes — the self-inflicted knockout",
+    ("'to begin' answered Yes: the self-inflicted knockout",
      "- Do you require sponsorship to begin employment? **Yes**", True),
-    ("'at the time of hire' answered No — correct",
+    ("'at the time of hire' answered No: correct",
      "- Will you require visa sponsorship at the time of hire? **No**", False),
-    ("authorized-now answered Yes — correct",
+    ("authorized-now answered Yes: correct",
      "- Are you legally authorized to work in the United States? **Yes**", False),
-    ("authorized-now answered No — false per the fixture config",
+    ("authorized-now answered No: false per the fixture config",
      "- Are you legally authorized to work in the United States? **No**", True),
-    ("bare sponsorship question with no timeframe answered No — read as the hard stop",
+    ("bare sponsorship question with no timeframe answered No: read as the hard stop",
      "- Do you require sponsorship? **No**", True),
     ("answer on the following line",
      "- Will you now or in the future require sponsorship?\n  Submitted answer: No", True),
@@ -377,7 +377,7 @@ CASES: list[tuple[str, str, bool]] = [
      '**"now or in the future"** phrasing, the honest **Yes** applies instead.', False),
     ("a stray ': no' inside a trailing quoted note, never an answer",
      '- Work authorization (single merged question): **"my status requires a renewal or sponsorship '
-     'now or in the future"** — exactly true. NOTE: no separate authorized-now/sponsorship pair '
+     'now or in the future"** (exactly true). NOTE: no separate authorized-now/sponsorship pair '
      "on this form.", False),
     ("the employer's quoted option text is not the candidate's answer",
      '| 9 | "Your authorization to work..." | 🔴 **"I am authorized to work in the country '
@@ -388,15 +388,15 @@ CASES: list[tuple[str, str, bool]] = [
     ("prose describing what the form does NOT ask",
      'This ATS does **not** ask the usual "are you authorized to work in the United States?" It asks '
      "you to pick the closest statement.", False),
-    ("inverted question, honest answer No given restricted=True — must NOT fire",
+    ("inverted question, honest answer No given restricted=True: must NOT fire",
      "- Are you authorized to work in the US **without sponsorship**, now or in the future? **No**", False),
-    ("inverted question answered Yes — this IS the lie and MUST fire",
+    ("inverted question answered Yes: this IS the lie and MUST fire",
      "- Are you authorized to work in the US **without sponsorship**, now or in the future? **Yes**", True),
-    ("inverted 'without restriction' answered No — matches restricted=True, must NOT fire",
+    ("inverted 'without restriction' answered No: matches restricted=True, must NOT fire",
      "- Are you authorized to work in the U.S. without restriction? **No**", False),
-    ("inverted 'without restriction' answered Yes — contradicts restricted=True, MUST fire",
+    ("inverted 'without restriction' answered Yes: contradicts restricted=True, MUST fire",
      "- Are you authorized to work in the U.S. without restriction? **Yes**", True),
-    ("inverted, to-begin timeframe, honest Yes — must NOT fire",
+    ("inverted, to-begin timeframe, honest Yes: must NOT fire",
      "- Can you begin work without requiring sponsorship? **Yes**", False),
     ("a wrong answer inside a markdown table row must fire",
      "| 7 | Will you now or in the future require sponsorship? | **No** |", True),
@@ -406,7 +406,7 @@ CASES: list[tuple[str, str, bool]] = [
 
 COVERAGE_CASES: list[tuple[str, str, bool]] = [
     ("a SUBMITTED dossier with no work-authorization answer at all",
-     "# Some Co — Some Role\nStatus: SUBMITTED 2026-01-01\nResume: resume.pdf (241kb)\n", True),
+     "# Some Co: Some Role\nStatus: SUBMITTED 2026-01-01\nResume: resume.pdf (241kb)\n", True),
     ("a not-yet-applied dossier with no answer is fine",
      "# Some Co\nStatus: dossier built, NOT APPLIED\n", False),
     ("a SUBMITTED dossier that records the answers is fine",
@@ -415,7 +415,7 @@ COVERAGE_CASES: list[tuple[str, str, bool]] = [
      "**✅ SUBMITTED 2026-01-01.** Success panel seen.\n"
      "- **No visa question on this form.** No EEO/demographic section either.\n", False),
     ("the same declaration, colon form",
-     "- **Status:** **SUBMITTED 2026-01-01** — success banner seen.\n"
+     "- **Status:** **SUBMITTED 2026-01-01** (success banner seen).\n"
      "- Visa/EEO questions: **not present on this form**\n", False),
     ("the CITIZENSHIP phrasing of the question, answered honestly",
      "- **Status:** **SUBMITTED 2026-01-01**.\n"
@@ -427,33 +427,33 @@ COVERAGE_CASES: list[tuple[str, str, bool]] = [
 ]
 
 _GOOD_Q = "- **Require this employer to sponsor work authorization now/someday? Submitted answer: NO**"
-_MARK = "<!-- visa:decided ADR-0001 — my call 2026-01-01: not correcting the submitted answer -->"
+_MARK = "<!-- visa:decided ADR-0001 - my call 2026-01-01: not correcting the submitted answer -->"
 
 DECISION_CASES: list[tuple[str, str, bool, bool]] = [
     ("a wrong-answer line, SUBMITTED + marked -> still found, downgraded to DECIDED",
      f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q}\n{_MARK}\n", True, True),
     ("the marker on the SAME line also works",
      f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q} {_MARK}\n", True, True),
-    ("WALL 2 — NOT submitted: the marker is ignored and it stays a full finding",
+    ("WALL 2, NOT submitted: the marker is ignored and it stays a full finding",
      f"Status: dossier built, not yet applied\n{_GOOD_Q}\n{_MARK}\n", True, False),
-    ("WALL 1 — no ADR named: not a decision, stays a full finding",
+    ("WALL 1, no ADR named: not a decision, stays a full finding",
      "Status: SUBMITTED 2026-01-01\n" + _GOOD_Q +
      "\n<!-- visa:decided because I said so -->\n", True, False),
-    ("WALL 1 — an ADR but no reason: stays a full finding",
-     f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q}\n<!-- visa:decided ADR-0001 —  -->\n", True, False),
-    ("WALL 3 — line-scoped: a marker up top does NOT cover a wrong answer further down",
+    ("WALL 1, an ADR but no reason: stays a full finding",
+     f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q}\n<!-- visa:decided ADR-0001 -  -->\n", True, False),
+    ("WALL 3, line-scoped: a marker up top does NOT cover a wrong answer further down",
      f"Status: SUBMITTED 2026-01-01\n{_MARK}\n\n- Filler line.\n- Filler line.\n{_GOOD_Q}\n", True, False),
     ("a correct answer with a marker present is still no finding at all",
      f"Status: SUBMITTED 2026-01-01\n- Now or in the future require sponsorship? **Yes**\n{_MARK}\n",
      False, False),
-    ("WALL 1b — an INVENTED ADR id must not satisfy the wall",
-     f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q}\n<!-- visa:decided ADR-9999 — made up -->\n", True, False),
+    ("WALL 1b: an INVENTED ADR id must not satisfy the wall",
+     f"Status: SUBMITTED 2026-01-01\n{_GOOD_Q}\n<!-- visa:decided ADR-9999 - made up -->\n", True, False),
 ]
 
 
 def selftest() -> int:
     passed = failed = 0
-    print("visa_gate.py selftest — a fixed fictional configuration, independent of any real KB file\n")
+    print("visa_gate.py selftest: a fixed fictional configuration, independent of any real KB file\n")
     for label, text, should in CASES:
         got = bool(scan_text("t.md", text, _TEST_CFG))
         ok = got == should
@@ -486,11 +486,11 @@ def selftest() -> int:
     load_ok = load_expected() is None or isinstance(load_expected(), dict)
     passed, failed = (passed + 1, failed) if load_ok else (passed, failed + 1)
     print(f"  {'✓' if load_ok else '✗'} CONFIG    load_expected() runs cleanly on the real repo "
-          f"(configured or not — both are valid states)")
+          f"(configured or not; both are valid states)")
     if failed:
-        print(f"\nSELFTEST FAILED — {failed} of {passed + failed} wrong")
+        print(f"\nSELFTEST FAILED: {failed} of {passed + failed} wrong")
         return 1
-    print(f"\nSELFTEST OK — {passed}/{passed + failed}")
+    print(f"\nSELFTEST OK: {passed}/{passed + failed}")
     return 0
 
 
@@ -502,9 +502,9 @@ def main(argv: list[str]) -> int:
 
     cfg = load_expected()
     if cfg is None:
-        print("visa_gate.py — knowledge-base/12-application-answers.md §3 is not filled in yet.")
+        print("visa_gate.py: knowledge-base/12-application-answers.md §3 is not filled in yet.")
         print("  Nothing was checked. Fill in the ```work-authorization``` block in that file before")
-        print("  relying on this gate — see SETUP.md.")
+        print("  relying on this gate; see SETUP.md.")
         return 0
 
     findings: list[Finding] = []
@@ -524,16 +524,16 @@ def main(argv: list[str]) -> int:
         if g:
             gaps.append(g)
 
-    print(f"visa_gate.py — checked {checked} file(s) against knowledge-base/12-application-answers.md §3")
+    print(f"visa_gate.py: checked {checked} file(s) against knowledge-base/12-application-answers.md §3")
     print(f"  authorized-now = {cfg['expected'][Q_AUTH]} · sponsorship-to-begin = {cfg['expected'][Q_BEGIN]} "
           f"· now-or-in-the-future = {cfg['expected'][Q_FUTURE]}")
-    print("  NOT checked: what was actually clicked in the browser. This reads the RECORD only —")
+    print("  NOT checked: what was actually clicked in the browser. This reads the RECORD only;")
     print("               a correct record and a wrong radio button still diverge.")
     decided = [f for f in findings if f.decided]
     open_findings = [f for f in findings if not f.decided]
 
     if not open_findings and not gaps:
-        print("\nCLEAN — every recorded work-authorization answer matches your configured rule.")
+        print("\nCLEAN: every recorded work-authorization answer matches your configured rule.")
         if decided:
             print(f"\n{len(decided)} ANSWER(S) ALREADY SUBMITTED AND RULED ON "
                   f"(shown for the record; not open work):\n")

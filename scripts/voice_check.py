@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""voice_check.py — the plain-voice gate.
+"""voice_check.py: the plain-voice gate.
 
 Every piece of writing runs through this before it passes: outbound copy written as you (cover
 notes, outreach, form free-text, portfolio, LinkedIn) and every reply written to you in chat. See
@@ -101,7 +101,7 @@ def render(findings: list[tuple[str, str, str]]) -> str:
                 "  Still required: read it plainly out loud. Does it just state the work, or does "
                 "it sell, narrate, or apologize? Plain and neutral is the bar, neither pitch nor "
                 "hedge (CLAUDE.md §11).")
-    out = [f"voice_check: {len(findings)} finding(s) — rewrite before this passes.\n"]
+    out = [f"voice_check: {len(findings)} finding(s). Rewrite before this passes.\n"]
     for cat, frag, why in findings:
         out.append(f"  [{cat}] “{frag}”\n      {why}")
     return "\n".join(out)
@@ -160,9 +160,9 @@ def selftest() -> int:
         print(f"  {'✓' if ok else '✗'} {label}")
     print()
     if failed:
-        print(f"SELFTEST FAILED — {failed} of {passed + failed} wrong")
+        print(f"SELFTEST FAILED: {failed} of {passed + failed} wrong")
         return 1
-    print(f"SELFTEST OK — {passed}/{passed + failed}")
+    print(f"SELFTEST OK: {passed}/{passed + failed}")
     return 0
 
 

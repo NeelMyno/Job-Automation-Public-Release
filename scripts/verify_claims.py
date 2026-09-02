@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-verify_claims.py — the grounding gate.
+verify_claims.py: the grounding gate.
 
 WHY THIS EXISTS
 ---------------
 A false claim in outbound copy is exactly as easy to write as a true one: a fabricated quote, a
 stretched framing of your own past work, or a rounded-up metric all read as well-formed, confident
 prose. None of them look different from something true, which is what makes them dangerous, and
-what makes "I re-read it and it seemed fine" an unreliable check — a plausible sentence does not
+what makes "I re-read it and it seemed fine" an unreliable check: a plausible sentence does not
 announce itself as invented.
 
-So this is a MECHANICAL gate, not an editorial one. It checks specific, falsifiable properties —
+So this is a MECHANICAL gate, not an editorial one. It checks specific, falsifiable properties:
 does this quotation exist in a file you actually fetched, is it tied to the person the copy says
-said it, has this exact phrasing already been corrected once before — rather than asking an agent
+said it, has this exact phrasing already been corrected once before, rather than asking an agent
 to "be careful," which is not a check.
 
 WHAT IT ENFORCES
@@ -22,14 +22,14 @@ cover-letter body, the form answers):
 
   R0  STRUCTURE     `referrals.md` must exist, stored sources must exist, and `## The
                      messages` must be locatable.
-  R1  QUOTATION      Every quoted string must appear verbatim in a file under `sources/`
-                     — AND, when the copy attributes it to a PERSON, in a file that
+  R1  QUOTATION      Every quoted string must appear verbatim in a file under `sources/`,
+                     and, when the copy attributes it to a PERSON, in a file that
                      plausibly belongs to THAT person. A job posting may never source a
                      human being's speech; a posting is the company's words, not a
                      person's. (See THE OWNERLESS HAYSTACK below.)
   R2  ATTRIBUTION    Any sentence that attributes speech, belief, or authorship to the
-                     recipient must carry a sourced quotation — one that is not sourced
-                     only to the posting — or the section must carry an explicit
+                     recipient must carry a sourced quotation (one that is not sourced
+                     only to the posting), or the section must carry an explicit
                      `OPERATOR-VERIFY:` line naming what you must confirm yourself.
   R3  REGRESSION     A claim you have already corrected once may never reappear, anywhere,
                      in any wording. Populate `RETRACTED` below the first time you catch one.
@@ -38,7 +38,7 @@ cover-letter body, the form answers):
   R6  NUMBERS        A metric you have already proven fabricated and purged may never
                      reappear. Populate `RETRACTED_NUMBERS` below the first time.
   R7  DEFAULT DENY   Any person's section carrying messages must have EITHER a sourced
-                     quotation OR an `OPERATOR-VERIFY:` line. Silence is not evidence —
+                     quotation OR an `OPERATOR-VERIFY:` line. Silence is not evidence:
                      you only cold-message someone because you claim to know something
                      about them, so that something must be checkable.
   R8  PRE-SEND GATE  `pre-send-check.md` must exist with all six items genuinely marked:
@@ -49,7 +49,7 @@ cover-letter body, the form answers):
                      retired from your résumé (a former employer you decided not to list,
                      a title correction). Populate `RESUME_RETIRED` below. This rule also
                      imports `canon.py`'s retired-claims registry and applies it to the
-                     dossier's résumé and cover letter (R9b) — a decision recorded only in
+                     dossier's résumé and cover letter (R9b): a decision recorded only in
                      a knowledge base and never applied to the actual outbound document is
                      not a decision that shipped.
   R10 LINK-CLAIM     Every portfolio link in a sendable block or a résumé entry is checked
@@ -57,7 +57,7 @@ cover-letter body, the form answers):
                      `never-claim-here:` list in the same block/entry = RED; a work-claim
                      noun near the link absent from its `shows:` = AMBER; an unknown slug
                      = RED. Exists because a claim can be true about your career and still
-                     false about the specific link sitting next to it — every rule above
+                     false about the specific link sitting next to it; every rule above
                      sails past that gap, because every clause in the sentence is
                      individually true.
   R11 CARD RULE      `resume/tailoring.md` declares which real strengths ("cards") you led
@@ -74,8 +74,8 @@ cover-letter body, the form answers):
                      be ANCHORED to your own employer/domain, so this rule never fires on a
                      TARGET company that is truthfully described the same way.
 
-THE BIGGEST SCOPE GAP, NAMED: THIS GATE READS ONLY WHAT `sendable_blocks()` COLLECTS —
-referrals.md, cover-letter/cover-note.md, and application.md form answers — plus, for R9/R10/R12,
+THE BIGGEST SCOPE GAP, NAMED: THIS GATE READS ONLY WHAT `sendable_blocks()` COLLECTS:
+referrals.md, cover-letter/cover-note.md, and application.md form answers, plus, for R9/R10/R12,
 the résumé and cover-letter files themselves. Anything outside those files is invisible to it.
 Automated coverage of the primary artifacts narrows this gap; it does not close it. A human
 review pass remains the only thing that catches general semantic drift in a sentence that touches
@@ -90,7 +90,7 @@ than silently carried; closing it means widening the R1/R2 scope.
 THE OWNERLESS HAYSTACK, AND WHY OWNERSHIP MATTERS.
 A naive version of this gate concatenates every stored source into ONE flat string and asks only
 "do these words exist SOMEWHERE in the pile?". That check is not enough: a quotation put in person
-A's mouth would pass if the words merely lived in person B's profile — or in the job posting. A
+A's mouth would pass if the words merely lived in person B's profile, or in the job posting. A
 posting's own boilerplate ("we're looking for someone who thinks like X and ships like Y") is
 real, verbatim, stored text; it is also never something a human being said to you personally, and
 attributing it to them by name is exactly how a fabricated quote gets built out of entirely
@@ -106,11 +106,11 @@ from:
     description asks for") -> the posting is the right source and the gate stays quiet. That
     is not a loophole, it is the honest way to quote a posting.
 The flat-haystack answer is kept as the lower-severity signal underneath the ownership answer, so
-no coverage is lost by adding this — only gained.
+no coverage is lost by adding this, only gained.
 
 THE ANNOTATION EXEMPTIONS, AND WHY THEY ARE NARROW.
 `OPERATOR-VERIFY:` and a `SENT LOG` prefix mark a block as something other than a fresh outbound
-draft — a record of something already sent, or a flag that a fact needs your own eyes before it
+draft: a record of something already sent, or a flag that a fact needs your own eyes before it
 ships. Either one COULD be used as a kill switch: prefix anything with `SENT LOG:` and the whole
 block goes invisible to every rule. That is worse than no gate, because the reviewer sees a clean
 PASS and trusts it.
@@ -150,7 +150,7 @@ import unicodedata
 from pathlib import Path
 
 # ── Rule 3: fabrications this repo has already corrected. ──────────────────────────
-# Ships EMPTY. Add an entry the moment you catch a claim being corrected — once a
+# Ships EMPTY. Add an entry the moment you catch a claim being corrected: once a
 # wording has been retracted, it must never be able to silently resurface, in this
 # wording or a paraphrase of it. `pattern` is a regex, matched case-insensitively
 # against the normalized block text.
@@ -163,15 +163,15 @@ RETRACTED: list[dict] = []
 
 # ── Rule 12: the core-facts guard. ──────────────────────────────────────────────────
 # R3 above catches corrected claims and retired phrasings in general. This catches
-# FABRICATED FRAMINGS OF YOUR OWN load-bearing facts specifically — your own employer,
-# your own past work — which nothing else in this gate is positioned to catch, because
+# FABRICATED FRAMINGS OF YOUR OWN load-bearing facts specifically: your own employer,
+# your own past work, which nothing else in this gate is positioned to catch, because
 # R1/R2 guard OTHER people's words, not your own.
 #
 # Ships EMPTY. Each entry carries `truth` (the grounded descriptor to reach for instead)
 # and `banned` (compiled regexes for the FALSE framings, ANCHORED to your own
 # employer/domain). The anchor is the whole discipline: a false framing of YOUR employer
 # must never be confused with a TRUE statement about a target company that happens to
-# share the same words — a blanket ban with no anchor would fire on every honest dossier
+# share the same words. A blanket ban with no anchor would fire on every honest dossier
 # and get switched off within a week. `[^.\n]{0,N}` keeps each match inside one clause so
 # it cannot span a paragraph and misfire.
 #
@@ -186,7 +186,7 @@ CORE_FACTS: list[dict] = []
 RETRACTED_NUMBERS: list[str] = []
 
 # ── Rule 9: strings you have explicitly RETIRED FROM THE RÉSUMÉ. ───────────────────
-# Not fabrications — real facts you decided not to list (a former employer you no
+# Not fabrications: real facts you decided not to list (a former employer you no
 # longer name, a title correction). Ships EMPTY. The gate enforces the decision so it
 # cannot ship logged-but-unexecuted: a change recorded only in a knowledge base and
 # never applied to the actual résumé file is not a change that happened.
@@ -207,7 +207,7 @@ MANIFEST_PATH = Path(__file__).resolve().parents[1] / "projects" / "CLAIMS-MANIF
 # `get_link_re()` (below) compiles the link-matching regex from it at runtime, cached
 # alongside the rest of the manifest. Fail-safe: if the manifest is missing, or carries
 # no `domain:` line, `get_link_re()` returns None and R10 simply finds no links to
-# check for that dossier — identical in effect to today's behavior for a link on any
+# check for that dossier, identical in effect to today's behavior for a link on any
 # domain the manifest does not recognize.
 _LINK_RE_CACHE: re.Pattern | None = None
 _LINK_RE_LOADED = False
@@ -233,7 +233,7 @@ def get_link_re() -> re.Pattern | None:
 # distinctive product nouns, not generic craft words ("research", "prototype" appear in
 # every honest sentence and would only make the gate cry wolf). Generic across any
 # product; not tied to any one person's work, so this list ships populated rather than
-# empty — trim or extend it for your own domain.
+# empty; trim or extend it for your own domain.
 WORK_CLAIM_NOUNS = [
     "login", "onboarding", "checkout", "upi", "funnel", "cart abandonment",
     "dispatcher", "theming layer", "multi-brand", "more than one brand", "second brand",
@@ -311,19 +311,19 @@ def load_manifest() -> dict | None:
 
 
 def check_link_claims(where: str, block: str, findings: list, entry_scope: bool = False) -> None:
-    """R10 — every `<domain>/<slug>` in a block/entry is checked against the manifest.
+    """R10: every `<domain>/<slug>` in a block/entry is checked against the manifest.
 
     RED  (1) any `never-claim-here:` term for that slug anywhere in the same block/entry
          (a claim placed one clause away from the link is still beside it; block scope is
          what catches that proximity laundering); (3) an unknown slug (forces manifest
          upkeep when a new case study deploys).
-    AMBER(2) a work-claim noun near the link — its own sentence for prose blocks, the
-         whole entry for a résumé <li> (`entry_scope=True`) — absent from the slug's
+    AMBER(2) a work-claim noun near the link (its own sentence for prose blocks, the
+         whole entry for a résumé <li> when `entry_scope=True`), absent from the slug's
          `shows:` list. Names the manifest line so the fix is a lookup, not a hunt.
     """
     link_re = get_link_re()
     if link_re is None:
-        return  # no manifest, or no `domain:` line — nothing to check (fail-safe)
+        return  # no manifest, or no `domain:` line; nothing to check (fail-safe)
     nb = norm(block)
     slugs = list(dict.fromkeys(link_re.findall(nb)))  # ordered, deduped
     if not slugs:
@@ -338,7 +338,7 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
         if slug is None:
             findings.append(Finding(
                 "R10", where,
-                f"RED: unknown slug '{domain}/{raw_slug}' — no section in "
+                f"RED: unknown slug '{domain}/{raw_slug}': no section in "
                 "projects/CLAIMS-MANIFEST.md. Either the link is wrong (a 404 in copy a "
                 "real person will click), or a new case study deployed and the manifest "
                 "was not updated. Fix the link or add the section; never ignore this."))
@@ -347,7 +347,7 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
         if sec["link_only"]:
             continue
         never_hay = " ; ".join(t for t, _ in sec["never"])
-        # (1) RED — never-claim terms anywhere in the same block/entry.
+        # (1) RED: never-claim terms anywhere in the same block/entry.
         for term, lineno in sec["never"]:
             if term in nb:
                 findings.append(Finding(
@@ -358,7 +358,7 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
                     f"career-true, but next to THIS link it is false about the link. "
                     f"Source of truth: {sec['source']}.",
                     block[:120] + ("…" if len(block) > 120 else "")))
-        # (2) AMBER — work-claim nouns near the link, absent from shows.
+        # (2) AMBER: work-claim nouns near the link, absent from shows.
         if entry_scope:
             scopes = [nb]
         else:
@@ -371,7 +371,7 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
                         f"AMBER: work-claim noun '{noun}' sits next to the {domain}/{raw_slug} "
                         f"link but is not in that slug's shows: list "
                         f"(projects/CLAIMS-MANIFEST.md:{sec['shows_line']}). Either the claim does "
-                        f"not belong beside this link, or the manifest is stale — reconcile "
+                        f"not belong beside this link, or the manifest is stale; reconcile "
                         f"against {sec['source']} before shipping.",
                         scope[:120] + ("…" if len(scope) > 120 else "")))
 
@@ -406,15 +406,15 @@ OPERATOR_MARK = "OPERATOR-VERIFY:"
 # internal_record_mark) so outbound copy cannot go dark by mentioning one mid-sentence.
 INTERNAL_RECORD_MARKS = ("SENT LOG", "RETRACTED", "DO NOT SEND", "NOT SENT")
 
-# ── WHAT AN ANNOTATION MAY SILENCE (narrow by design — see the module docstring). ──
+# ── WHAT AN ANNOTATION MAY SILENCE (narrow by design; see the module docstring). ──
 # An annotation may silence only the rule class it is ABOUT, and every block it
 # silences is counted and named in the `NOT checked:` line.
 #
 # The rule classes:
-#   R1/R2/R7      "is this PROVEN?"          — an annotation about evidence may speak here
-#   R3/R6         "is this TRUE?"            — a retracted claim, or a purged metric
-#   R4            "does LinkedIn accept it?" — only meaningful for copy actually being sent
-#   R5            "is it in your voice?"     — likewise
+#   R1/R2/R7      "is this PROVEN?"          : an annotation about evidence may speak here
+#   R3/R6         "is this TRUE?"            : a retracted claim, or a purged metric
+#   R4            "does LinkedIn accept it?" : only meaningful for copy actually being sent
+#   R5            "is it in your voice?"     : likewise
 #   R10/R12       "is it true about the LINK / about your own facts?"
 #
 # THE SPLIT THAT MATTERS is PREFIX, NOT SUBSTRING. Two different things wear the same
@@ -442,18 +442,18 @@ ANNOTATION_EXEMPTIONS: dict[str, frozenset[str]] = {
     # label that exists for that; OPERATOR-VERIFY does not get to hold one silently.
     "OPERATOR-VERIFY prefix": _RECORD,
     # A draft explicitly held back. Not addressed to anyone, so voice, length and link
-    # claims are moot — but a fabrication in a held draft is still a fabrication that a
+    # claims are moot, but a fabrication in a held draft is still a fabrication that a
     # later session can pick up and send, so R3 and R6 stay live.
     "DO NOT SEND": _RECORD,
     "NOT SENT": _RECORD,
     # A killed phrase, preserved so it cannot be reused. R3 MUST be silent here or the
     # repo's own memory trips the gate, and the fix an agent reaches for under pressure
-    # is to DELETE the record — the wrong direction, since the record is the honest
+    # is to DELETE the record: the wrong direction, since the record is the honest
     # part. The ONE row that silences the truth alarms, and it should stay narrow in
     # practice: this label has to be typed on purpose.
     "RETRACTED": _RECORD | frozenset({"R3", "R6", "R10", "R12"}),
     # THE NARROWING. An `OPERATOR-VERIFY:` line trailing a real draft annotates the
-    # EVIDENCE for a claim — the documented escape hatch for facts an agent cannot
+    # EVIDENCE for a claim: the documented escape hatch for facts an agent cannot
     # fetch. It says nothing whatever about whether the copy is honest, in voice, or
     # inside the 300-character cap, and it may not pretend otherwise.
     "OPERATOR-VERIFY inline": frozenset({"R1", "R2", "R7"}),
@@ -497,7 +497,7 @@ def _dossier_status_if_dead(folder: Path) -> str | None:
     """Return the tracker status if this dossier is dead (rejected/passed/withdrawn), else None.
 
     Authority is pipeline/tracker.html, which only your real outcomes update, so a dossier can
-    never mark ITSELF dead to dodge a gate. A read failure returns None — the gate stays ON. That
+    never mark ITSELF dead to dodge a gate. A read failure returns None: the gate stays ON. That
     direction is deliberate: an unreadable tracker must never silently exempt a live dossier.
     """
     try:
@@ -525,7 +525,7 @@ class Finding:
 
 # A job posting is the COMPANY's words. It may source a claim about the role; it may
 # NEVER source a human being's speech. Detected by filename, because a posting does not
-# always live at `jd-*.md` — other stored postings under sources/ carry names like
+# always live at `jd-*.md`; other stored postings under sources/ carry names like
 # `sources/<company>-jd-<role>.md` or `sources/posting-<role>.md`. Deliberately NOT
 # matching bare "post": `<person>-linkedin-post.md` is a person's own writing and is
 # exactly the file that SHOULD source their speech.
@@ -567,7 +567,7 @@ class SourceFile:
         Three acceptance paths, cheapest first:
           1. the FILENAME says so  (`person-name-linkedin.md`, `namewhatever-profile.md`)
           2. the HEADER says so    (the `url:`/`fetched:` block and the page title)
-          3. the name sits within NEIGHBOURHOOD_CHARS of the quotation IN THE FILE —
+          3. the name sits within NEIGHBOURHOOD_CHARS of the quotation IN THE FILE,
              which is the strongest signal of all, and the one that lets a team page
              or a multi-quote article correctly source the person it attributes to.
         """
@@ -613,8 +613,8 @@ def load_sources(folder: Path) -> Sources:
     """Index every stored primary source, ONE ENTRY PER FILE.
 
     Two kinds count as primary:
-      sources/*.md  — verbatim fetched page text (a person's own words)
-      jd-*.md       — the verbatim job posting, pulled from the ATS with its URL and date
+      sources/*.md  : verbatim fetched page text (a person's own words)
+      jd-*.md       : the verbatim job posting, pulled from the ATS with its URL and date
     Nothing else. A claim is not sourced because another file in this repo repeats it,
     and a person's claim is not sourced because the COMPANY's posting happens to
     contain the same sentence.
@@ -656,14 +656,14 @@ PERSON_SPEECH_RE = re.compile(
     r"(?:post|posts|note|thread|comment|essay|piece|article|talk|interview|writing|"
     r"words|line|point|bio|profile|newsletter|blog|video|podcast|answer|reply|tweet))\b")
 
-# `<Somebody> said "..."` — third-person speech verb immediately before the quotation.
+# `<Somebody> said "..."`: third-person speech verb immediately before the quotation.
 NEAR_SPEECH_VERB_RE = re.compile(
     r"\b(said|says|say|wrote|writes|told|argued|argues|puts? it|called|calls|"
     r"describ\w+|framed|frames|noted|notes|mentioned|mentions|asked|posted|quote[ds]?)\b")
 
 
 def quote_attribution(block: str, quote: str) -> str:
-    """'person' | 'document' | '' — who the COPY says these words belong to.
+    """'person' | 'document' | '': who the COPY says these words belong to.
 
     Proximity-bound: only the ATTRIBUTION_WINDOW characters immediately before the
     quotation are read. '' means the copy claims no speaker at all, in which case the
@@ -688,7 +688,7 @@ def quote_attribution(block: str, quote: str) -> str:
 
 
 # Headings under `## The messages` that are NOT a person. Ownership FAILS OPEN on these
-# (checks skip) — the cost of a wrong "not a person" is zero, the cost of a wrong
+# (checks skip): the cost of a wrong "not a person" is zero, the cost of a wrong
 # "is a person" is a false positive, so this list is deliberately generous.
 NON_PERSON_HEADINGS = {
     "none", "no", "not", "ruled", "unified", "drafted", "additional", "backup", "other",
@@ -707,14 +707,14 @@ def person_name_tokens(heading: str) -> list[str] | None:
     """Name tokens for a `### ` heading, or None when it is not confidently a person.
 
     Real headings this must survive:
-        ### 1 · A Person — "a role at a company" (1st°, viewed ~2w ago)
-        ### 1. A Person — Head of Product (THE hiring node) · **url**
-        ### A Person — SHORT variant (253 chars, fits LinkedIn's 300-char note)
-        ### 4. A B (Middle) Person — designer at a company · https://...
+        ### 1 · A Person, "a role at a company" (1st°, viewed ~2w ago)
+        ### 1. A Person, Head of Product (THE hiring node) · **url**
+        ### A Person, SHORT variant (253 chars, fits LinkedIn's 300-char note)
+        ### 4. A B (Middle) Person, designer at a company · https://...
         ### 1. A Person (recruiter who owns the req)
     and must REFUSE, so ownership fails open rather than crying wolf:
         ### None drafted yet · ### Ruled out / honest gaps · ### Unified pack (pointer)
-        ### 4 · DJ — the warm lane      (a nickname; no file could ever match it)
+        ### 4 · DJ, the warm lane      (a nickname; no file could ever match it)
     """
     h = re.sub(r"^\s*[#\s]*\d+\s*[.)·\-–—]\s*", "", heading.strip())
     # Drop multi-word parentheticals ("(recruiter who owns the req)"); KEEP a
@@ -803,7 +803,7 @@ def extract_referral_sections(text: str) -> list[tuple[str, str]]:
     HEADING, whatever it is named. An earlier version of this cut at one specific
     hardcoded heading name, which meant any dossier that closed `## The messages` with
     a differently-named (or absent) trailing heading had its trailing prose swept in as
-    if it were outbound copy — a real false-positive risk, since that trailing prose is
+    if it were outbound copy: a real false-positive risk, since that trailing prose is
     exactly where documentation/process notes tend to live. Cutting at the next `## `
     heading generically closes that regardless of what the heading is called.
     """
@@ -825,7 +825,7 @@ def quoted_strings(s: str) -> list[str]:
 
 
 def internal_record_mark(body: str) -> str:
-    """The internal-record label PREFIXING this block, or '' — not a bool.
+    """The internal-record label PREFIXING this block, or '', rather than a bool.
 
     Every quote-block in a person's section counts as sendable copy by default, which is
     right for catching unlabelled drafts but would misfire on internal records that
@@ -886,7 +886,7 @@ def _record_suppression(where: str, mark: str, rules: frozenset[str]) -> None:
 def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
     """(kind, text, exempt_rules) for the sendable quote-blocks in a person's section.
 
-    Annotated blocks are not DROPPED — they are returned with the set of rules their
+    Annotated blocks are not DROPPED: they are returned with the set of rules their
     annotation may legitimately silence, and every rule outside that set still runs on
     them. See ANNOTATION_EXEMPTIONS.
 
@@ -895,8 +895,8 @@ def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
     refine the kind label, so a draft written without them is still swept.
 
     DM IS MATCHED FIRST, DELIBERATELY. A DM label routinely explains its InMail verdict
-    by naming the alternative — e.g. `**First DM (Use InMail: NO — free connection note
-    is available...)**` — so a loose connection-note pattern would happily claim the
+    by naming the alternative, e.g. `**First DM (Use InMail: NO, free connection note
+    is available...)**`, so a loose connection-note pattern would happily claim the
     DM's body and then R4 would cap a legitimately long DM at 300 characters. Matching
     DM first, and skipping bodies already claimed, is what keeps the two kinds apart.
     """
@@ -922,7 +922,7 @@ def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
 
 
 # ────────────────────────────────────────────────────────────────────────────────────
-# R11 — THE CARD RULE, AS A GATE.
+# R11: THE CARD RULE, AS A GATE.
 #
 # A tailoring record kept as prose alone (in `resume/tailoring.md`) is enforced by
 # nothing, and prose drifts from reality in both directions at once: a card can be
@@ -935,7 +935,7 @@ def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
 
 # name -> (regex that detects the card in copy, regex that detects it in a declaration)
 # Ships EMPTY. This is for R11's "which real strengths did you lead with vs. hold back
-# per application" check — add your own entries once you have real positioning facts
+# per application" check; add your own entries once you have real positioning facts
 # worth tracking (a scale metric, a specific past role, a specific technical claim).
 CARD_SIGNATURES: dict[str, tuple[str, str]] = {}
 
@@ -964,12 +964,12 @@ def _card_artifacts(folder: Path) -> list[tuple[str, str]]:
 
 
 def check_card_rule(folder: Path, findings: list) -> None:
-    """R11 — reconcile resume/tailoring.md's declared cards against the real artifacts."""
+    """R11: reconcile resume/tailoring.md's declared cards against the real artifacts."""
     tf = folder / "resume" / "tailoring.md"
     if not tf.exists():
         # Deliberately silent. A dossier built before R11 existed (or a dead one, which
         # stays read-only forever) has no declaration, and nagging about it would make
-        # every historical dossier red — a gate that is always red gets ignored. R11's
+        # every historical dossier red, and a gate that is always red gets ignored. R11's
         # job is to catch a declaration that CONTRADICTS the artifacts, not to demand
         # the file.
         return
@@ -987,7 +987,7 @@ def check_card_rule(folder: Path, findings: list) -> None:
     artifacts = _card_artifacts(folder)
     # An OUT declaration may legitimately mean "out of the cover and form answers, but
     # retained in the résumé bullet", because the résumé is one fixed page. The gate
-    # accepts that ONLY when the declaration says it in words — an unqualified OUT that
+    # accepts that ONLY when the declaration says it in words; an unqualified OUT that
     # is contradicted by the artifacts stays a failure.
     retention_declared = bool(re.search(r"retained in the r[eé]sum", seg_out, re.I))
     for card, (copy_rx, decl_rx) in CARD_SIGNATURES.items():
@@ -1034,7 +1034,7 @@ def check_card_rule(folder: Path, findings: list) -> None:
 # Which rules actually got to run on the last check_dossier() call. The banner used to build its
 # "checked:" line from the static rule registry in this module's docstring, so it would claim
 # R0-R12 had run even when R0 short-circuited and only R0 had. That is a lie by omission inside the
-# honesty gate — the exact "verdict without its blind spots" failure the scope line exists to
+# honesty gate: the exact "verdict without its blind spots" failure the scope line exists to
 # prevent.
 _RULES_SKIPPED: list[str] = []
 
@@ -1047,7 +1047,7 @@ def check_dossier(folder: Path) -> list[Finding]:
     findings: list[Finding] = []
     sources = load_sources(folder)
 
-    # R10 precondition — the manifest must exist. A missing manifest is a LOUD failure
+    # R10 precondition: the manifest must exist. A missing manifest is a LOUD failure
     # on every dossier, never a silent skip: a gate that silently stops reading its
     # data file is how "logged-but-unexecuted" happens.
     if load_manifest() is None:
@@ -1087,7 +1087,7 @@ def check_dossier(folder: Path) -> list[Finding]:
             _record_suppression(where, annotation_exemption(msg)[0], exempt)
             nmsg = norm(msg)
 
-            # R1 — every quotation must exist in a stored source, and must belong to
+            # R1: every quotation must exist in a stored source, and must belong to
             # whoever the copy says said it.
             if "R1" not in exempt:
                 for q in quoted_strings(msg):
@@ -1112,10 +1112,10 @@ def check_dossier(folder: Path) -> list[Finding]:
                             f"RED: this quotation is attributed to {person.split('—')[0].strip()} "
                             f"by the copy itself, but the ONLY file carrying it is a JOB "
                             f"POSTING ({owner_names}). A posting is the COMPANY's words, never a "
-                            f"person's — this is exactly how a fabricated quote gets built out of "
+                            f"person's: this is exactly how a fabricated quote gets built out of "
                             f"real, verbatim material (see THE OWNERLESS HAYSTACK in the module "
-                            f"docstring). Fix by fetching and storing THEIR source, or — if you "
-                            f"mean the posting — say so in the copy (\"the posting asks for ...\"), "
+                            f"docstring). Fix by fetching and storing THEIR source, or, if you "
+                            f"mean the posting, say so in the copy (\"the posting asks for ...\"), "
                             f"which this gate accepts.",
                             f'"{q}"'))
                         continue
@@ -1131,7 +1131,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                             f"or cut the attribution. Sourced-somewhere is not sourced-to-them.",
                             f'"{q}"'))
 
-            # R2 — attribution to the recipient needs a sourced quote, or an operator flag.
+            # R2: attribution to the recipient needs a sourced quote, or an operator flag.
             # A posting-only quotation is not accepted as that evidence: the company's
             # posting says nothing about what this person said or believes.
             if "R2" not in exempt:
@@ -1148,11 +1148,11 @@ def check_dossier(folder: Path) -> list[Finding]:
                             "Quote them verbatim from sources/, or mark what you must confirm by hand.",
                             msg[:110] + ("…" if len(msg) > 110 else "")))
 
-            # R4 — LinkedIn's cap.
+            # R4: LinkedIn's cap.
             if "R4" not in exempt and kind == "connection note" and len(msg) > 300:
                 findings.append(Finding("R4", where, f"Connection note is {len(msg)} chars; LinkedIn caps at 300."))
 
-        # R7 — DEFAULT DENY, per person.
+        # R7: DEFAULT DENY, per person.
         #
         # R2's trigger list is a blocklist, and a blocklist always has a hole: a note
         # can assert unverifiable biography about the recipient with no trigger phrase
@@ -1162,7 +1162,7 @@ def check_dossier(folder: Path) -> list[Finding]:
         # with your own eyes.
         #
         # R7 DELIBERATELY KEEPS THE FLAT-HAYSTACK EVIDENCE TEST. Tightening it the way
-        # R2 is tightened — "a posting-only quotation is not evidence about a person" —
+        # R2 is tightened ("a posting-only quotation is not evidence about a person")
         # would put an honest dossier red on a message that says only "the job
         # description can say '...' and mean it", which asserts nothing about the
         # recipient at all, so R7's premise never fires. R7 is an UNTRIGGERED
@@ -1179,7 +1179,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                 "person asserts something about them. Prove it from sources/, or name what "
                 "you must check yourself. Silence is not evidence."))
 
-    # R8 — the pre-send research gate. Fires only when the dossier actually carries
+    # R8: the pre-send research gate. Fires only when the dossier actually carries
     # sendable copy: a dossier with nothing to send has nothing to research-gate.
     if sendable_blocks(folder):
         psc = folder / "pre-send-check.md"
@@ -1199,7 +1199,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                             f"Mandatory item '{key}' is not checked [x]. It means: {meaning}. "
                             "Do the check for real, then mark it. Never mark without doing."))
 
-    # R3/R5/R6/R10/R12 — sweep ONLY what a real human will read. Documentation about a
+    # R3/R5/R6/R10/R12: sweep ONLY what a real human will read. Documentation about a
     # correction is how the repo remembers; it must not trip the gate that prevents it.
     for where, block, exempt in sendable_blocks(folder):
         if "R10" not in exempt:
@@ -1236,7 +1236,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                 if w in nb:
                     findings.append(Finding("R5", where, f"Banned phrase '{w}'."))
 
-    # R9 — THE RÉSUMÉ ENTERS THE GATE.
+    # R9: THE RÉSUMÉ ENTERS THE GATE.
     #
     # The résumé is the primary artifact an employer receives. A decision you locked
     # about it (drop a former employer, correct a title) that sits recorded only in a
@@ -1258,7 +1258,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                 "R9", "resume/",
                 "this dossier holds a résumé PDF but has NO resume.html source, so the retired-claim "
                 "and link-claim rules could not read it. Add the source (copy resume/resume.html and "
-                "apply the tailoring delta) — a résumé nothing can read is a résumé nothing is "
+                "apply the tailoring delta): a résumé nothing can read is a résumé nothing is "
                 "guarding."))
 
     if rhtml.exists():
@@ -1271,22 +1271,22 @@ def check_dossier(folder: Path) -> list[Finding]:
                     "This is the resume's background-check surface; the decision to remove it is "
                     "locked, so its presence is a defect, not a choice."))
 
-        # R9b — THE FULL RETIRED REGISTRY, applied to the DOSSIER's résumé.
+        # R9b: THE FULL RETIRED REGISTRY, applied to the DOSSIER's résumé.
         #
         # RESUME_RETIRED above is a small, hand-maintained list. `canon.py` owns the
-        # fuller retired-claims registry and the assertion-vs-prohibition logic — but a
+        # fuller retired-claims registry and the assertion-vs-prohibition logic, but a
         # knowledge-base-wide scan by design excludes the applications/ folder, so
         # nothing else reads a dossier's own résumé for a claim retired there. Between
         # them: canon has the knowledge and does not look at applications/; R9 looks and
         # does not have the knowledge. This closes that gap by importing canon's
         # registry and pointing it at the one surface it does not scan on its own.
         #
-        # canon.py stays the single owner of the registry — this does not restate it,
+        # canon.py stays the single owner of the registry; this does not restate it,
         # it imports it.
         #
         # DEAD DOSSIERS ARE EXEMPT, VISIBLY. A rejected/passed/withdrawn dossier is
         # never sent to anyone again, and it stays read-only forever as a preserved
-        # record of what WAS actually sent — often built before a claim was retired.
+        # record of what WAS actually sent, often built before a claim was retired.
         # Rewriting it would destroy the record; leaving it permanently red would train
         # the next agent to scroll past this gate, which is the "warning nobody reads"
         # failure this whole gate exists to avoid.
@@ -1310,12 +1310,12 @@ def check_dossier(folder: Path) -> list[Finding]:
     dead = _dossier_status_if_dead(folder)
     if dead:
         _HISTORY_SKIPPED.append(
-            f"the retired-claim registry on {folder.name}/resume/resume.html — that dossier is "
+            f"the retired-claim registry on {folder.name}/resume/resume.html: that dossier is "
             f"'{dead}' per pipeline/tracker.html, so its résumé is a read-only record of what was "
             f"sent, not a sendable artifact")
     else:
         # The résumé AND the cover letter. Both are artifacts an employer receives, and
-        # the same hole covers both — scanning only the résumé would leave exactly half
+        # the same hole covers both; scanning only the résumé would leave exactly half
         # the outbound surface unguarded.
         targets = ([("resume/resume.html", rt)] if rhtml.exists() else [])
         for cl in sorted((folder / "cover-letter").glob("*")):
@@ -1324,7 +1324,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                     targets.append((f"cover-letter/{cl.name}", cl.read_text(encoding="utf-8")))
                 except OSError:
                     pass
-        # AND THE RENDERED PDFs — the files an employer actually receives. Scanning
+        # AND THE RENDERED PDFs: the files an employer actually receives. Scanning
         # only the HTML source assumes the PDF was rebuilt from it, which is exactly
         # the assumption that leaves a stale, already-corrected PDF unguarded.
         for sub in ("resume", "cover-letter"):
@@ -1353,7 +1353,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                 f"this PASS."))
 
 
-    # R11 — the card rule, reconciled against the artifacts rather than trusted as prose.
+    # R11: the card rule, reconciled against the artifacts rather than trusted as prose.
     check_card_rule(folder, findings)
 
     return findings
@@ -1368,12 +1368,12 @@ def check_dossier(folder: Path) -> list[Finding]:
 # fresh clone with no real user data.
 #
 # THE REGISTRIES ABOVE SHIP EMPTY (RETRACTED, CORE_FACTS, RETRACTED_NUMBERS,
-# RESUME_RETIRED, CARD_SIGNATURES) — that is the correct state for a fresh clone with no
+# RESUME_RETIRED, CARD_SIGNATURES): that is the correct state for a fresh clone with no
 # real corrections recorded yet. But an empty registry has nothing for R3/R6/R9/R11/R12
 # to catch, so the selftest SEEDS them with a few invented, clearly-fictional entries
 # before running its cases (see _seed_fixture_registries() below), proving the
 # MECHANISM works without needing real content. This mutation is process-local and
-# `selftest()` is terminal — nothing else runs in this process afterward — so it never
+# `selftest()` is terminal, and nothing else runs in this process afterward, so it never
 # leaks into a real dossier check.
 # ────────────────────────────────────────────────────────────────────────────────────
 
@@ -1406,7 +1406,7 @@ SELFTEST_CASES = [
     ("R10", "career-plausible claims on a link that carries never-claim-here terms",
      '> Closest thing I have is a design system where I was the sole engineer and solo '
      'founder end to end, at example.com/example-case-study'),
-    # A single work-claim noun near the link, absent from that slug's shows: list —
+    # A single work-claim noun near the link, absent from that slug's shows: list,
     # the AMBER path, distinct from the RED never-claim-here path above.
     ("R10", "a work-claim noun near the link that the manifest does not support",
      '> I have spent the last year on an internal dashboard for admins; the case study '
@@ -1419,7 +1419,7 @@ SELFTEST_CASES = [
 
     # ── ATTRIBUTION-OWNERSHIP CASES. Each one exited 0 before ownership was checked. ──
     #
-    # HOLE 1. The quotation is real, stored, and verbatim — it is the JOB POSTING'S OWN
+    # HOLE 1. The quotation is real, stored, and verbatim: it is the JOB POSTING'S OWN
     # BOILERPLATE, put in the recipient's mouth in a note addressed to them. The old
     # flat haystack asked only "do these words exist somewhere in this dossier?", so it
     # said yes. A posting is the COMPANY's words, never a person's.
@@ -1428,7 +1428,7 @@ SELFTEST_CASES = [
      'feedback as fuel" when we spoke.'),
     # HOLE 2. The retracted claim, four characters away from invisible. Prefixing a
     # block `SENT LOG:` used to delete it from EVERY rule; now the label may excuse the
-    # evidence rules and the copy rules, never the truth alarms — and a retracted claim
+    # evidence rules and the copy rules, never the truth alarms, and a retracted claim
     # inside a SENT LOG is the worst news the gate can carry, because it means it
     # REACHED A REAL PERSON.
     ("R3", "a retracted claim hiding behind a `SENT LOG:` prefix (the block-wide kill switch, narrowed)",
@@ -1448,7 +1448,7 @@ SELFTEST_CASES = [
     # R6 in ordinary outbound copy.
     ("R6", "a retracted metric in an ordinary connection note",
      '> Hi Jordan, at Globex I shipped a console that moved adoption 450% in a quarter.'),
-    # R12 — a false framing of your OWN employer, anchored to it by name, mirroring the
+    # R12: a false framing of your OWN employer, anchored to it by name, mirroring the
     # exact shape a corrected framing takes: true individual words, false as a whole.
     ("R12", "your own past employer mischaracterized as a developer-tools company",
      '> At Globex I was the design lead at a developer-tools company that felt like a '
@@ -1468,13 +1468,13 @@ SELFTEST_CASES = [
 # teeth, so only positives count toward coverage.
 # ────────────────────────────────────────────────────────────────────────────────────
 
-# Ratchet. Raise it when you add cases; never lower it to make a run pass — that is the
+# Ratchet. Raise it when you add cases; never lower it to make a run pass: that is the
 # denominator-shrinking this whole section exists to make impossible.
 MIN_SELFTEST_CASES = 33
 
 
 def implemented_rules() -> set[str]:
-    """Every rule id this module can actually EMIT — read from the code, not a list.
+    """Every rule id this module can actually EMIT, read from the code, not a list.
 
     Union of (a) every `Finding("Rn", ...)` construction in this file and (b) the rule
     registry in the module docstring. Reading the source is what makes a NEW rule
@@ -1554,7 +1554,7 @@ def _seed_fixture_registries() -> None:
             "id": "example-employer-true-nature",
             "truth": "TEST FIXTURE: Globex is a seed-stage veterinary-software startup, not a "
                      "developer-tools company. Mirrors the real registry's shape and anchoring "
-                     "discipline — replace with your own facts once you have a framing worth "
+                     "discipline; replace with your own facts once you have a framing worth "
                      "guarding.",
             "banned": [
                 (re.compile(r"\bglobex\b[^.\n]{0,80}\bdeveloper[- ]?tools?\b", re.I), "Globex called developer tools"),
@@ -1590,13 +1590,13 @@ def _poisoned(real: Path, tmp: Path, poison: str) -> Path:
 
 
 def _selftest_r11(h: _Harness) -> None:
-    """R11 — the card-rule failure, both directions, as permanent cases."""
+    """R11: the card-rule failure, both directions, as permanent cases."""
     import tempfile, shutil
     base = Path(__file__).resolve().parents[1] / "applications" / "EXAMPLE-fixture-selftest"
     if not base.exists():
         # No silent skip. The MIN_SELFTEST_CASES floor turns a vanished fixture into a
         # loud failure, exactly as a vanished referrals.md already is.
-        print("  ⚠ R11 cases SKIPPED (fixture dossier absent) — the case floor will fail this run")
+        print("  ⚠ R11 cases SKIPPED (fixture dossier absent): the case floor will fail this run")
         return
     cases = [
         ("a card declared OUT while the cover letter still carries it",
@@ -1646,14 +1646,14 @@ def selftest() -> int:
 
     _seed_fixture_registries()
 
-    print("SELFTEST — the gate must CATCH each shape of mistake it exists to prevent.\n")
+    print("SELFTEST: the gate must CATCH each shape of mistake it exists to prevent.\n")
     h = _Harness()
     for rule, name, poison in SELFTEST_CASES:
         with tempfile.TemporaryDirectory() as td:
             found = check_dossier(_poisoned(real, Path(td) / "dossier", poison))
             h.expect(rule, name, found, f"Poison: {poison[:80]}")
 
-    # R8 — structural, so its poison is a deletion, not an injection: remove the
+    # R8: structural, so its poison is a deletion, not an injection: remove the
     # pre-send research audit and the gate must refuse to let the outbound copy ship.
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "dossier"
@@ -1662,7 +1662,7 @@ def selftest() -> int:
         h.expect("R8", "outbound copy with no pre-send research audit",
                  check_dossier(tmp))
 
-    # R9 — the résumé enters the gate. Inject a retired employer string into a copy of
+    # R9: the résumé enters the gate. Inject a retired employer string into a copy of
     # the fixture's resume.html and assert R9 fires. This is the guard that would catch
     # a retired employer name shipping logged-but-unexecuted.
     with tempfile.TemporaryDirectory() as td:
@@ -1675,10 +1675,10 @@ def selftest() -> int:
         h.expect("R9", "a retired-from-resume employer in resume.html",
                  check_dossier(tmp), "The resume is outside the gate again.")
 
-    # R0 — STRUCTURAL. Delete referrals.md: every application needs one, and every rule
+    # R0: STRUCTURAL. Delete referrals.md: every application needs one, and every rule
     # underneath it reads that file, so the run must also RECORD that they never ran
     # (that is what keeps the `checked:` banner from claiming coverage it does not
-    # have — the gate lying about itself).
+    # have: the gate lying about itself).
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td) / "dossier"
         shutil.copytree(real, tmp)
@@ -1689,7 +1689,7 @@ def selftest() -> int:
                       set(_RULES_SKIPPED) >= {"R1", "R2", "R7"},
                       f"_RULES_SKIPPED was {_RULES_SKIPPED!r}; the banner would claim coverage it lacks.")
 
-    # R7 — DEFAULT DENY. A person section carrying a message but no sourced quotation
+    # R7: DEFAULT DENY. A person section carrying a message but no sourced quotation
     # and no OPERATOR-VERIFY line must be refused: you only cold-message someone
     # because you claim to know something about them.
     with tempfile.TemporaryDirectory() as td:
@@ -1698,7 +1698,7 @@ def selftest() -> int:
         ref = tmp / "referrals.md"
         t = ref.read_text(encoding="utf-8").replace(
             "## The messages",
-            "## The messages\n\n### Casey Nolan — Staff Designer\n\n"
+            "## The messages\n\n### Casey Nolan, Staff Designer\n\n"
             "> Hi Casey, I applied to the Design Lead role and would value your read on it.\n", 1)
         ref.write_text(t, encoding="utf-8")
         h.expect("R7", "a person section with a message, no sourced quote and no OPERATOR-VERIFY",
@@ -1729,7 +1729,7 @@ def selftest() -> int:
     # gate gets disabled, and a disabled gate catches nothing at all.
     ownership_negatives = [
         # 1. Quoting the POSTING, attributed to the posting. The posting is the RIGHT
-        #    source for it, so R1 must stay quiet — this is the line between the
+        #    source for it, so R1 must stay quiet: this is the line between the
         #    ownership check and cargo-culting it.
         ("R1", "a posting quote openly attributed to the job posting is NOT flagged",
          '> Hi Jordan, Acme\'s posting says "thinks like a builder, ships like an engineer, and '
@@ -1750,7 +1750,7 @@ def selftest() -> int:
         with tempfile.TemporaryDirectory() as td:
             h.refuse(rule, name, check_dossier(_poisoned(real, Path(td) / "dossier", good)))
 
-    # ── R12 NEGATIVES — the anchor is the whole point, so it is tested from both sides. ──
+    # ── R12 NEGATIVES: the anchor is the whole point, so it is tested from both sides. ──
     # A blanket ban on "developer tools" would red every honest dossier applying to an
     # actual developer-tools company, get switched off, and catch nothing. These prove
     # R12 fires ONLY on your own employer/domain, never on a TRUE statement about a
@@ -1762,7 +1762,7 @@ def selftest() -> int:
          '> Hi Jordan, Acme Corp\'s own product is exactly the kind of developer-tools platform '
          'I want to design for.'),
         # 2. The CORRECTED framing. "Globex" is present, but next to its grounded
-        #    descriptor, not "terminal" or "developer tools" — this is what the fix
+        #    descriptor, not "terminal" or "developer tools": this is what the fix
         #    writes, so it must pass or the gate would block its own remedy.
         ("R12", "the corrected 'Globex, a seed-stage veterinary-software startup' framing is NOT flagged",
          '> At Globex, a seed-stage veterinary-software startup, I was the design lead: I built the '
@@ -1773,7 +1773,7 @@ def selftest() -> int:
             h.refuse(rule, name, check_dossier(_poisoned(real, Path(td) / "dossier", good)))
 
     # A FOURTH ownership negative, guarding the acceptance path the baseline fixture
-    # does not exercise on its own — which is exactly why it would rot unnoticed. A
+    # does not exercise on its own, which is exactly why it would rot unnoticed. A
     # SHARED source (a team page, a multi-quote article) is named after the COMPANY,
     # so neither the filename nor the header names the person; ownership has to
     # resolve through their name sitting beside the quotation INSIDE the file. If that
@@ -1794,7 +1794,7 @@ def selftest() -> int:
         ref = tmp / "referrals.md"
         t = ref.read_text(encoding="utf-8").replace(
             "## The messages",
-            "## The messages\n\n### Ada Whitfield — Staff Design Engineer\n\n"
+            "## The messages\n\n### Ada Whitfield, Staff Design Engineer\n\n"
             '> Hi Ada, you said "we ship the front end ourselves and hold the bar in code" '
             "and that is how I work too.\n", 1)
         ref.write_text(t, encoding="utf-8")
@@ -1804,7 +1804,7 @@ def selftest() -> int:
 
     # HOLE 2, second half: a gate that turns itself off must SAY SO. Assert the
     # annotation-silenced blocks are named and counted on the NOT-checked line, not
-    # merely handled internally — an unreported suppression is the same failure in a
+    # merely handled internally; an unreported suppression is the same failure in a
     # quieter coat, because the PASS is what gets trusted.
     with tempfile.TemporaryDirectory() as td:
         tmp = _poisoned(real, Path(td) / "dossier",
@@ -1925,21 +1925,21 @@ def selftest() -> int:
                        key=lambda r: int(r[1:]))
     covered_ok = not uncovered
     if not covered_ok:
-        print("\n  🔴 RULE COVERAGE FAILURE — these rules are IMPLEMENTED but NO positive")
+        print("\n  🔴 RULE COVERAGE FAILURE: these rules are IMPLEMENTED but NO positive")
         print("     selftest case fires them, so nothing here proves they still work:")
         for r in uncovered:
-            print(f"       · {r}  — add a case to SELFTEST_CASES (or a structural case) that MUST trip {r}")
+            print(f"       · {r}: add a case to SELFTEST_CASES (or a structural case) that MUST trip {r}")
         print("     A rule with no case is a rule that can be neutered silently.")
     floor_ok = h.total >= MIN_SELFTEST_CASES
     if not floor_ok:
-        print(f"\n  🔴 CASE FLOOR FAILURE — {h.total} cases ran, but MIN_SELFTEST_CASES is "
+        print(f"\n  🔴 CASE FLOOR FAILURE: {h.total} cases ran, but MIN_SELFTEST_CASES is "
               f"{MIN_SELFTEST_CASES}.")
         print("     Cases were deleted, or a fixture dossier vanished. Never lower the floor")
         print("     to make a run pass: shrinking the denominator is the exact failure this")
         print("     assertion exists to prevent. Restore the case or the fixture.")
 
     ok = h.passed == h.total and clean and covered_ok and floor_ok
-    print(f"\n{'SELFTEST OK' if ok else 'SELFTEST FAILED'} — {h.passed}/{h.total} cases, "
+    print(f"\n{'SELFTEST OK' if ok else 'SELFTEST FAILED'}: {h.passed}/{h.total} cases, "
           f"{len(h.covered)}/{len(implemented_rules())} rules exercised by a positive case, "
           f"live dossier {'clean' if clean else 'DIRTY'}")
     return 0 if ok else 1
@@ -1959,7 +1959,7 @@ def main() -> int:
     suppressed = list(_SUPPRESSED)          # snapshot: check_dossier clears it on entry
     srcs = load_sources(folder).names
 
-    print(f"verify_claims — {folder.name}")
+    print(f"verify_claims: {folder.name}")
     print(f"  sources on disk: {len(srcs)} ({', '.join(srcs) if srcs else 'NONE'})\n")
 
     # The verdict travels with its scope. "Gate-green" must never be read as
@@ -1968,7 +1968,7 @@ def main() -> int:
     # cannot silently rot apart from the rules.
     rules = re.findall(r"^\s{2}(R\d+)\s+([A-Z-]+(?: [A-Z-]+)*?)(?=\s{2}|\s[^A-Z])", __doc__ or "", re.M)
     # Subtract the rules that were structurally PREVENTED from running. Listing a rule as
-    # "checked" when R0 short-circuited before it is the gate lying about its own coverage —
+    # "checked" when R0 short-circuited before it is the gate lying about its own coverage:
     # the same defect the NOT-checked line exists to prevent, committed by the NOT-checked line.
     skipped = set(_RULES_SKIPPED)
     checked = ", ".join(f"{rid} {label.strip().lower()}" for rid, label in rules
@@ -2005,13 +2005,13 @@ def main() -> int:
         if len(suppressed) > 6:
             detail += f" ; …and {len(suppressed) - 6} more"
         not_checked = (f"🔇 {len(suppressed)} block(s) partially silenced by an annotation: "
-                       f"{detail}. Every OTHER rule still ran on them — including R3/R6/R10, "
+                       f"{detail}. Every OTHER rule still ran on them, including R3/R6/R10, "
                        f"the truth alarms. Read those blocks yourself for what their "
                        f"annotation covers. · " + not_checked)
     if skipped:
         skipped_labels = ", ".join(f"{rid} {label.strip().lower()}" for rid, label in rules
                                    if rid in skipped)
-        not_checked = (f"🔴 {skipped_labels} — these NEVER RAN: R0 failed on structure and every "
+        not_checked = (f"🔴 {skipped_labels}: these NEVER RAN: R0 failed on structure and every "
                        f"rule below it reads the file that is missing. A green line above does not "
                        f"cover them. · " + not_checked)
     scope_line = f"  checked: {checked}\n  NOT checked: {not_checked}\n"
@@ -2022,7 +2022,7 @@ def main() -> int:
         print("PASS is not send-ready by itself: the NOT-checked surfaces above are yours.")
         return 0
 
-    print(f"FAIL — {len(findings)} finding(s). Nothing ships until these are zero.\n")
+    print(f"FAIL: {len(findings)} finding(s). Nothing ships until these are zero.\n")
     print(scope_line)
     for f in findings:
         print(f); print()

@@ -3,7 +3,7 @@
 Immutable, append-only. Each ADR is a locked decision; supersede it with a new one, never rewrite it.
 
 **Status values:** `Accepted` (locked, currently in force) · `Accepted (partial-supersession note)`
-(still locked, but a later ADR narrowed or corrected one specific part — noted inline) · `Superseded
+(still locked, but a later ADR narrowed or corrected one specific part, noted inline) · `Superseded
 by ADR-NNNN` (fully replaced by a later ADR, kept for history, no longer in force).
 
 | ADR | Title | Status | Date |

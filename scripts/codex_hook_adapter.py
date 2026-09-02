@@ -3,7 +3,7 @@
 
 The incident-earned repository checks remain in scripts/hooks.py. This file
 only translates Codex hook payloads, optionally supplies and verifies a
-configurable response timestamp (off by default — see config.py), and blocks
+configurable response timestamp (off by default; see config.py), and blocks
 command shapes that Claude's local settings already prohibited.
 
 Modes:
@@ -86,7 +86,7 @@ def load_expected_stamp(data: dict) -> str | None:
 
 def timestamp_inject(data: dict) -> dict | None:
     if not RESPONSE_TIMESTAMP_TZ:
-        return None  # off by default — set config.RESPONSE_TIMESTAMP_TZ to enable
+        return None  # off by default; set config.RESPONSE_TIMESTAMP_TZ to enable
     stamp = now_stamp()
     save_expected_stamp(data, stamp)
     context = (
@@ -113,7 +113,7 @@ def normalized_first_line(message: str) -> str:
 
 def timestamp_stop(data: dict) -> dict | None:
     if not RESPONSE_TIMESTAMP_TZ:
-        return None  # off by default — set config.RESPONSE_TIMESTAMP_TZ to enable
+        return None  # off by default; set config.RESPONSE_TIMESTAMP_TZ to enable
     if data.get("stop_hook_active"):
         return None
     message = data.get("last_assistant_message")
@@ -237,7 +237,7 @@ def selftest() -> int:
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     passed = all(ok for _, ok in checks)
-    print(f"SELFTEST {'OK' if passed else 'FAILED'} — {sum(ok for _, ok in checks)}/{len(checks)}")
+    print(f"SELFTEST {'OK' if passed else 'FAILED'}: {sum(ok for _, ok in checks)}/{len(checks)}")
     return 0 if passed else 1
 
 

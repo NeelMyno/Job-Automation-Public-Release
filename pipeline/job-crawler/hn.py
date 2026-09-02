@@ -3,23 +3,23 @@
 HN "Who's Hiring" collector.
 
 The monthly "Ask HN: Who is hiring?" thread is a high-signal, FREE source for roles that never
-reach an ATS board — especially early-stage/founding roles. This module finds the LATEST official
+reach an ATS board, especially early-stage/founding roles. This module finds the LATEST official
 thread and turns each top-level comment into one candidate posting, in the SAME record shape the
 ATS fetchers in crawl.py return, so crawl.py can run them through the identical filters.yaml gates
 (title, reject patterns, US-location, freshness).
 
 Source: the free Algolia Hacker News Search API (https://hn.algolia.com/api). $0, no key,
-no login, no scraping — the same public JSON the HN site itself reads.
+no login, no scraping: the same public JSON the HN site itself reads.
 
 HONEST BY CONSTRUCTION (mirrors crawl.py): this module only SELECTS real comments and copies
 their real fields. It never invents a company, role, or location. HN comments are freeform, so
-a field that isn't cleanly present is returned empty (crawl.py renders that as an em-dash) —
-never guessed. It filters CONSERVATIVELY: a comment is kept only if a title from your own
+a field that isn't cleanly present is returned empty (crawl.py renders that as an em-dash),
+not guessed. It filters CONSERVATIVELY: a comment is kept only if a title from your own
 `include_titles` list appears in its header (the role line), not merely because a related word
 shows up somewhere in the body.
 
 Standalone module: no import of crawl.py (avoids a cycle). It reuses crawl.py's *vocabulary*
-by taking the loaded filters `F` as an argument (include_titles, us_markers, location_block) —
+by taking the loaded filters `F` as an argument (include_titles, us_markers, location_block),
 so all title/geography knowledge stays in the one place, filters.yaml.
 """
 import json, re, html, urllib.request, urllib.error
@@ -153,7 +153,7 @@ def _looks_location(token, F):
 
 
 def _is_city_state(token):
-    """'Blaine, WA' / 'Austin, TX' style — used to detect a location sitting in slot 0 (so the
+    """'Blaine, WA' / 'Austin, TX' style, used to detect a location sitting in slot 0 (so the
     company is the next token), while NOT mistaking 'Foo, Inc.' for a location."""
     t = token.strip()
     if "," not in t:
@@ -166,13 +166,13 @@ def _is_city_state(token):
 
 def _company_and_location(tokens, role_token, F):
     """Best-effort, honest company + location from the header tokens. Returns ("" , "") shapes
-    that crawl.py renders as em-dashes when a field can't be determined — never a guess."""
+    that crawl.py renders as em-dashes when a field can't be determined, never a guess."""
     if not tokens:
         return "", ""
     company = ""
     role_is_first = bool(role_token) and tokens and role_token == tokens[0]
     if role_is_first:
-        # "Founding Designer at Acme | Remote" — pull the company after 'at'/'@' if present,
+        # "Founding Designer at Acme | Remote": pull the company after 'at'/'@' if present,
         # else the next non-location token; otherwise leave unknown (don't call the role a company).
         m = re.search(r"\b(?:at|@)\s+(.+)$", tokens[0], re.I)
         if m:
@@ -238,7 +238,7 @@ def parse_comment(c, F):
 def collect(F, thread=None):
     """Find the latest thread, parse its top-level comments into matching postings.
     Returns (postings, meta). `meta` carries the thread provenance for the crawl JSON output.
-    Never raises for an empty/absent thread — returns ([], meta) so the ATS crawl is unaffected."""
+    Never raises for an empty/absent thread: returns ([], meta) so the ATS crawl is unaffected."""
     th = thread or find_latest_thread()
     meta = dict(thread_id=None, thread_title=None, thread_url=None,
                 raw_comments=0, matched_postings=0)

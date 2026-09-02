@@ -18,7 +18,7 @@ authoritative (it asks the same public board API the crawler reads); the HTTP ch
 what the fetched page shows.
 
 Clean-room: original Python, stdlib only. It REUSES crawl.py's helpers (`fetch`, `strip_html`,
-`UA`) and the same three public ATS endpoints — no third-party code, no new dependencies, no
+`UA`) and the same three public ATS endpoints: no third-party code, no new dependencies, no
 login, no scraping, and no automating any auth-walled platform (those leads return `uncertain`).
 
 Two check strategies, picked automatically:
@@ -43,13 +43,13 @@ import urllib.request, urllib.error
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 
-import crawl  # sibling module (same dir, on sys.path): reuse fetch(), strip_html(), UA — clean-room
+import crawl  # sibling module (same dir, on sys.path): reuse fetch(), strip_html(), UA (clean-room)
 
 HERE = Path(__file__).resolve().parent
 TRACKER = HERE.parent / "tracker.html"          # pipeline/tracker.html
 UA = crawl.UA
 
-# The three public ATS board endpoints — IDENTICAL to crawl.py's fetchers (single source of truth
+# The three public ATS board endpoints are IDENTICAL to crawl.py's fetchers (single source of truth
 # for the API shape; kept here as named templates so the ATS check is self-documenting).
 GH_API = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
 ASHBY_API = "https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
@@ -78,7 +78,7 @@ WEAK_CLOSED = (
     "position filled", "role is closed", "opening is closed", "has expired", "now closed",
 )
 
-# JD-shaped sections — presence of the apply affordance AND >=2 of these on a substantial page is
+# JD-shaped sections: presence of the apply affordance AND >=2 of these on a substantial page is
 # positive evidence the page really is a live job description (a careers INDEX has none of these).
 JD_SECTIONS = (
     "responsibilities", "qualifications", "what you'll do", "what you will do", "about the role",
@@ -88,7 +88,7 @@ JD_SECTIONS = (
     "job description", "in this role", "what you'll bring", "our team",
 )
 
-# Generic careers-index / site-root path segments — a redirect that lands on one of these (with no
+# Generic careers-index / site-root path segments. A redirect that lands on one of these (with no
 # job id in the final URL) means the specific posting was pulled and the board bounced us home.
 CAREERS_WORDS = {
     "careers", "career", "jobs", "job", "openings", "opening", "opportunities", "positions",
@@ -100,13 +100,13 @@ CAREERS_WORDS = {
 GH_ID_RE = re.compile(r"(?:gh_jid=|token=|/jobs/)(\d{4,})")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
-# Hosts we cannot honestly verify by fetching — always return `uncertain`, never a guess. Add any
+# Hosts we cannot honestly verify by fetching: always return `uncertain`, never a guess. Add any
 # other login-walled platform you rely on to this tuple rather than trying to automate it.
 AUTH_WALLED_HOSTS = ("linkedin.com",)
 
 
 # ============================================================================================
-# 1) THE PURE CLASSIFIER  (no network — feed it strings; this is what test_liveness.py exercises)
+# 1) THE PURE CLASSIFIER  (no network: feed it strings; this is what test_liveness.py exercises)
 # ============================================================================================
 def _host(url):
     try:
@@ -126,7 +126,7 @@ def _has_job_id(url):
 
 
 def _norm(url):
-    """host + path (lowercased, trailing slash dropped) — for detecting a real redirect."""
+    """host + path (lowercased, trailing slash dropped), for detecting a real redirect."""
     p = urlparse(url or "")
     return (p.hostname or "").lower(), (p.path or "/").rstrip("/").lower()
 
@@ -147,7 +147,7 @@ def _looks_like_index(url):
 def _looks_like_jd(text):
     """Positive evidence the page IS a live job description: an apply affordance + >=2 named JD
     sections. The section requirement is the real signal (a JS shell / nav-only page has none);
-    the small length floor just rejects a near-empty body. Conservative on purpose — anything
+    the small length floor just rejects a near-empty body. Conservative on purpose: anything
     short of this is 'uncertain', never 'live'."""
     if len(text) < 300:
         return False
@@ -198,11 +198,11 @@ def classify(status_code, final_url, body_text, *, original_url):
     if _looks_like_jd(text):
         return "live", "page reads as a live job description"
 
-    # 7. inconclusive — the SAFE default (a lone weak word, a thin page, a JS shell, etc.)
+    # 7. inconclusive: the SAFE default (a lone weak word, a thin page, a JS shell, etc.)
     if weak:
         return "uncertain", "only a weak signal %r (not conclusive)" % weak[0]
     if len(text) < 400:
-        return "uncertain", "thin/empty page — no job content and no closed-signal"
+        return "uncertain", "thin/empty page: no job content and no closed-signal"
     return "uncertain", "no apply affordance and no closed-signal"
 
 
@@ -227,7 +227,7 @@ def detect_ats(url):
 
 def job_id_from_url(url, ats):
     """The posting's own id from the URL (gh_jid / token / /jobs/<n> for Greenhouse; the UUID for
-    Ashby & Lever). None if it cannot be read — the caller then falls back to an HTTP check."""
+    Ashby & Lever). None if it cannot be read; the caller then falls back to an HTTP check."""
     if ats == "greenhouse":
         m = GH_ID_RE.search(url or "")
         return m.group(1) if m else None
@@ -237,7 +237,7 @@ def job_id_from_url(url, ats):
 
 def slug_from_url(url, ats):
     """The board slug from the URL path, when present. Company-hosted Greenhouse pages
-    (stripe.com/...?gh_jid=) do NOT carry the slug — that is resolved from the company via
+    (stripe.com/...?gh_jid=) do NOT carry the slug; that is resolved from the company via
     boards.yaml instead (see resolve_target)."""
     p = urlparse(url or "")
     h = _host(url)
@@ -292,17 +292,17 @@ def resolve_target(url, company=None, boards_map=None):
 
 
 # ============================================================================================
-# 3) THE CHECKS  (ATS board API — authoritative; and the HTTP fallback)
+# 3) THE CHECKS  (ATS board API, authoritative; and the HTTP fallback)
 # ============================================================================================
 def _fetch_ats_ids(ats, slug, timeout=25):
     """Return (all_ids, listed_ids, error). ids are strings, lowercased for uuids. On any fetch
-    error return ([], [], reason) so the caller reports `uncertain` — never `dead` off a failure."""
+    error return ([], [], reason) so the caller reports `uncertain`, never `dead`, off a failure."""
     api = {"greenhouse": GH_API, "ashby": ASHBY_API, "lever": LEVER_API}[ats].format(slug=slug)
     try:
         d = crawl.fetch(api, timeout=timeout)
     except urllib.error.HTTPError as e:
         note = "board '%s' not found (HTTP 404)" % slug if e.code == 404 else "board HTTP %s" % e.code
-        return [], [], "%s %s — can't verify" % (ats, note)
+        return [], [], "%s %s: can't verify" % (ats, note)
     except Exception as e:
         return [], [], "%s board fetch failed: %s" % (ats, type(e).__name__)
 
@@ -352,11 +352,11 @@ def check_ats(ats, slug, job_id, cache=None, timeout=25):
         if jid in listed_ids:
             return "live", "listed on the %s board" % label
         if jid in all_ids:
-            return "dead", "present but UNLISTED on the %s board — not publicly open" % label
-        return "dead", "absent from the %s board — posting pulled or filled" % label
+            return "dead", "present but UNLISTED on the %s board (not publicly open)" % label
+        return "dead", "absent from the %s board (posting pulled or filled)" % label
     if jid in all_ids:
         return "live", "present on the %s board" % label
-    return "dead", "absent from the %s board — posting pulled or filled" % label
+    return "dead", "absent from the %s board (posting pulled or filled)" % label
 
 
 def http_probe(url, timeout=20, max_bytes=800_000):
@@ -385,10 +385,10 @@ def http_probe(url, timeout=20, max_bytes=800_000):
 def check_url(url, company=None, boards_map=None, cache=None, timeout=20):
     """Top-level single-URL check -> (verdict, reason). Picks the ATS or HTTP strategy itself."""
     if not url:
-        return "uncertain", "no URL on this lead — nothing to check"
+        return "uncertain", "no URL on this lead: nothing to check"
     host = _host(url)
     if any(host == h or host.endswith("." + h) for h in AUTH_WALLED_HOSTS):
-        return "uncertain", "an auth-walled platform — verify by hand"
+        return "uncertain", "an auth-walled platform: verify by hand"
     tgt = resolve_target(url, company, boards_map)
     if tgt:
         return check_ats(*tgt, cache=cache, timeout=max(timeout, 25))
@@ -487,11 +487,11 @@ def rewrite_tracker(text, updates, checked):
     only the named row lines change; structure (markers, row count, NETWORK array) must survive or
     NOTHING is written and the original text is returned with an error note.
 
-    This is a pure text function — main() decides whether to write the result to disk."""
+    This is a pure text function; main() decides whether to write the result to disk."""
     lines = text.split("\n")
     block = find_app_block(lines)
     if not block:
-        return text, "APPLICATIONS block not found — NOT written"
+        return text, "APPLICATIONS block not found: NOT written"
 
     before_co = text.count('co:"')
     new_text = text
@@ -499,17 +499,17 @@ def rewrite_tracker(text, updates, checked):
     for idx, verdict in updates.items():
         old = lines[idx]
         if not _ROW_RE.match(old):
-            return text, "line %d is not a row — NOT written" % idx
+            return text, "line %d is not a row: NOT written" % idx
         new = set_liveness_on_line(old, verdict, checked)
         if new is None:
-            return text, "could not safely rewrite line %d — NOT written" % idx
+            return text, "could not safely rewrite line %d: NOT written" % idx
         # per-row safety: the rewritten row must carry EXACTLY one of each field (no duplication)
         if new.count('liveness:"') != 1 or new.count('checked:"') != 1:
-            return text, "line %d field-count off — NOT written" % idx
+            return text, "line %d field-count off: NOT written" % idx
         if new == old:
             continue                                    # already current (idempotent re-run)
         if new_text.count(old) != 1:
-            return text, "row line not unique (line %d) — NOT written" % idx
+            return text, "row line not unique (line %d): NOT written" % idx
         new_text = new_text.replace(old, new, 1)
         changed += 1
 
@@ -523,9 +523,9 @@ def rewrite_tracker(text, updates, checked):
     }
     bad = [name for name, ok in checks.items() if not ok]
     if bad:
-        return text, "post-rewrite validation FAILED (%s) — NOT written" % "; ".join(bad)
+        return text, "post-rewrite validation FAILED (%s): NOT written" % "; ".join(bad)
     if changed == 0:
-        return text, "already current — no rows needed changing"
+        return text, "already current: no rows needed changing"
     return new_text, "ok: %d row(s) annotated" % changed
 
 
@@ -585,9 +585,9 @@ def run_tracker(args):
             TRACKER.write_text(new_text)
             print("\n  tracker.html: %s (checked=%s)" % (note, checked_date))
         elif note.startswith("already current"):
-            print("\n  tracker.html: %s — nothing to write" % note)
+            print("\n  tracker.html: %s (nothing to write)" % note)
         else:
-            print("\n  tracker.html NOT modified — %s" % note, file=sys.stderr)
+            print("\n  tracker.html NOT modified: %s" % note, file=sys.stderr)
             return 1
     else:
         print("\n  (re-run with --write to stamp liveness/checked onto these rows)")

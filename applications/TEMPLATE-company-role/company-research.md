@@ -1,4 +1,4 @@
-# Company research — Company
+# Company research: Company
 
 [One-line summary + which stored sources everything traces to]
 
@@ -8,7 +8,7 @@
 
 ## Money + size / Stage & funding
 
-[rounds, amounts, dates, named investors, headcount — cite sources]
+[rounds, amounts, dates, named investors, headcount; cite sources]
 
 ## Culture
 
@@ -20,7 +20,7 @@
 
 ## The honest gaps
 
-<!-- Present only when a real one exists — surfaced, never hidden. -->
+<!-- Present only when a real one exists (surfaced, never hidden). -->
 
 ## People / who this role reports to
 

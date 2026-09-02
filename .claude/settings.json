@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
 
   "_why": [
-    "A rule that lives only in a doc, with nothing enforcing it, eventually gets violated — someone",
+    "A rule that lives only in a doc, with nothing enforcing it, eventually gets violated, since someone",
     "has to remember to run the check every time, and eventually no one does. So the checks below",
     "run from the harness itself (SessionStart / PostToolUse / Stop), never from an agent choosing",
     "to type a command. Each hook fails OPEN (a crash never blocks the session) and is scoped to",

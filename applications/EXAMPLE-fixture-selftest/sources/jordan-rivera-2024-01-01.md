@@ -1,6 +1,6 @@
 ---
 url: https://example.com/social/jordan-rivera/posts/123
-title: Jordan Rivera — comment on a meetup recap post (synthetic)
+title: Jordan Rivera, comment on a meetup recap post (synthetic)
 fetched: 2024-01-01
 method: fixture, invented for the selftest
 ---

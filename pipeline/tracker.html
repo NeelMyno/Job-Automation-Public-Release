@@ -252,7 +252,7 @@ const NET_STATUS = {
   active:   {label:"In touch",   c:"var(--status-live)", live:true},
   passed:   {label:"Closed",     c:"var(--status-muted)"},
 };
-// Fit rendering lives in parseFit()/fitChip() below — a `fit` value is a rich
+// Fit rendering lives in parseFit()/fitChip() below. A `fit` value is a rich
 // string ("strong 9/10 - reason"), not one of three fixed codes, so it is parsed.
 
 const el=s=>document.querySelector(s);
@@ -302,7 +302,7 @@ function fitChip(raw){
     `<span class="lbl">${esc(f.label)}</span>${f.score?`<span class="score">${esc(f.score)}</span>`:""}</span>`;
 }
 // Make URLs in drawer prose clickable. esc() runs FIRST, so we only ever wrap
-// already-escaped text — no raw markup can slip through.
+// already-escaped text; no raw markup can slip through.
 function linkify(raw){
   return esc(raw).replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]])/g,
     u=>`<a href="${u}" target="_blank" rel="noopener">${u}</a>`);

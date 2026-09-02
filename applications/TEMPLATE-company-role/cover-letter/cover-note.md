@@ -1,4 +1,4 @@
-# Cover note — Company, Role Title
+# Cover note: Company, Role Title
 
 Built [when/how, from which JD + facts files]. Style-check status: [ ] `voice_check.py` clean.
 
@@ -8,19 +8,19 @@ Built [when/how, from which JD + facts files]. Style-check status: [ ] `voice_ch
 ---
 Hi,
 
-[Paragraph 1 — a JD-matched open: reference something specific from the posting.]
+[Paragraph 1 is a JD-matched open: reference something specific from the posting.]
 
-[Paragraph 2 — an earned opinion + 1-2 real builds mapped to the JD's pillars, named honestly, no
-counted metrics in prose.]
+[Paragraph 2 is an earned opinion plus 1-2 real builds mapped to the JD's pillars, named honestly,
+no counted metrics in prose.]
 
-[Paragraph 3 — a live artifact link, availability, close.]
+[Paragraph 3 is a live artifact link, availability, close.]
 
 [Your name]
 ---
 
 ## Form-answer honesty block
 
-No work-authorization claims appear in the letter above — those answers live only in the form,
+No work-authorization claims appear in the letter above; those answers live only in the form,
 sourced from `knowledge-base/12-application-answers.md` §3.
 
 ## Why these specifics (JD-to-line map)
@@ -39,4 +39,4 @@ sourced from `knowledge-base/12-application-answers.md` §3.
 
 ## Before sending
 
-[final reconciliation flags — e.g. inconsistent info across documents in the same bundle]
+[final reconciliation flags, e.g. inconsistent info across documents in the same bundle]

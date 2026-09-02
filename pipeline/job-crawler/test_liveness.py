@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Offline unit tests for liveness.py — NO network calls. Every input is a synthetic string fed
+Offline unit tests for liveness.py: NO network calls. Every input is a synthetic string fed
 straight to the pure classifier / resolver / writer helpers. The network-touching layers
 (check_ats, http_probe, _fetch_ats_ids) are intentionally NOT exercised here; they are verified
 separately against the live boards.
@@ -68,7 +68,7 @@ class TestClassify(unittest.TestCase):
         self.assertIn("closed-signal", r)
 
     def test_position_filled_is_dead(self):
-        v, _ = self.c(200, "<div>This position has been filled — thank you for your interest.</div>")
+        v, _ = self.c(200, "<div>This position has been filled. Thank you for your interest.</div>")
         self.assertEqual(v, "dead")
 
     def test_live_jd_is_live(self):

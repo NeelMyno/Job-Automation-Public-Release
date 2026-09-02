@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""resume_gate.py — a rendered résumé is ONE page, and it FILLS that page.
+"""resume_gate.py: a rendered résumé is ONE page, and it FILLS that page.
 
 WHY THIS EXISTS
 ---------------
-Empty space on a one-page résumé is not restraint, it's unused evidence — and the failure mode
+Empty space on a one-page résumé is not restraint. It's unused evidence, and the failure mode
 that motivated this gate was a résumé that dropped the current employer entirely, listing it only
 as a line inside a projects section, so its Experience section read as though the person hadn't
 worked in years. Nothing mechanical caught that until this gate existed.
@@ -16,7 +16,7 @@ WHAT THIS CHECKS
      knowledge-base/07-master-resume.md must appear on the page, and the CURRENT one must sit
      beside a still-open date range ("Present") rather than only as a project credit.
 
-     Detection is by date proximity, never by section order — résumé variants order their
+     Detection is by date proximity, never by section order: résumé variants order their
      sections differently and an order-based check produces false positives when Education
      happens to sit above Experience in a particular layout.
 
@@ -41,7 +41,7 @@ REPO = Path(__file__).resolve().parent.parent
 MIN_FILL = 88.0          # percent of page height the last line of text must reach
 MAX_PAGES = 1
 
-# "Listed as employment" is detected by PROXIMITY TO A CURRENT DATE RANGE, not by section order —
+# "Listed as employment" is detected by PROXIMITY TO A CURRENT DATE RANGE, not by section order:
 # a cut-at-the-next-heading approach false-positives whenever Education happens to sit above
 # Experience in a given layout. A date range's position doesn't move with the layout.
 PRESENT = re.compile(r"\bPresent\b", re.I)
@@ -56,7 +56,7 @@ class Finding:
 def _parse_required_employment(text: str) -> list[tuple[str, str, bool]]:
     """Parse [(employer, start_date, is_current), ...] out of a WORK EXPERIENCE section's text.
 
-    Only top-level `**Employer — Title** — dates` lines count — a blockquote or bullet line
+    Only top-level `**Employer - Title** - dates` lines count; a blockquote or bullet line
     doesn't, which is what keeps a footnote about a *retired* employer claim from being read back
     in as a live requirement.
     """
@@ -92,7 +92,7 @@ def _parse_canonical_facts(text: str) -> dict[str, list[tuple[str, str]]]:
             continue
         # Lines carry up to three pipe-separated fields: key | value | human note. Splitting on
         # only the first pipe swallows the note into the value and fails every résumé, including
-        # a correctly-written one — a bug the selftest below pins permanently.
+        # a correctly-written one. That bug is pinned permanently by the selftest below.
         parts = [x.strip() for x in rest.split("|")]
         key = parts[0] if parts else ""
         val = parts[1] if len(parts) > 1 else ""
@@ -102,7 +102,7 @@ def _parse_canonical_facts(text: str) -> dict[str, list[tuple[str, str]]]:
 
 
 def required_employment() -> list[tuple[str, str, bool]]:
-    """The production entry point — always reads the real knowledge-base file.
+    """The production entry point: always reads the real knowledge-base file.
 
     Never hardcoded: when the user changes jobs, this gate follows on the next KB edit with no
     code change.
@@ -115,7 +115,7 @@ def required_employment() -> list[tuple[str, str, bool]]:
 
 
 def canonical_facts() -> dict[str, list[tuple[str, str]]]:
-    """The production entry point — always reads the real knowledge-base file."""
+    """The production entry point: always reads the real knowledge-base file."""
     try:
         return _parse_canonical_facts((REPO / "knowledge-base" / "07-master-resume.md").read_text())
     except OSError:
@@ -125,8 +125,8 @@ def canonical_facts() -> dict[str, list[tuple[str, str]]]:
 def _loose(token: str) -> str:
     """A regex for `token` that tolerates true spellings of the same fact.
 
-    "1070" (no thousands comma), "April 2025" (month spelled out), and "Apr 2025 – Current" are
-    all the same fact as "1,070" / "Apr 2025" / "Apr 2025 – Present" — a gate that fails honest
+    "1070" (no thousands comma), "April 2025" (month spelled out), and "Apr 2025 - Current" are
+    all the same fact as "1,070" / "Apr 2025" / "Apr 2025 - Present". A gate that fails honest
     copy trains people to ignore it, which costs more than the defect it was meant to catch.
     """
     MONTHS = {"Jan": "Jan(?:uary)?", "Feb": "Feb(?:ruary)?", "Mar": "Mar(?:ch)?",
@@ -168,7 +168,7 @@ def measure(pdf: Path) -> tuple[int, float, str] | None:
     blocks = [b for b in page.get_text("blocks") if b[4].strip()]
     if not blocks:
         return doc.page_count, 0.0, ""
-    # Fill is where the body ENDS, not where the lowest ink is — a naive max(bottom edge) reads a
+    # Fill is where the body ENDS, not where the lowest ink is: a naive max(bottom edge) reads a
     # near-empty page as full the moment a normal footer line sits near the bottom. Walk the
     # blocks top-down and stop at the first large vertical gap; content below a big hole isn't
     # part of the body.
@@ -202,7 +202,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
             f"(floor is {MIN_FILL:.0f}%). Empty space is unused evidence."
         )
 
-    # An empty required-employment list must fail LOUD, never read as "nothing wrong" — a KB
+    # An empty required-employment list must fail LOUD, never read as "nothing wrong": a KB
     # heading rename or an unreadable file must never silently disable this whole check.
     if required is None:
         required = required_employment()
@@ -210,7 +210,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
         problems.append(
             "the required-employment list is EMPTY, so the employment check did not run. "
             "knowledge-base/07-master-resume.md must contain a line exactly `### WORK EXPERIENCE` "
-            "followed by `**Employer — Title** — Mon YYYY – …` entries. Fix the KB; do not trust "
+            "followed by `**Employer - Title** - Mon YYYY - …` entries. Fix the KB; do not trust "
             "this résumé until this line disappears."
         )
 
@@ -236,7 +236,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
     except Exception:
         blocks = []
 
-    # A match inside the PROJECTS section does not count as employment — only the PROJECTS
+    # A match inside the PROJECTS section does not count as employment: only the PROJECTS
     # heading is used as the cut, never EDUCATION (cutting at EDUCATION false-positives whenever
     # a layout puts Education above Experience).
     _PROJ = re.compile(r"^\s*(SELECTED\s+PROJECTS|PROJECTS)\s*$", re.I | re.M)
@@ -259,9 +259,9 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
                 "unparseable, so none of your locked résumé decisions were checked. Restore the "
                 "```canonical-facts``` block before trusting this résumé."
             )
-        # Retired claims come from canon.py, the owner — never a second list here. Two lists is
+        # Retired claims come from canon.py, the owner; never a second list here. Two lists is
         # how a mismatch starts. canon scopes its rules by path prefix, so it must be handed a
-        # real repo-relative path — a bare "resume" string matches no scope and silently returns
+        # real repo-relative path: a bare "resume" string matches no scope and silently returns
         # zero findings.
         try:
             import canon as _canon
@@ -281,7 +281,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
                 problems.append(f"contains a retired string: \"{bad}\". {why}")
 
         # "email" / "portfolio" / "linkedin" have a genuinely universal shape, so they're checked
-        # by finding what's actually on the page and comparing it to the canonical value — this
+        # by finding what's actually on the page and comparing it to the canonical value, which
         # can catch a WRONG value, not just a missing one. "title" has no universal shape across
         # roles/industries, so it's checked as a direct presence test instead: is the canonical
         # title string found anywhere on the page? (A shape-based regex here would only ever
@@ -290,7 +290,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
             "email":     r"[\w.+-]+@[\w.-]+\.\w+",
             # (?<!@) and the negative lookbehind on the leading token stop this from matching the
             # DOMAIN half of an email address (e.g. "example.com" inside "you@example.com") as if
-            # it were a portfolio URL — an email and a portfolio are usually different domains, and
+            # it were a portfolio URL: an email and a portfolio are usually different domains, and
             # without this a résumé's own contact line produces a false "wrong portfolio" finding.
             "portfolio": r"(?<![\w.@-])[\w-]+\.(?:in|com|dev|design|io)\b(?!/)",
             "linkedin":  r"linkedin\.com/in/[\w-]+",
@@ -316,7 +316,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
                     f"the {label} on this résumé is {found[0]!r}, but the canonical value is "
                     f"{want!r} (knowledge-base/07-master-resume.md → canonical-facts)."
                 )
-        # A number rule fires on a WRONG COUNT, never on the bare noun — only when a quantity sits
+        # A number rule fires on a WRONG COUNT, never on the bare noun: only when a quantity sits
         # immediately before the noun is it graded, so ordinary prose mentioning the same noun
         # with no count claim never trips it.
         for trigger, required_value in facts["number"]:
@@ -342,7 +342,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
             if not _listed(emp, start):
                 if is_current:
                     problems.append(
-                        f"the CURRENT job ({emp}, {start} – Present) is not listed as employment. "
+                        f"the CURRENT job ({emp}, {start} - Present) is not listed as employment. "
                         f"It reads as though you last worked years ago."
                     )
                 else:
@@ -376,7 +376,7 @@ def check_html(src: Path) -> Finding | None:
             problems.append(
                 f"{'the CURRENT job' if is_current else 'employment entry'} MISSING: {emp} "
                 f"({start}). Copy resume/resume.html and apply only the delta noted in this "
-                f"dossier's tailoring.md — don't author a résumé from scratch per application."
+                f"dossier's tailoring.md. Don't author a résumé from scratch per application."
             )
     rel = str(src.relative_to(REPO)) if src.is_relative_to(REPO) else str(src)
     return Finding(rel, problems) if problems else None
@@ -385,7 +385,7 @@ def check_html(src: Path) -> Finding | None:
 def targets(args: list[str]) -> list[Path]:
     if not args:
         # EXAMPLE-*/TEMPLATE-* dossiers are scaffolding (verify_claims.py's own fixture, and the
-        # blank starter copy-from), never a real outbound résumé — sweeping them here would fail
+        # blank starter copy-from), never a real outbound résumé: sweeping them here would fail
         # this gate forever on every fresh clone, for a PDF nobody is about to send to an employer.
         real_dossier_pdfs = [
             p for p in REPO.glob("applications/*/resume/*.pdf")
@@ -404,15 +404,15 @@ def targets(args: list[str]) -> list[Path]:
 
 # ── selftest: a fully self-contained fictional fixture, independent of any real résumé ──
 #
-# Everything below is generated from FIXTURE_KB — never from the real knowledge-base/07 file —
+# Everything below is generated from FIXTURE_KB (never from the real knowledge-base/07 file),
 # so `--selftest` passes on a fresh clone before anyone has written a real résumé.
 FIXTURE_KB = """
 ### WORK EXPERIENCE
 
-**Acme Robotics — Staff Product Designer** — Mar 2024 – Present
+**Acme Robotics - Staff Product Designer** - Mar 2024 - Present
 - Led the redesign of the fleet-ops console end to end.
 
-**Globex Analytics — Senior Product Designer** — Jun 2021 – Feb 2024
+**Globex Analytics - Senior Product Designer** - Jun 2021 - Feb 2024
 - Shipped a self-serve dashboard used by every enterprise account.
 
 ## 🔴 CANONICAL FACTS
@@ -434,13 +434,13 @@ def selftest() -> int:
     try:
         import fitz
     except ImportError:
-        print("SELFTEST SKIPPED — PyMuPDF not available")
+        print("SELFTEST SKIPPED: PyMuPDF not available")
         return 0
 
     required = _parse_required_employment(FIXTURE_KB)
     facts = _parse_canonical_facts(FIXTURE_KB)
     if not required:
-        print("SELFTEST FAILED — the fixture's own WORK EXPERIENCE section didn't parse. This is a "
+        print("SELFTEST FAILED: the fixture's own WORK EXPERIENCE section didn't parse. This is a "
               "bug in this file, not in any real résumé.")
         return 1
     all_emps = [e for e, _, _ in required]
@@ -449,7 +449,7 @@ def selftest() -> int:
               education_name: str | None = None) -> Path:
         """employers=None means 'every required one'. Pass a subset to simulate a deletion.
 
-        education_name re-prints a name under EDUCATION with a DIFFERENT date — the decoy that
+        education_name re-prints a name under EDUCATION with a DIFFERENT date: the decoy that
         defeats a name-only presence check (the job must be gone from Experience even though the
         same string survives under Education).
         """
@@ -512,11 +512,11 @@ def selftest() -> int:
 
     ok &= _t("[facts] the fixture's canonical-facts block parses and is not empty",
              bool(facts["number"]) and bool(facts["exact"]),
-             "the fixture text at the top of this file failed to parse — a bug in this script, "
+             "the fixture text at the top of this file failed to parse: a bug in this script, "
              "not in any real résumé.")
 
     # ── END-TO-END: every rule must be provably ALIVE, on a synthetic fixture built entirely
-    # in this function — never on whatever resume.html the real user has (or hasn't) written yet.
+    # in this function, never on whatever resume.html the real user has (or hasn't) written yet.
     import subprocess
     FIXTURE_HTML = f"""<html><body style="font-size:10pt; line-height:1.4; font-family:sans-serif;">
 <h1>Jordan Rivera</h1>
@@ -525,7 +525,7 @@ def selftest() -> int:
 <p>Design systems, prototyping, accessibility, user research, cross-functional collaboration,
 information architecture, interaction design, usability testing, stakeholder communication.</p>
 <h2>EXPERIENCE</h2>
-<div class="job"><b>{current[0]} — Staff Product Designer</b> — Mar 2024 – Present
+<div class="job"><b>{current[0]} - Staff Product Designer</b> - Mar 2024 - Present
 <p>Shipped the fleet-ops console redesign, moving 1,070 DTCG tokens into one system.
 Led the cross-functional discovery process, ran usability testing with 12 operators, and
 partnered with engineering to ship the redesign in three phases. Reduced the average
@@ -533,7 +533,7 @@ time-to-complete a dispatch task by rebuilding the console's information archite
 real operator workflows rather than the underlying data model. Established a weekly design
 critique that raised the team's shipped-quality bar and cut rework by consolidating early
 feedback before engineering handoff.</p></div>
-<div class="job"><b>{past[0]} — Senior Product Designer</b> — Jun 2021 – Feb 2024
+<div class="job"><b>{past[0]} - Senior Product Designer</b> - Jun 2021 - Feb 2024
 <p>Shipped a self-serve dashboard used across every enterprise account. Owned the design system
 that kept the product consistent as the team scaled from 3 to 11 designers. Ran quarterly design
 reviews and mentored two junior designers through their first shipped features. Partnered
@@ -544,16 +544,16 @@ quarterly roadmap that closed the team's three largest usability gaps.</p></div>
 editing patterns for operational dashboards, built end to end over six weekends, from initial
 research through a working prototype tested with five real operators.</p>
 <h2>EDUCATION</h2>
-<p>State University — B.A. Design, 2017–2021.</p>
+<p>State University, B.A. Design, 2017-2021.</p>
 <h2>CERTIFICATIONS</h2>
-<p>Example Certification Body — Advanced Product Design, 2023. Second Certification Body —
+<p>Example Certification Body, Advanced Product Design, 2023. Second Certification Body,
 Accessibility Fundamentals, 2022.</p>
 <h2>ADDITIONAL</h2>
 <p>Conference speaker, regional design meetup (2023, 2024). Volunteer design mentor, community
-bootcamp program (2022–present).</p>
+bootcamp program (2022-present).</p>
 </body></html>"""
     # A regex-bounded removal of the WHOLE current-employer <div class="job">...</div> block, so
-    # this stays correct even as the bullet text above changes — a fragile exact-string .replace()
+    # this stays correct even as the bullet text above changes. A fragile exact-string .replace()
     # on that prose silently matched nothing the first time this fixture's copy was edited, which
     # made this case pass for the wrong reason (nothing was removed, so of course nothing fired).
     project_credit_html = re.sub(
@@ -654,7 +654,7 @@ bootcamp program (2022–present).</p>
             print("  · [e2e] fixture-based PDF checks  -> SKIPPED (weasyprint not available)")
 
     # A bonus, non-blocking check: if the user has already written a real résumé, prove it passes
-    # its own gate too. This never gates selftest pass/fail — a fresh clone has no résumé yet.
+    # its own gate too. This never gates selftest pass/fail: a fresh clone has no résumé yet.
     for candidate in sorted(REPO.glob("resume/*.pdf")):
         if candidate.is_file():
             f = check_pdf(candidate)
@@ -665,7 +665,7 @@ bootcamp program (2022–present).</p>
                 print(f"  · (bonus, non-blocking) your real résumé {candidate.name} passes this gate")
             break
 
-    print(f"\n{'SELFTEST OK' if ok else 'SELFTEST FAILED'} — {len(cases) + 1}+ cases, fully self-contained")
+    print(f"\n{'SELFTEST OK' if ok else 'SELFTEST FAILED'}: {len(cases) + 1}+ cases, fully self-contained")
     return 0 if ok else 1
 
 
@@ -674,7 +674,7 @@ def main(argv: list[str]) -> int:
         return selftest()
     args = [a for a in argv if not a.startswith("-")]
     paths = targets(args)
-    print(f"resume_gate.py — {len(paths)} résumé PDF(s): one page, filled to {MIN_FILL:.0f}%, current employer listed as employment")
+    print(f"resume_gate.py checks {len(paths)} résumé PDF(s): one page, filled to {MIN_FILL:.0f}%, current employer listed as employment")
     print("  NOT checked: whether the content is TRUE (canon.py / verify_claims.py own that),")
     print("               whether it reads well, or whether it is tailored to the target.\n")
     if not paths:
@@ -683,7 +683,7 @@ def main(argv: list[str]) -> int:
     findings = [f for f in ((check_html(p) if p.suffix.lower() == ".html" else check_pdf(p))
                             for p in paths) if f]
     if not findings:
-        print(f"CLEAN — all {len(paths)} résumé(s) are one full page.")
+        print(f"CLEAN: all {len(paths)} résumé(s) are one full page.")
         return 0
     print(f"{len(findings)} RÉSUMÉ(S) WASTING THE PAGE OR MISSING THE CURRENT JOB:\n")
     for f in findings:

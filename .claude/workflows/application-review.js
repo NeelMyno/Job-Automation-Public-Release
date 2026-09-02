@@ -9,10 +9,10 @@ export const meta = {
 }
 
 // The Workflow tool may hand `args` through as a JSON-encoded string rather than an object.
-// Parse defensively — a bare object crash here reports as "(unknown company)" with no clue why.
+// Parse defensively: a bare object crash here reports as "(unknown company)" with no clue why.
 const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
 if (!A.repoRoot) {
-  throw new Error('application-review requires repoRoot — the absolute path to this repo on this machine. Pass it explicitly; there is no default.')
+  throw new Error('application-review requires repoRoot, the absolute path to this repo on this machine. Pass it explicitly; there is no default.')
 }
 const repo = A.repoRoot
 const company = A.company || '(unknown company)'
@@ -65,32 +65,32 @@ You are one of FIVE independent reviewers of a job application package. You see 
 
 Think deeply and thoroughly. Maximum-effort reasoning, not pattern-matching.
 
-TARGET: ${company} — ${role}
+TARGET: ${role} at ${company}
 
 READ THESE FILES (they are real, on disk):
 - The JD (authoritative, verbatim): ${A.jdPath}
 - The resume source: ${A.resumeHtml}
-- The rendered PDF (what the employer actually sees — read it with: pdftotext -layout "${A.resumePdf}" -): ${A.resumePdf}
+- The rendered PDF (what the employer actually sees; read it with: pdftotext -layout "${A.resumePdf}" -): ${A.resumePdf}
 - The cover letter: ${A.coverPath}
 - The master resume (the honest source of truth for every claim): ${repo}/knowledge-base/07-master-resume.md
 - The rules you are enforcing: ${repo}/CLAUDE.md §5, §11, §13
 - Voice + preferences: ${repo}/knowledge-base/11-preferences-and-conventions.md
 - If present, a personal blocklist of specific facts/numbers the operator has personally gotten
-  wrong before: ${repo}/knowledge-base/00-red-zone-facts.md — read it if it exists, skip silently
+  wrong before: ${repo}/knowledge-base/00-red-zone-facts.md; read it if it exists, skip silently
   if it doesn't. Nothing in it should ever slip back into shipped copy.
 
-THE TRUTH DIAL (CLAUDE.md §13.2 is the only owner of this rule) — you SURFACE, you never DECIDE:
+THE TRUTH DIAL (CLAUDE.md §13.2 is the only owner of this rule); you SURFACE, you never DECIDE:
 - GREEN: the strongest TRUE framing. Recommend freely.
 - AMBER [REACH]: any line a careful reader could call a stretch. Put it in reachItems, never silently into a fix.
-- RED — the operator's own two hard-stop categories (CLAUDE.md §5), never propose, not even on instruction:
+- RED: the operator's own two hard-stop categories (CLAUDE.md §5), never propose, not even on instruction:
   (1) work authorization / citizenship / visa / sponsorship answers;
   (2) employers, titles, employment dates, degrees, institutions, GPA, licenses, certifications.
   These two are the background-check surface: a false one is found after the offer and risks more
   than the job.
 - EVERYTHING ELSE about how the operator frames THEIR OWN real work is THEIR call. Raise a genuine
-  concern ONCE in reachItems with your evidence, then defer — the operator is the authoritative
+  concern ONCE in reachItems with your evidence, then defer. The operator is the authoritative
   primary source on their own work; do NOT override their first-hand account with your inference.
-  (Unchanged and separate: never put unsourced words in a NAMED THIRD PARTY's mouth — CLAUDE.md §0.1.)
+  (Unchanged and separate: never put unsourced words in a NAMED THIRD PARTY's mouth; see CLAUDE.md §0.1.)
 
 OUTPUT: call the StructuredOutput tool exactly once. Be specific. A finding without a concrete replacement string is useless.
 Order findings by severity. If the package is genuinely good on your lens, say SHIP and return few findings; do NOT invent work.
@@ -103,7 +103,7 @@ const LENSES = [
   {
     key: 'jd-fit-ats',
     lens: 'JD-fit & ATS',
-    brief: `LENS 1 — JD-FIT & ATS.
+    brief: `LENS 1: JD-FIT & ATS.
 Build a requirement-by-requirement map: for EVERY responsibility, requirement, and nice-to-have in the JD, name the exact
 resume line (or cover sentence) that answers it, or mark it UNANSWERED. Then:
 - Which JD pillars are under-weighted or missing entirely?
@@ -116,7 +116,7 @@ Report the requirement->line map inside your findings (one finding per gap).`,
   {
     key: 'recruiter-6s',
     lens: 'Recruiter 6-second screen',
-    brief: `LENS 2 — THE RECRUITER'S SIX SECONDS.
+    brief: `LENS 2: THE RECRUITER'S SIX SECONDS.
 You are a recruiter with 200 resumes and six seconds each. Read only the top third first.
 - What do you see, in order? Name line, title line, tagline, first company, first bullet.
 - Does the top third alone make you want to read on? If not, exactly what must change?
@@ -129,7 +129,7 @@ You are a recruiter with 200 resumes and six seconds each. Read only the top thi
   {
     key: 'hiring-manager-redteam',
     lens: 'Hiring-manager red team',
-    brief: `LENS 3 — HIRING-MANAGER RED TEAM (adversarial).
+    brief: `LENS 3: HIRING-MANAGER RED TEAM (adversarial).
 You are the peer or boss this person would report to at ${company}. You are looking for reasons to say no.
 - Give the THREE STRONGEST REASONS TO REJECT this candidate based on this package. Be brutal and specific.
 - Which lines are generic enough that any competent candidate could have written them? Name each.
@@ -142,7 +142,7 @@ Then, and only then, give the fixes. Your findings should be dominated by the re
   {
     key: 'honesty-defensibility',
     lens: 'Honesty & defensibility audit',
-    brief: `LENS 4 — HONESTY & DEFENSIBILITY (the highest-stakes lens).
+    brief: `LENS 4: HONESTY & DEFENSIBILITY (the highest-stakes lens).
 Trace EVERY factual claim in the resume and cover letter to a source. For each: quote the claim, name the file/repo/URL that
 proves it, and mark VERIFIED / UNSOURCED / FALSE.
 - Re-derive every number yourself from ${repo}/knowledge-base/.
@@ -159,7 +159,7 @@ proves it, and mark VERIFIED / UNSOURCED / FALSE.
   {
     key: 'voice-antislop',
     lens: 'Voice & anti-slop',
-    brief: `LENS 5 — VOICE & ANTI-SLOP.
+    brief: `LENS 5: VOICE & ANTI-SLOP.
 Read ${repo}/CLAUDE.md §11 and the voice notes in knowledge-base/11-preferences-and-conventions.md FIRST. Then hunt every tell:
 - Em-dashes anywhere in shipped copy (the cover letter especially). Zero allowed.
 - The rule of three (reflexive balanced triads). Note: a factual enumeration of three REAL product features is not the same as a
@@ -199,7 +199,7 @@ const reach = ok.flatMap((r) => (r.reachItems || []).map((x) => ({ ...x, lens: r
 phase('Synthesize')
 
 const synth = await agent(
-  `You are the SYNTHESIS pass over five independent reviews of an application package for ${company} — ${role}.
+  `You are the SYNTHESIS pass over five independent reviews of an application package for ${role} at ${company}.
 
 Here are the five structured reviews as JSON:
 ${JSON.stringify(ok, null, 2)}
@@ -217,7 +217,7 @@ Your job:
 6. State honestly whether the package is SHIP / SHIP_WITH_EDITS / DO_NOT_SHIP, and why.
 
 Constraints: no em-dashes in any replacement text. Every replacement must be literally true per the master resume.
-Never propose anything in the operator's two RED categories (CLAUDE.md §5) — work authorization, and
+Never propose anything in the operator's two RED categories (CLAUDE.md §5): work authorization, and
 employers/titles/dates/degrees/GPA/licenses. Everything else about how the operator frames their own real work is their
 call: surface the concern once in the AMBER section with your evidence, then defer to them.
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""subject_check.py — the founder-email SUBJECT-LINE gate.
+"""subject_check.py: the founder-email SUBJECT-LINE gate.
 
 Founder-direct emails are a common cap-bypass channel. The subject line must give THIS
 recipient a reason to open: the role, plus a short TRUE slice of your background that maps
 to what they build. A bare "Role at Company" with no hook reads as a template, so a hook
 is required. This makes the rule MECHANICAL so it cannot rot into prose.
 
-The LOCKED template (KB-11 §ratified-log is the owner — do not restate the rule elsewhere):
+The LOCKED template (KB-11 §ratified-log is the owner; do not restate the rule elsewhere):
 
     <Role> at <Company> | <2-8 word TRUE domain hook>
 
@@ -21,7 +21,7 @@ BANNED and why:
   - em-dash / en-dash / "!"                      → §11 house style
 
 This gates the SUBJECT ONLY. The email BODY still runs voice_check.py. The hook must be TRUE
-and grounded (§0.1) — the gate cannot verify truth, only shape; that stays on the author.
+and grounded (§0.1): the gate cannot verify truth, only shape; that stays on the author.
 
 Usage:
   python3 scripts/subject_check.py --text "Founding Product Designer at Acme | Freight & logistics product design"
@@ -57,46 +57,46 @@ def check_subject(s: str) -> list[str]:
         return findings  # blank lines are skipped by the caller
 
     if "—" in raw or "–" in raw:
-        findings.append("R6 em/en-dash — house style forbids it (§11). Use a plain pipe ` | `.")
+        findings.append("R6 em-dash/en-dash: house style forbids it (§11). Use a plain pipe ` | `.")
     if "!" in raw:
-        findings.append("R6 exclamation mark — subjects stay flat, no punch (§11).")
+        findings.append("R6 exclamation mark: subjects stay flat, no punch (§11).")
 
-    # R1 STRUCTURE — exactly one ` | `, both sides non-empty.
+    # R1 STRUCTURE: exactly one ` | `, both sides non-empty.
     parts = raw.split("|")
     if len(parts) != 2:
         findings.append(
-            "R1 structure — need exactly one ` | ` separator. Template: "
+            "R1 structure: need exactly one ` | ` separator. Template: "
             "`<Role> at <Company> | <2-8 word true domain hook>`. "
             "A bare `Role at Company` with no hook reads like a template, not a reason to open."
         )
         return findings  # nothing else is meaningful without the split
     left, hook = parts[0].strip(), parts[1].strip()
     if not left:
-        findings.append("R1 structure — the left of ` | ` (role at company) is empty.")
+        findings.append("R1 structure: the left of ` | ` (role at company) is empty.")
     if not hook:
-        findings.append("R1 structure — the hook (right of ` | `) is empty; give a real reason to open.")
+        findings.append("R1 structure: the hook (right of ` | `) is empty; give a real reason to open.")
 
-    # R2 LEFT — must read "<Role> at <Company>".
+    # R2 LEFT: must read "<Role> at <Company>".
     if left and " at " not in f" {left} ":
         findings.append("R2 left side must read `<Role> at <Company>` (missing ` at `).")
 
-    # R3 HOOK LENGTH — 2..8 words, a phrase not a sentence.
+    # R3 HOOK LENGTH: 2..8 words, a phrase not a sentence.
     if hook:
         n = len(hook.split())
         if n < 2:
-            findings.append(f"R3 hook is {n} word — too thin; give a 2-8 word domain slice.")
+            findings.append(f"R3 hook is {n} word: too thin; give a 2-8 word domain slice.")
         elif n > 8:
-            findings.append(f"R3 hook is {n} words — too long; tighten to a 2-8 word phrase, not a sentence.")
+            findings.append(f"R3 hook is {n} words: too long; tighten to a 2-8 word phrase, not a sentence.")
 
     low = raw.lower()
     for pat in HYPE:
         if re.search(pat, low):
-            findings.append(f"R4 hype/superlative in the subject (`{pat}`) — plain voice only (§11).")
+            findings.append(f"R4 hype/superlative in the subject (`{pat}`): plain voice only (§11).")
             break
     for pat in BUG_HOOK:
         if re.search(pat, low):
             findings.append(
-                f"R5 'found-a-bug / fix-your-product' hook (`{pat}`) — too lame and rinse-and-repeat. "
+                f"R5 'found-a-bug / fix-your-product' hook (`{pat}`): too lame and rinse-and-repeat. "
                 "Lead with your real matching experience, never their flaw."
             )
             break
@@ -113,18 +113,18 @@ def run(subjects: list[str]) -> int:
         fs = check_subject(s)
         if fs:
             any_fail = True
-            print(f"FAIL — {s.strip()!r}")
+            print(f"FAIL: {s.strip()!r}")
             for f in fs:
                 print(f"    - {f}")
         else:
-            print(f"OK   — {s.strip()!r}")
+            print(f"OK:   {s.strip()!r}")
     if checked == 0:
         print("subject_check: no subject lines to check.")
         return 0
     if any_fail:
         print("\nsubject_check: FAIL. Fix the subject(s) before sending (owner: KB-11).")
         return 1
-    print(f"\nsubject_check: {checked} subject(s) OK — role-first + true domain hook, no hype, no flaw-hook.")
+    print(f"\nsubject_check: {checked} subject(s) OK: role-first + true domain hook, no hype, no flaw-hook.")
     return 0
 
 
@@ -162,7 +162,7 @@ def selftest() -> int:
     if ok:
         print("subject_check selftest OK")
         return 0
-    print("subject_check selftest FAILED — a real protection just broke.")
+    print("subject_check selftest FAILED: a real protection just broke.")
     return 1
 
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""canon.py — the retired-claim checker. Guards the WELL, not just the door.
+"""canon.py: the retired-claim checker. Guards the WELL, not just the door.
 
 WHY THIS EXISTS
 ---------------
-A career-automation repo generates outbound copy — resumes, cover letters, positioning notes —
+A career-automation repo generates outbound copy (resumes, cover letters, positioning notes)
 from a knowledge base about you. When a fact changes (a project's real scope gets corrected, a
 claim turns out to be an overclaim, a title turns out to map to the wrong job family), the fix
-gets written in ONE place — a decision record, a knowledge-base file — and the retired wording is
+gets written in ONE place (a decision record, a knowledge-base file) and the retired wording is
 expected to disappear everywhere else. It doesn't, by default. Markdown and HTML get copied,
 pasted, and reworded constantly, and a retired claim has a way of surviving in a sibling file, a
 stale bullet, or a résumé PDF nobody re-checked.
@@ -14,28 +14,28 @@ stale bullet, or a résumé PDF nobody re-checked.
 A checker that only reads outbound application copy is not enough, because that copy is
 *generated from* the knowledge base. If the retired claim is still live at the source, a
 per-dossier check just keeps catching the same defect at the door while the well stays poisoned.
-This file checks the source surfaces directly — the knowledge base, the résumé, and this repo's
+This file checks the source surfaces directly: the knowledge base, the résumé, and this repo's
 own instruction files.
 
-THE HARD PART — assertion vs prohibition
+THE HARD PART: assertion vs prohibition
 ----------------------------------------
 A naive substring search is wrong, because the retired string appears constantly in CORRECT text
 too: a prohibition ("never say X"), a documented correction ("X is retired; say Y instead"), a
 historical record of the mistake itself. A checker that flags every occurrence fires mostly on
-correct work — and a linter that cries wolf gets turned off within a week.
+correct work, and a linter that cries wolf gets turned off within a week.
 
 So every hit is classified:
-  * NEGATED   — a negation marker sits in the line or the window immediately before it. The text
+  * NEGATED:   a negation marker sits in the line or the window immediately before it. The text
                 is telling you NOT to say the thing. Allowed, silently.
-  * ASSERTED  — no negation, or the line carries an assertion marker ("Résumé-ready:", "Say:",
+  * ASSERTED:  no negation, or the line carries an assertion marker ("Résumé-ready:", "Say:",
                 "Use this line") that OVERRIDES any nearby negation, because a line labelled as
                 ready-to-paste copy is copy that WILL get pasted, whatever the surrounding prose
                 warns.
 
-THE OTHER HARD PART — one claim has infinite spellings
+THE OTHER HARD PART: one claim has infinite spellings
 ------------------------------------------------------
-A line-oriented ASCII regex guards exactly one spelling of a claim. In ordinary use — no exotic
-attack required — a retired claim keeps reappearing through mundane text transformations:
+A line-oriented ASCII regex guards exactly one spelling of a claim. In ordinary use, no exotic
+attack required, a retired claim keeps reappearing through mundane text transformations:
 
     line split          a claim that wraps across a markdown line break
     HTML interpolation  a bold/em/anchor tag landing mid-phrase
@@ -48,16 +48,16 @@ attack required — a retired claim keeps reappearing through mundane text trans
 
 None of these is exotic. Every one is something a human, an editor, or a paste from another
 document produces by accident. A checker that only guards the canonical spelling is a checker
-that passes the moment the copy is touched — which is exactly when it matters most.
+that passes the moment the copy is touched, which is exactly when it matters most.
 
 So every file is matched through a NORMALISED VIEW (see `normalise()`):
-    * HTML tags stripped — inline tags (`<b>`, `<em>`, `<a>`) close up, block tags (`<li>`, `<p>`)
+    * HTML tags stripped: inline tags (`<b>`, `<em>`, `<a>`) close up, block tags (`<li>`, `<p>`)
       become a space, so a word boundary at a block-tag join is preserved;
     * HTML entities decoded (`&nbsp;` -> space, `&amp;` -> `&`);
     * invisibles deleted (zero-width space/joiner, word joiner, BOM, soft hyphen);
     * every unicode dash -> `-`, every unicode space -> ` `, fullwidth ASCII -> ASCII;
     * confusable Cyrillic/Greek letters folded to Latin;
-    * ALL whitespace — newlines included — collapsed to one space.
+    * ALL whitespace (newlines included) collapsed to one space.
 
 Every normalised character keeps a pointer back to its source offset, so a finding still reports
 the ORIGINAL line number and the ORIGINAL text. The classification logic is unchanged by
@@ -68,17 +68,17 @@ normalisation:
       line-split bypass, but letting the CONTEXT windows collapse across lines too would let an
       unrelated correction on a neighbouring line excuse an assertion on this one.
     * an ASSERTION label is read from the normalised text, so a marked-up "**Résumé-<b>ready</b>:**"
-      still counts — but only on the lines the match itself spans, deliberately not extended to a
+      still counts, but only on the lines the match itself spans, deliberately not extended to a
       preceding line, since "Use this line: ..." followed by "Never say ... on the next line" is a
       legitimate and common markdown shape.
 
-SCOPE — stated out loud, because a silent scope is a lie by omission
+SCOPE: stated out loud, because a silent scope is a lie by omission
 --------------------------------------------------------------------
-SCANNED (the live surfaces an agent generates copy from) — see `SCAN_GLOBS` below.
+SCANNED (the live surfaces an agent generates copy from): see `SCAN_GLOBS` below.
 NOT SCANNED, deliberately:
     ops/**            immutable history. Decision records legitimately quote the strings they
                       retired, as part of documenting the retirement.
-    applications/**   per-application outbound copy is a separate concern — a dedicated
+    applications/**   per-application outbound copy is a separate concern; a dedicated
                       claim-verification tool, if you have one, owns that surface. `sources/`
                       subfolders are verbatim snapshots, and editing one to make a check pass is
                       forgery.
@@ -105,7 +105,7 @@ REPO = Path(__file__).resolve().parents[1]
 # --------------------------------------------------------------------------------------
 # THE REGISTRY
 # --------------------------------------------------------------------------------------
-# One entry per retired claim about YOU — a fact, framing, or number that used to be true (or used
+# One entry per retired claim about YOU: a fact, framing, or number that used to be true (or used
 # to be your best phrasing) and has since been corrected. `pattern` is a case-insensitive regex,
 # matched against the NORMALISED view of the text (see `normalise()` below), so it catches the
 # claim however it's spelled, tagged, or pasted.
@@ -115,14 +115,14 @@ REPO = Path(__file__).resolve().parents[1]
 #       "id":       "short-kebab-id",     # stable identifier; referenced by canon:allow escapes
 #       "pattern":  r"...",                # case-insensitive regex, matched against normalised text
 #       "why":      "...",                 # the decision that retired this claim
-#       "instead":  "...",                 # the wording that IS true — a rule that says "no"
+#       "instead":  "...",                 # the wording that IS true; a rule that says "no"
 #                                           # without saying "what then" just gets argued with
-#       "scope":     "substring",          # optional — only checked on paths containing this
-#       "scope_any": ("a/", "b/"),         # optional — only checked on paths containing ANY of these
+#       "scope":     "substring",          # optional: only checked on paths containing this
+#       "scope_any": ("a/", "b/"),         # optional: only checked on paths containing ANY of these
 #   }
 #
 # TO ADD ONE: the moment you correct or retire a claim about yourself, add an entry here IN THE
-# SAME COMMIT as the correction. That is the whole point of this file — the registry is how a
+# SAME COMMIT as the correction. That is the whole point of this file: the registry is how a
 # decision propagates instead of quietly evaporating everywhere except the one place you fixed it.
 
 RETIRED: list[dict] = []
@@ -140,7 +140,7 @@ RETIRED: list[dict] = []
 #   "human taste vs AI slop ("un-slopping the AI slop"), builder, not engineer"
 # All three were suppressed by a "not" belonging to a different clause. Hence: a window, not a line.
 LOOKBACK_CHARS = 80   # "never say X", "Drop X", "they are NOT X", "Delete X everywhere"
-LOOKAHEAD_CHARS = 40  # only for strong retirement verbs: "X is RETIRED", "X — superseded"
+LOOKAHEAD_CHARS = 40  # only for strong retirement verbs: "X is RETIRED", "X: superseded"
 
 NEGATION = re.compile(
     # Plain "no" earns its place: `- No "un-slopping the AI slop" slogan.` is a prohibition, and
@@ -151,14 +151,14 @@ NEGATION = re.compile(
     r"banned?|blocklist(?:ed)?|avoid|instead of|rather than|supersed(?:e|ed|es)|"
     r"correct(?:s|ed|ion)?|wrong|incorrect|do not|don't|must not|cannot|false|fabricat\w*|"
     # "old" is narrowed to old *wording*, never old *things*. A bare "the old" once suppressed a
-    # real fabrication ("The old tracking page guessed at delivery times") — the artifact was
+    # real fabrication ("The old tracking page guessed at delivery times"): the artifact was
     # genuinely old; the claim about it was invented.
     r"stop saying|off the r[ée]sum[ée]|old (?:figure|number|line|wording|framing|metric|claim)s?|"
     r"former|previously|used to)(?![-\w])|[⛔❌]|~~",
     re.I,
 )
 # 🔴 is deliberately NOT a negation marker. This repo may use it as an ALERT/emphasis marker on a
-# line that emphasises a *retired* rule itself — treating it as negation would hide exactly that.
+# line that emphasises a *retired* rule itself; treating it as negation would hide exactly that.
 
 STRONG_RETIREMENT = re.compile(
     r"\b(?:retired?|superseded?|forbidden|banned|deprecated|removed|dead|obsolete|"
@@ -166,7 +166,7 @@ STRONG_RETIREMENT = re.compile(
 )
 
 # The explicit escape hatch. Heuristics handle the ordinary "never say X" idioms; this covers the
-# rest — a section-level supersession banner too far above to see, a quotation of the retired claim
+# rest: a section-level supersession banner too far above to see, a quotation of the retired claim
 # in a record, a legitimate homonym. It is deliberately NOT a bare "ignore":
 #   * it must NAME the rule it silences, so it cannot blanket-suppress a future rule; and
 #   * it must carry a reason, because a silent suppression is the same lie by omission this whole
@@ -184,18 +184,18 @@ ASSERTION = re.compile(
 )
 
 # --------------------------------------------------------------------------------------
-# NORMALISATION — guard the CLAIM, not one spelling of it. See the module docstring for the
+# NORMALISATION: guard the CLAIM, not one spelling of it. See the module docstring for the
 # eight bypass classes this normalisation closes.
 #
 # Design constraint: every normalised character must remember where it came from, because a
 # finding that cannot name the ORIGINAL line number is not actionable. So this is a hand-rolled
-# left-to-right pass rather than `unicodedata.normalize` + `html.unescape` — those give you a
+# left-to-right pass rather than `unicodedata.normalize` + `html.unescape`: those give you a
 # string with no offset map, and a finding at "normalised offset 4127" is useless to a human.
 # --------------------------------------------------------------------------------------
 
 # Inline tags close up (`<b>Wid</b>get` IS "Widget"); everything else becomes a space, so
 # `<li>2019</li><li>75 million users` keeps the `\b` in front of 75. An unknown tag is treated as
-# block-level — the conservative choice, since joining across it could destroy a word boundary.
+# block-level, the conservative choice, since joining across it could destroy a word boundary.
 INLINE_TAGS = {
     "a", "abbr", "b", "bdi", "bdo", "big", "cite", "code", "data", "del", "dfn", "em", "font",
     "i", "ins", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span", "strike",
@@ -205,7 +205,7 @@ TAG = re.compile(r"</?([A-Za-z][A-Za-z0-9]*)[^<>]*>")
 # `&nbsp;` `&#8209;` `&#x2011;` `&amp;`. The trailing `;` is required, so "R&D" is left alone.
 ENTITY = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
 
-# Invisible. Deleted outright — that is what a reader sees, so it is what the checker must see.
+# Invisible. Deleted outright: that is what a reader sees, so it is what the checker must see.
 # Written as escapes, not glyphs, because a table of invisible characters that you cannot see in
 # the source is a table nobody can audit.
 INVISIBLE = set(
@@ -227,7 +227,7 @@ QUOTES = {**{c: "'" for c in "‘’‚‛′‵´"},
           **{c: '"' for c in "“”„‟″‶«»"}}
 
 # Confusable folding. These are the codepoints that render identically to a Latin letter in the
-# fonts this repo's files are read in — `СI-gated` (Cyrillic Es) is invisible to a human reviewer
+# fonts this repo's files are read in: `СI-gated` (Cyrillic Es) is invisible to a human reviewer
 # AND to an ASCII regex, which is the worst combination a checker can have.
 _CYR_UP, _LAT_UP = "АВЕКМНОРСТУХІЈЅԚԜЁ", "ABEKMHOPCTYXIJSQWE"
 _CYR_LO, _LAT_LO = "аеорсухіјѕԛԝё", "aeopcyxijsqwe"
@@ -330,7 +330,7 @@ SCAN_GLOBS = [
 # Never scanned. See the module docstring for why each is here.
 EXCLUDE_PARTS = ("/ops/", "/applications/", "/source-material/", "/projects/", "/archive/", "/.git/")
 
-# Employer-authored text that happens to live inside a scanned folder — e.g. a saved JD or a
+# Employer-authored text that happens to live inside a scanned folder, e.g. a saved JD or a
 # tracker file that quotes a company's own listing verbatim. A rule about how YOU describe your
 # own work must never fire on how a company describes theirs. Starts empty; add a file here the
 # moment you find one that needs the exclusion.
@@ -368,8 +368,8 @@ def _excluded(p: Path) -> bool:
 def scan_text(rel: str, text: str) -> list[Finding]:
     """Classify every retired-string hit in one file as NEGATED (fine) or ASSERTED (a finding).
 
-    Matching happens against `normalise(text)` — a whitespace-collapsed, tag-stripped,
-    unicode-folded view — so a claim is caught however it is spelled. Every window the
+    Matching happens against `normalise(text)`, a whitespace-collapsed, tag-stripped,
+    unicode-folded view, so a claim is caught however it is spelled. Every window the
     classification uses is then mapped back onto the ORIGINAL lines, so nothing about the
     assertion-vs-prohibition logic changed shape.
     """
@@ -410,7 +410,7 @@ def scan_text(rel: str, text: str) -> list[Finding]:
             lo = norm_at(starts[first])
             hi = norm_at(starts[last + 1]) if last + 1 < len(starts) else len(norm)
 
-            # Explicit, named, reasoned escape — checked before anything else. See ALLOW.
+            # Explicit, named, reasoned escape, checked before anything else. See ALLOW.
             # Read from the RAW lines: the escape is a literal comment a human wrote, and it is
             # honoured on any line the match touches.
             if any((a := ALLOW.search(rl)) and a.group(1).lower() == entry["id"] for rl in spanned):
@@ -425,15 +425,15 @@ def scan_text(rel: str, text: str) -> list[Finding]:
                 reported.add(first)
                 continue
 
-            # (1) Negation immediately BEFORE the match — "never say X", "Drop X", "NOT X".
+            # (1) Negation immediately BEFORE the match: "never say X", "Drop X", "NOT X".
             before = norm[max(lo, m.start() - LOOKBACK_CHARS):m.start()]
-            # (2) A STRONG retirement verb just AFTER — "X is RETIRED", "X — superseded".
+            # (2) A STRONG retirement verb just AFTER: "X is RETIRED", "X: superseded".
             #     Generic "not" is deliberately excluded here: "HARD FILTER, not a preference"
             #     negates *preference* and asserts the retired rule.
             #
             #     🔴 The window STOPS at the first clause boundary, and that is not a nicety.
             #     A retirement verb 40 chars later can belong to a COMPLETELY DIFFERENT retired
-            #     claim, inside a parenthetical — excusing THIS claim on THAT verb's word alone
+            #     claim, inside a parenthetical; excusing THIS claim on THAT verb's word alone
             #     is adjacent-verification laundering performed by the tool built to prevent it.
             #     A retirement verb only excuses the claim it is attached to, so a new clause ends
             #     its reach.
@@ -446,7 +446,7 @@ def scan_text(rel: str, text: str) -> list[Finding]:
             )
             after = "" if names_other else after_raw
             # (3) A correction banner on one of the two preceding non-blank lines.
-            #     A TABLE ROW is never a banner for the row beneath it — it is a sibling record
+            #     A TABLE ROW is never a banner for the row beneath it: it is a sibling record
             #     about a different subject.
             in_table = lines[first].lstrip().startswith("|")
             banner = ""
@@ -459,8 +459,8 @@ def scan_text(rel: str, text: str) -> list[Finding]:
                 j -= 1
 
             # The banner must be a genuine CORRECTION banner, not merely a nearby word. A bare
-            # "removed" or "NOT real" on a neighbouring line — about a completely different
-            # subject — can excuse a real defect if allowed to. So a banner now also needs an ADR
+            # "removed" or "NOT real" on a neighbouring line, about a completely different
+            # subject, can excuse a real defect if allowed to. So a banner now also needs an ADR
             # reference or a date: the shape of an actual correction note, not an accident of
             # vocabulary.
             banner_ok = bool(STRONG_RETIREMENT.search(banner)) and bool(
@@ -485,9 +485,9 @@ SKIPPED: list[str] = []   # files handed to us that we could NOT read. Never sil
 def scan_paths(paths: list[Path]) -> list[Finding]:
     """Scan the readable files, and RECORD the ones we could not read.
 
-    Printing "CLEAN — no retired claim is asserted" for a file this checker silently refused to
-    open manufactures exactly the false confidence it exists to end. It cannot read a PDF — that
-    is fine and honest — but it must say so, not report CLEAN for a file it never opened.
+    Printing "CLEAN: no retired claim is asserted" for a file this checker silently refused to
+    open manufactures exactly the false confidence it exists to end. It cannot read a PDF (that
+    is fine and honest), but it must say so, not report CLEAN for a file it never opened.
     """
     global SKIPPED
     SKIPPED = []
@@ -523,13 +523,13 @@ def live_surface() -> list[Path]:
 
 
 # --------------------------------------------------------------------------------------
-# Self-test — every rule must catch the claim it exists for, and must NOT fire on the correct
+# Self-test: every rule must catch the claim it exists for, and must NOT fire on the correct
 # wording that legitimately sits beside it. A test that only proves the happy path is not a test;
 # a rule with no negative control is a false-positive generator.
 #
-# RETIRED ships EMPTY (above) — there is nothing of yours to test until you add your own entries.
-# To prove the DETECTION MACHINERY itself still works — normalisation, the eight unicode-bypass
-# classes, the assertion/negation/banner classifier — the selftest below temporarily registers a
+# RETIRED ships EMPTY (above); there is nothing of yours to test until you add your own entries.
+# To prove the DETECTION MACHINERY itself still works (normalisation, the eight unicode-bypass
+# classes, the assertion/negation/banner classifier), the selftest below temporarily registers a
 # handful of CLEARLY FICTIONAL example claims, runs CASES against them, then restores RETIRED to
 # empty. These example entries are never present outside `--selftest`.
 # --------------------------------------------------------------------------------------
@@ -538,7 +538,7 @@ _EXAMPLE_RETIRED: list[dict] = [
     {
         "id": "example-solo-build",
         "pattern": r"built\s+the\s+entire\s+platform\s+solo",
-        "why": "(fictional, --selftest only) a corrected overclaim — the platform had a team.",
+        "why": "(fictional, --selftest only) a corrected overclaim: the platform had a team.",
         "instead": "describe the specific piece you actually owned",
     },
     {
@@ -598,15 +598,15 @@ CASES: list[tuple[str, str, str, bool]] = [
      "CLAUDE.md",
      'This paragraph is the historical record of the fictional overclaim, kept for reference: '
      '"built the entire platform solo." '
-     '<!-- canon:allow example-solo-build — this line IS the canonical record of the retired '
+     '<!-- canon:allow example-solo-build - this line IS the canonical record of the retired '
      'claim and must stay verbatim -->', False),
     ("a canon:allow escape naming the WRONG id must NOT excuse the finding",
      "CLAUDE.md",
      'Kept for the record: "built the entire platform solo." '
-     '<!-- canon:allow example-user-count — wrong id, must not excuse example-solo-build -->', True),
+     '<!-- canon:allow example-user-count - wrong id, must not excuse example-solo-build -->', True),
 
     # --- scope / scope_any narrowing ---
-    ("scope_any narrows to specific folders — a non-matching path is not flagged",
+    ("scope_any narrows to specific folders: a non-matching path is not flagged",
      "knowledge-base/03-narrative.md",
      "Internally this was called Project Nightingale before it shipped.", False),
     ("scope_any matches on its SECOND option too",
@@ -620,10 +620,10 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("a correction about a DIFFERENT claim nearby must not excuse THIS one",
      "knowledge-base/06-projects-portfolio.md",
      'The launch page says the founder built the entire platform solo (auto-deploy is retired '
-     'wording — say "automatic deploys").', True),
+     'wording, say "automatic deploys").', True),
 
     # ==================================================================================
-    # THE EIGHT UNICODE-BYPASS CLASSES — each one character or one tag away from a string the
+    # THE EIGHT UNICODE-BYPASS CLASSES: each one character or one tag away from a string the
     # registry already knows. A rule that guards a single spelling is a rule that expires the
     # first time someone edits the sentence.
     # ==================================================================================
@@ -696,7 +696,7 @@ def selftest() -> int:
     RETIRED = _EXAMPLE_RETIRED
     passed = failed = 0
     try:
-        print("canon.py selftest — the detection machinery against fictional example claims\n")
+        print("canon.py selftest: the detection machinery against fictional example claims\n")
         for label, path, text, should in CASES:
             got = bool(scan_text(path, text))
             ok = got == should
@@ -711,9 +711,9 @@ def selftest() -> int:
         RETIRED = saved
     print()
     if failed:
-        print(f"SELFTEST FAILED — {failed} of {passed + failed} cases wrong")
+        print(f"SELFTEST FAILED: {failed} of {passed + failed} cases wrong")
         return 1
-    print(f"SELFTEST OK — {passed}/{passed + failed} "
+    print(f"SELFTEST OK: {passed}/{passed + failed} "
           f"({sum(1 for c in CASES if c[3])} bypass/defect cases caught, "
           f"{sum(1 for c in CASES if not c[3])} correct-wording controls not flagged)")
     return 0
@@ -723,13 +723,13 @@ def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
     if "--list" in argv:
-        print(f"canon registry — {len(RETIRED)} retired claims\n")
+        print(f"canon registry: {len(RETIRED)} retired claims\n")
         for e in RETIRED:
             print(f"  [{e['id']}]{'  scope=' + e['scope'] if e.get('scope') else ''}")
             print(f"      why:     {e['why']}")
             print(f"      instead: {e['instead']}\n")
         if not RETIRED:
-            print("  (empty — add your own entries to RETIRED as you retire claims about yourself)")
+            print("  (empty; add your own entries to RETIRED as you retire claims about yourself)")
         return 0
 
     args = [a for a in argv if not a.startswith("-")]
@@ -742,13 +742,13 @@ def main(argv: list[str]) -> int:
 
     findings = scan_paths(paths)
 
-    print(f"canon.py — checked {where} against {len(RETIRED)} retired claims")
+    print(f"canon.py: checked {where} against {len(RETIRED)} retired claims")
     print("  scanned:     knowledge-base/, resume/, CLAUDE.md, STRUCTURE.md, README.md, "
           "docs/DESIGN.md, .claude/commands|workflows")
     print("  NOT checked: ops/ (immutable history), applications/ (a dedicated per-application "
           "claim checker, if you have one, owns that surface)")
     if SKIPPED:
-        print(f"  🔴 NOT READ ({len(SKIPPED)}) — a verdict below does NOT cover these:")
+        print(f"  🔴 NOT READ ({len(SKIPPED)}): a verdict below does NOT cover these:")
         for s in SKIPPED[:8]:
             print(f"       {s}")
         if len(SKIPPED) > 8:
@@ -756,14 +756,14 @@ def main(argv: list[str]) -> int:
 
     if not findings:
         scope = "the files it read" if SKIPPED else "any live surface"
-        print(f"\nCLEAN — no retired claim is asserted on {scope}.")
+        print(f"\nCLEAN: no retired claim is asserted on {scope}.")
         return 1 if SKIPPED and args else 0
     print(f"\n{len(findings)} RETIRED CLAIM(S) ASSERTED:\n")
     for f in findings:
         print(f.render())
         print()
-    print("Each is a decision that was made and never propagated. Fix the wording, or — if the "
-          "decision itself changed — update the registry entry in the same commit.")
+    print("Each is a decision that was made and never propagated. Fix the wording, or, if the "
+          "decision itself changed, update the registry entry in the same commit.")
     return 1
 
 

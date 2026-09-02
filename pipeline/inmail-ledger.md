@@ -1,9 +1,9 @@
-# InMail Ledger — the scarce-channel accounting (optional)
+# InMail Ledger: the scarce-channel accounting (optional)
 
 <!--
 This file only matters if you're using a paid tier (e.g. LinkedIn Premium Career) that grants a
 limited monthly allotment of paid messages. If you're not tracking anything like that, delete this
-file — outreach_queue.py handles its absence gracefully (the InMail balance just doesn't appear).
+file; outreach_queue.py handles its absence gracefully (the InMail balance just doesn't appear).
 -->
 
 A connection note is the free card, playable every time. A paid credit (InMail or equivalent) is
@@ -17,9 +17,9 @@ same turn.**
 - **Max banked:** [ ]
 - **Renewal date:** [ ]
 - **Refund rule:** [ ] (many platforms credit back an InMail/credit if the recipient responds
-  within a window — check your plan's actual terms, don't assume)
+  within a window; check your plan's actual terms, don't assume)
 - **Free bypasses that cost zero credits:** a connection note (always), an "Open Profile"-style
-  recipient, a shared group — check before ever spending a credit.
+  recipient, or a shared group; check before ever spending a credit.
 
 ## Current balance and refill schedule
 

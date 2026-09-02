@@ -1,7 +1,7 @@
 # Outreach handover format (LOCKED)
 
 **This is the format every outreach handover follows, without exception.** If you want it changed,
-update THIS file and follow the updated version from there on — don't let the shape drift session
+update THIS file and follow the updated version from there on. Don't let the shape drift session
 to session.
 
 ## Why this format
@@ -22,7 +22,7 @@ message by hand.
 
 ## Structure (mirror this exactly)
 
-**Top of the file — a short "how to use" block:**
+**At the top of the file, a short "how to use" block:**
 - Note = free connection request, send it first. DM = after they accept (or as a normal message if
   already connected; the operator reports the channel, the agent logs it).
 - InMail default (NO unless a block says YES) + the current InMail balance, if you track one.
@@ -30,15 +30,15 @@ message by hand.
 
 **Then, grouped by company, one section per company:**
 
-    # <Company> — <Role>
+    # <Company>: <Role>
     **<Req / Job ID>** · <basket + pacing: big = all same-day; small = 3/company/day> · InMail: <default>
 
 **Then, per person under that company:**
 
     ## N. <Full Name>  *(optional tag: send today / send tomorrow, for paced baskets)*
     **Profile:** <linkedin url>
-    **Why:** <one true, grounded line — the specific reason this person>
-    (InMail-YES people only: · 🔴 **InMail: YES** — <one-line reason>)
+    **Why:** <one true, grounded line: the specific reason this person>
+    (InMail-YES people only: · 🔴 **InMail: YES**, <one-line reason>)
 
     **Connection note:**
     ```
@@ -49,11 +49,11 @@ message by hand.
     ```
     Hi <Name>,
 
-    <paragraph 1 — an observation about THEIR own work, first>
+    <paragraph 1: an observation about THEIR own work, first>
 
-    <paragraph 2 — your matching real work; the give = your portfolio>
+    <paragraph 2: your matching real work; the give = your portfolio>
 
-    <the ask — always present, reshaped (never dropped) for a decision-node>
+    <the ask, always present, reshaped (never dropped) for a decision-node>
 
     <Your name>
     ```

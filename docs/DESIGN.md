@@ -1,8 +1,8 @@
-# DESIGN.md — the tracker dashboard's default design system
+# DESIGN.md: the tracker dashboard's default design system
 
-The design system for `pipeline/tracker.html` — the one piece of UI this repo ships. This is a
+The design system for `pipeline/tracker.html`, the one piece of UI this repo ships. This is a
 **default**, not a mandate: the palette, canvas, and type below are one reasonable choice for a
-dense, at-a-glance operational dashboard. Restyle it however you like — the rules that matter are the
+dense, at-a-glance operational dashboard. Restyle it however you like; the rules that matter are the
 structural/accessibility ones below the token section, not the specific colors.
 
 ## Register: instrument panel
@@ -12,27 +12,27 @@ canvas, thin hairlines, tabular numerals, one accent doing the semantic work, ze
 Think of the register any well-built internal ops console or monitoring dashboard uses: information
 density over ornament, hierarchy from spacing and weight rather than color.
 
-## Tokens (role-named — never hardcode hex/px in markup)
+## Tokens (role-named: never hardcode hex/px in markup)
 
 - **Canvas** `--bg:#0C0C0D` (neutral near-black; never `#000`, never accent-tinted). Surfaces
   `--surface:#131414` / `--surface-2:#191A1A`. Hairlines `--line:#242525`.
 - **Ink** `--ink:#E6E7E3` (softened, not pure white) · `--ink-dim` · `--ink-faint`.
 - **Accent** `--accent:#37D98C` with `--accent-ink:#06140D` for text on accent fills. **One accent,
   one job:** live/in-progress status + current selection. Never decorative, never in a shadow/glow,
-  kept under ~5% of surface. Swap the hue for anything you like — it's a one-token change.
+  kept under ~5% of surface. Swap the hue for anything you like; it's a one-token change.
 - **Status** by dot **+ label**, never hue alone: live→accent, attention/needs-action→amber, negative
   →muted red (rare), neutral/muted→ink tones. ≤5 total colors.
 - **Type** any clean sans with real tabular-figure support (Manrope, Inter, and most system UI fonts
-  all work) — `tnum`+`lnum` tabular figures for anything numeric.
+  all work), using `tnum`+`lnum` tabular figures for anything numeric.
 - **Shadow** neutral only, reserved for genuinely floating layers.
 
 ## Rules this UI should pass (self-audit before "done")
 
-The five sins: (1) no low-contrast text on the accent color — use the accent-ink token; (2) no accent
+The five sins: (1) no low-contrast text on the accent color (use the accent-ink token); (2) no accent
 in any shadow/glow; (3) no accent-tinted "neutral" canvas; (4) no approximate placement (flex/grid
 anchored, not fragile utilities); (5) no hue-only status (dot+label always). Plus: one accent · one
 primary action per view · hierarchy by type before chrome · hairlines before shadows · lead with one
-number, never a uniform 3–5-up stat-tile grid · numeric columns right-aligned + tabular · no
+number, never a uniform 3-to-5-up stat-tile grid · numeric columns right-aligned + tabular · no
 gradients-as-chrome, no glassmorphism, no em-dashes in shipped copy.
 
 ## Table law (read this before touching `tracker.html`)
@@ -57,11 +57,11 @@ that:
 Corollaries: numeric columns right-aligned + tabular · a missing value renders as an em-dash glyph,
 never a fake zero · sticky header · hairline rows, never zebra.
 
-## Motion — frequency-gated
+## Motion: frequency-gated
 
 A tracker you look at often deserves speed over animation: everything instant, including row
 disclosure (no height transition, no chevron easing). One reasonable exception: a slow live-status
-pulse (2–3s) on in-progress rows, respecting `prefers-reduced-motion`. No hover animations that shift
+pulse (2-3s) on in-progress rows, respecting `prefers-reduced-motion`. No hover animations that shift
 weight/size.
 
 ## Accessibility floor

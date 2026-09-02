@@ -1,4 +1,4 @@
-# Target companies. THIS is the file you edit to point the crawler at your own target list —
+# Target companies. THIS is the file you edit to point the crawler at your own target list:
 # add one line per company, in any industry. A wrong slug is harmless: the crawler skips it and
 # lists it under `errors` in its JSON output, so you'll see the fix to make.
 #
@@ -7,7 +7,7 @@
 #   jobs.lever.co/<slug>          -> ats: lever
 #   jobs.ashbyhq.com/<slug>       -> ats: ashby
 #
-# Each ATS endpoint returns a company's ENTIRE job board — filters.yaml decides which of those
+# Each ATS endpoint returns a company's ENTIRE job board; filters.yaml decides which of those
 # postings actually match what you're looking for, so you can list any company here regardless
 # of what role you're hunting; the title filter does the real targeting.
 

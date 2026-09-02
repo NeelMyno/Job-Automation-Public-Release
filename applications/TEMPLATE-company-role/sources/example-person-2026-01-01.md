@@ -1,4 +1,4 @@
-# Source snapshot — [Person or Company] ([role/context])
+# Source snapshot: [Person or Company] ([role/context])
 
 ```
 url: [the real URL you fetched]
@@ -19,8 +19,8 @@ fetched: 2026-01-01
 - NOT verified: [what remains, with an explicit OPERATOR-VERIFY: instruction]
 
 <!--
-This is a worked example showing the exact shape verify_claims.py expects — one file per
+This is a worked example showing the exact shape verify_claims.py expects: one file per
 person/company fact bundle you quote or characterize anywhere in this dossier. Delete this file
-and create your own real ones as you research. Never edit a source file to make a quote pass —
+and create your own real ones as you research. Never edit a source file to make a quote pass;
 that's forgery (CLAUDE.md §0.1 ban #5).
 -->

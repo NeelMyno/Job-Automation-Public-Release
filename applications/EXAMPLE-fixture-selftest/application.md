@@ -1,4 +1,4 @@
-# Acme Corp — Design Lead · application record (SELFTEST FIXTURE)
+# Acme Corp: Design Lead · application record (SELFTEST FIXTURE)
 
 Synthetic. Not a real application. Exercises `application.md`'s form-answer sweep in
 `python3 scripts/verify_claims.py --selftest`.

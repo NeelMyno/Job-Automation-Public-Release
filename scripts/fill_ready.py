@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""fill_ready.py — a pre-fill readiness gate for an application's cover letter.
+"""fill_ready.py: a pre-fill readiness gate for an application's cover letter.
 
 A cover-letter PDF should be mandatory in every application bundle, exactly
 like the resume, and should travel with it. This gate exists because presence
-alone turned out not to be enough: a stale-but-present cover letter — a PDF
+alone turned out not to be enough: a stale-but-present cover letter (a PDF
 that existed on disk but no longer matched its edited source note, carrying
-banned phrasing, an em-dash, or otherwise off-voice copy — slipped through a
+banned phrasing, an em-dash, or otherwise off-voice copy) slipped through a
 presence-only check and reached a live form before this freshness-and-content
 check was added.
 
@@ -17,7 +17,7 @@ rendered and content-clean.
 What it checks, per dossier:
   1. A cover-letter PDF is PRESENT.                              else -> BLOCK
   2. The cover SOURCE note passes the content linter              else -> BLOCK
-     (voice_check.py — pluggable; swap in your own).
+     (voice_check.py, pluggable; swap in your own).
   3. The cover PDF is not STALE vs the note (PDF mtime >= note).  else -> BLOCK
 
 Exit codes:  0 = ready to fill · 2 = BLOCKED (one or more failures) · 3 = usage error.
@@ -38,7 +38,7 @@ VOICE_CHECK = REPO / "scripts" / "voice_check.py"
 # Cover source notes are named a few ways across a dossier tree; the largest markdown
 # file in cover-letter/ is treated as the sendable body when none of these match.
 # "waas-message.md" is an example of a board-specific convention (originally named for
-# a "Work at a Startup"-style job board) — it is optional, not load-bearing; add or
+# a "Work at a Startup"-style job board). It is optional, not load-bearing; add or
 # remove filenames here to match your own dossier naming.
 NOTE_NAMES = ("cover-note.md", "cover-letter.md", "waas-message.md", "message.md")
 
@@ -121,16 +121,16 @@ def run(dossier_arg: str) -> int:
     if not dossier.is_absolute():
         dossier = REPO / dossier
     if not dossier.is_dir():
-        print(f"fill_ready: usage error — no such dossier: {dossier_arg}")
+        print(f"fill_ready: usage error, no such dossier: {dossier_arg}")
         return 3
     fails = check_dossier(dossier)
     name = dossier.name
     if fails:
-        print(f"fill_ready: BLOCKED — {name} is NOT ready to fill ({len(fails)} issue(s)). Do not open the browser.")
+        print(f"fill_ready: BLOCKED, {name} is NOT ready to fill ({len(fails)} issue(s)). Do not open the browser.")
         for f in fails:
             print(f"  🔴 {f}")
         return 2
-    print(f"fill_ready: OK — {name} has a present, voice-clean, current cover-letter PDF.")
+    print(f"fill_ready: OK, {name} has a present, voice-clean, current cover-letter PDF.")
     return 0
 
 
@@ -147,7 +147,7 @@ def selftest() -> int:
         "team feels it immediately."
     )
     # Content designed to trip the content linter (an em-dash, here) rather than model
-    # every possible failure — the point is exercising the "linter says no" path.
+    # every possible failure: the point is exercising the "linter says no" path.
     stale_note = (
         "At my last company I owned the onboarding flow end to end — research, design, "
         "and the shipped implementation — and measured a drop in first-week support "

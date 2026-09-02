@@ -1,6 +1,6 @@
-# Acme Corp — Design Lead · cover note (SELFTEST FIXTURE)
+# Acme Corp, Design Lead · cover note (SELFTEST FIXTURE)
 
-**Status: FIXTURE — not a real cover letter.** Built only so
+**Status: FIXTURE. Not a real cover letter.** Built only so
 `python3 scripts/verify_claims.py --selftest` has real sendable copy to sweep on a fresh clone
 with no real user data.
 
