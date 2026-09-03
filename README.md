@@ -4,6 +4,11 @@ An agent-run career engine, supported in Claude Code and Codex, that turns a job
 a tailored résumé + cover letter, discovers new postings automatically, preps you for interviews, and
 drafts warm outreach. **Built for any role, any industry, anywhere in the US.**
 
+![How the engine works: an empty knowledge base feeds a discovery track and a build track, both converge on a grounding gate of five checks, and only a passing draft reaches one of two points where you, not the agent, click Submit or Send.](docs/architecture.svg)
+
+Six stages, one gate every draft has to clear before a human ever sees it, and two feedback loops
+that keep the whole thing honest.
+
 New here? Read [`SETUP.md`](SETUP.md) first: it's the whole onboarding walkthrough, start to finish.
 
 ## How it works
@@ -20,7 +25,11 @@ browser to fill (never submit) real forms. See `CLAUDE.md` for the full operatin
 ## The gates: why this repo can be trusted
 
 Everything an employer sees is checked by a script, not by an agent remembering to be careful.
-Five gates, each with a self-test that runs clean out of the box on a fresh clone:
+The diagram above shows the checks a single dossier's résumé, cover letter, and outreach draft
+must clear before a human ever sees them (`verify_claims`, `canon`, `visa_gate`, plus `resume_gate`
+and the voice/subject checks). The full repo-wide gate suite is wider than that and includes the
+rules and the goal themselves, not just one dossier's content. Five of those gates, each with a
+self-test that runs clean out of the box on a fresh clone:
 
 ```
 python3 scripts/verify_claims.py "applications/<company>-<role>"   # outbound copy
@@ -48,6 +57,7 @@ every file written is checked, and a turn that introduces a defect is **blocked*
   five-pass review workflow, and `settings.json` (the hooks).
 - `ops/` is this repo's own session record: `STATE.md`, `HANDOFF.md`, `decisions/` (an immutable ADR
   ledger), `log/activity.md`, `notes/`.
+- `docs/`: the architecture diagram at the top of this file.
 - `applications/`: active per-job dossiers, one folder per job. Copy `TEMPLATE-company-role/` to
   start one.
 - `resume/`: your current résumé (source, built PDF, fonts).
