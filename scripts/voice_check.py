@@ -55,12 +55,19 @@ RULES: list[tuple[str, list[str], str]] = [
     ], "Reads as a story (setup, lesson, turn). Skip the narrative arc; make it a plain statement."),
 
     ("too-neat mirror", [
-        r"\bexactly how I (work|think|build)\b", r"\bexactly what I (do|build|ship)\b",
-        r"\bwhich is exactly\b", r"\bthat'?s exactly (how|what|the)\b",
+        r"\balready\b", r"\bexactly\b",
         r"\bthe same (thing|fight|problem) I (deal|fight|face|work|live)\b",
         r"\breads like a description of my\b",
-    ], "A too-neat mirror between the company and you. Real overlap is partial; say it plainly, "
-       "let it be imperfect."),
+    ], "A too-neat mirror between the company and you, the JD's language handed back as if you "
+       "already lived inside their exact framing. This is a BLANKET ban on the bare words "
+       "'already' and 'exactly', not a pattern over specific noun phrases: a pattern-matched rule "
+       "over specific shapes ('exactly how I work') missed the same claim wearing a different "
+       "grammatical shell every time it was tightened ('is already my default', 'is already the "
+       "world X operates in', 'I already work with the product': three distinct shells, same "
+       "underlying claim, in one sweep). When a banned pattern keeps resurfacing in a new shape, "
+       "the word itself is the tell, not the sentence shape around it. Any legitimate non-mirror "
+       "use ('exactly 5 years', 'I have already relocated') is cheap to reword and loses nothing "
+       "by dropping the word, and that trade beats missing a fourth variant."),
 
     ("em-dash", [r"—", r"(?<!\w)--(?!\w)"],
         "Em-dash or double-dash. Banned in shipped copy; use a period or a comma."),
@@ -128,6 +135,25 @@ def selftest() -> int:
 
     story = "I learned it the hard way, and that's why now I keep the judgment on what ships."
     want("catches story-arc (the hard way / and that's why)", "story-arc" in {c for c, _, _ in check(story)})
+
+    # Three distinct grammatical shells for the same underlying claim, found in one real sweep:
+    # a pattern-matched rule over specific phrases missed the second and third shell entirely,
+    # which is exactly why this rule is now a blanket ban on the bare words, not a phrase list.
+    already_mirror = ("I'm applying for the Design Engineer role. The line about owning the design "
+                       "system across Figma and code is already how I work.")
+    want("catches 'is already how I work' (not just 'exactly')",
+         "too-neat mirror" in {c for c, _, _ in check(already_mirror)})
+
+    synonym_mirror = ("A designer who ships his own production front end, with an AI-native workflow, "
+                       "is already the world Fathom operates in.")
+    want("catches 'is already the world X operates in' (the copula shell)",
+         "too-neat mirror" in {c for c, _, _ in check(synonym_mirror)})
+
+    no_copula_mirror = ("I use Northwind every working day, so the honest version of why I'm applying "
+                         "is that I already work with the product all day.")
+    want("catches 'I already work' (no copula, the blanket-word fix)",
+         "too-neat mirror" in {c for c, _, _ in check(no_copula_mirror)})
+
     want("catches em-dash", "em-dash" in {c for c, _, _ in check("I ship the front end — all of it.")})
 
     perf = "It does one thing, and it refuses to do anything else. No feed, no streaks, no coach."
