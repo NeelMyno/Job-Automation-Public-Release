@@ -4,10 +4,10 @@ An agent-run career engine, supported in Claude Code and Codex, that turns a job
 a tailored résumé + cover letter, discovers new postings automatically, preps you for interviews, and
 drafts warm outreach. **Built for any role, any industry, anywhere in the US.**
 
-![How the engine works: an empty knowledge base feeds a discovery track and a build track, both converge on a grounding gate of five checks, and only a passing draft reaches one of two points where you, not the agent, click Submit or Send.](docs/architecture.svg)
+![How the engine works: a one-time setup feeds a knowledge base, which feeds a discovery track and a build track; both converge on a grounding gate that checks this dossier's own content and, in a second row, the repo itself every session; a passing draft reaches one of two points where you, not the agent, click Submit or Send; and ops/ carries session memory across the whole thing.](docs/architecture.svg)
 
-Six stages, one gate every draft has to clear before a human ever sees it, and two feedback loops
-that keep the whole thing honest.
+One-time setup, a gate that checks both this dossier and the repo itself, session memory that
+carries across a fresh clone's sessions, and two feedback loops that keep the whole thing honest.
 
 New here? Read [`SETUP.md`](SETUP.md) first: it's the whole onboarding walkthrough, start to finish.
 

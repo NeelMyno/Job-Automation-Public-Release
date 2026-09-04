@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1146" role="img" aria-label="Flow diagram of the job-search engine: a knowledge base feeds a discovery track (crawler and tracker) and a build track (dossier, résumé, cover letter, outreach drafts); both converge on a grounding gate of five checks; passing drafts go to two human-approval steps, fill the real form and review and send outreach, that the person themselves submits or sends; failing drafts loop back to Build; and the outcome of every submission feeds back into the tracker.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1301" role="img" aria-label="Detailed flow diagram of the job-search engine. Setup.md is filled in once; ops holds session memory, read at the start of every session and written at the end. A knowledge base of four minimum files feeds a discovery track (crawler pulling from Greenhouse, Ashby, Lever, and HN) and a build track (dossier, resume plus cover letter, outreach drafts, each showing its real sub-parts), both converging on a grounding gate with two rows: five checks on this one dossier's content, and three checks that run repo-wide every session regardless of dossier, also enforced automatically from the harness. A passing draft goes to two human-approval steps, filling the real form via an isolated browser tool and sending outreach via LinkedIn, that the person themselves submits or sends. A failing draft loops back to Build. The outcome, status, sponsorship, and next action, feeds back into the tracker.">
   <defs>
     <pattern id="haz" width="26" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
       <rect width="26" height="12" fill="#16130E"/><rect width="13" height="12" fill="#E4002B"/>
@@ -22,16 +22,22 @@
     .lbl{ font-size:12.5px; }
     .nodeTitle{ font-size:22px; }
     .nodeSub{ font-size:12px; fill:#5A5346; letter-spacing:.02em; text-transform:none; font-weight:400; }
+    .tag{ font-size:10px; fill:#5A5346; letter-spacing:.05em; }
     .pillLabel{ font-size:14px; font-weight:700; letter-spacing:.05em; }
+    .pillSub{ font-size:9.5px; fill:#5A5346; letter-spacing:.04em; }
     .edgeLabel{ font-size:12px; fill:#5A5346; letter-spacing:.03em; }
     .gateTitle{ font-family:"Anton"; font-size:38px; text-transform:uppercase; letter-spacing:.01em; fill:#16130E; }
+    .rowLabel{ font-size:11px; font-weight:700; fill:#16130E; letter-spacing:.06em; }
     .onDark{ fill:#FFFFFF; }
     .dim{ fill:#5A5346; }
     .box{ fill:#EDEAE3; stroke:#16130E; stroke-width:1.5; }
     .boxAlt{ fill:#E1DBCC; stroke:#16130E; stroke-width:1.25; }
+    .boxThin{ fill:#EDEAE3; stroke:#16130E; stroke-width:1.1; }
     .pill{ fill:#EDEAE3; stroke:#16130E; stroke-width:1.5; }
+    .pillWide{ fill:#EDEAE3; stroke:#16130E; stroke-width:1.25; }
     .actionBox{ fill:#EDEAE3; stroke:#16130E; stroke-width:1.5; }
     .flow{ fill:none; stroke:#16130E; stroke-width:1.5; }
+    .flowThin{ fill:none; stroke:#16130E; stroke-width:1.1; }
     .flowFail{ fill:none; stroke:#E4002B; stroke-width:1.75; stroke-dasharray:2 5; }
   </style>
 
@@ -39,14 +45,14 @@
        HTML page around it to supply a background, so paint the paper tone here directly or a
        transparent canvas falls back to whatever the host page's background is (black, on GitHub's
        dark theme, which would put black ink on nothing) -->
-  <rect x="0" y="0" width="1320" height="1146" fill="#EDEAE3"/>
+  <rect x="0" y="0" width="1320" height="1301" fill="#EDEAE3"/>
 
   <!-- crop / registration marks, all four corners -->
   <g stroke="#16130E" stroke-width="1.5">
     <line x1="32" y1="20" x2="32" y2="40"/><line x1="22" y1="30" x2="42" y2="30"/>
     <line x1="1288" y1="20" x2="1288" y2="40"/><line x1="1278" y1="30" x2="1298" y2="30"/>
-    <line x1="32" y1="1106" x2="32" y2="1126"/><line x1="22" y1="1116" x2="42" y2="1116"/>
-    <line x1="1288" y1="1106" x2="1288" y2="1126"/><line x1="1278" y1="1116" x2="1298" y2="1116"/>
+    <line x1="32" y1="1261" x2="32" y2="1281"/><line x1="22" y1="1271" x2="42" y2="1271"/>
+    <line x1="1288" y1="1261" x2="1288" y2="1281"/><line x1="1278" y1="1271" x2="1298" y2="1271"/>
   </g>
 
   <!-- top row: bordered fig tag + plain sys tag -->
@@ -57,113 +63,156 @@
   <!-- hazard divider -->
   <rect x="72" y="94" width="1176" height="13" fill="url(#haz)"/>
 
-  <g transform="translate(0,150)">
+  <!-- OPS/: session memory, sits outside the main flow. Every session reads it first, writes it last. -->
+  <rect class="boxThin" x="72" y="117" width="188" height="34"/>
+  <text class="disp" x="86" y="131" style="font-size:13px">OPS/</text>
+  <text class="tag mono" x="86" y="146" style="font-size:8.5px">SESSION MEMORY: READ FIRST, WRITTEN LAST</text>
+  <path class="flowThin" d="M260,134 L360,134 L360,211 L450,211" marker-end="url(#arrow)"/>
+
+  <!-- SETUP.md: the one-time step before Foundation exists -->
+  <rect class="boxThin" x="590" y="117" width="140" height="26"/>
+  <text class="tag mono" x="660" y="134" text-anchor="middle" style="font-size:9.5px">SETUP.MD, DAY ONE</text>
+  <path class="flowThin" d="M660,143 L660,159" marker-end="url(#arrow)"/>
+
+  <g transform="translate(0,161)">
 
   <!-- FOUNDATION -->
-  <rect class="box" x="452" y="0" width="416" height="84"/>
+  <rect class="box" x="452" y="0" width="416" height="100"/>
   <text class="disp nodeTitle" x="660" y="41" text-anchor="middle">KNOWLEDGE&#8209;BASE/</text>
   <text class="nodeSub" x="660" y="64" text-anchor="middle">your facts, filled in once</text>
+  <text class="tag mono" x="660" y="84" text-anchor="middle">01 PROFILE &#183; 02 WORK&#8209;AUTH &#183; 07 RESUME &#183; 12 ANSWERS</text>
 
   <!-- split from foundation -->
-  <path class="flow" d="M660,84 L660,110 L280,110 L280,128" marker-end="url(#arrow)"/>
-  <path class="flow" d="M660,110 L1040,110 L1040,128" marker-end="url(#arrow)"/>
+  <path class="flow" d="M660,100 L660,126 L280,126 L280,144" marker-end="url(#arrow)"/>
+  <path class="flow" d="M660,126 L1040,126 L1040,144" marker-end="url(#arrow)"/>
+  <rect x="1076" y="120" width="52" height="17" fill="none" stroke="#16130E" stroke-width="1.1"/>
+  <text class="tag mono" x="1102" y="132" text-anchor="middle" style="font-size:9px">/WAVE</text>
 
   <!-- DISCOVERY column -->
-  <rect class="box" x="92" y="130" width="376" height="80"/>
-  <text class="disp nodeTitle" x="280" y="169" text-anchor="middle">JOB&#8209;CRAWLER</text>
-  <text class="nodeSub" x="280" y="191" text-anchor="middle">Greenhouse &#183; Ashby &#183; Lever &#183; HN</text>
+  <rect class="box" x="92" y="146" width="376" height="96"/>
+  <text class="disp nodeTitle" x="280" y="185" text-anchor="middle">JOB&#8209;CRAWLER</text>
+  <text class="nodeSub" x="280" y="207" text-anchor="middle">Greenhouse &#183; Ashby &#183; Lever &#183; HN</text>
+  <text class="tag mono" x="280" y="227" text-anchor="middle">$0 &#183; NO KEYS &#183; NO LOGIN</text>
 
-  <path class="flow" d="M280,210 L280,248" marker-end="url(#arrow)"/>
+  <path class="flow" d="M280,242 L280,278" marker-end="url(#arrow)"/>
 
-  <rect class="box" x="92" y="250" width="376" height="80"/>
-  <text class="disp nodeTitle" x="280" y="289" text-anchor="middle">TRACKER.HTML</text>
-  <text class="nodeSub" x="280" y="311" text-anchor="middle">the one live pipeline view</text>
+  <rect class="box" x="92" y="280" width="376" height="80"/>
+  <text class="disp nodeTitle" x="280" y="319" text-anchor="middle">TRACKER.HTML</text>
+  <text class="nodeSub" x="280" y="341" text-anchor="middle">the one live pipeline view</text>
 
   <!-- connector: tracker picks the next target for Build -->
-  <path class="flow" d="M468,290 L700,290 L700,152 L858,152" marker-end="url(#arrow)"/>
-  <text class="edgeLabel mono" x="704" y="212">RANKED TARGET</text>
+  <path class="flow" d="M468,320 L700,320 L700,178 L858,178" marker-end="url(#arrow)"/>
+  <text class="edgeLabel mono" x="704" y="242">RANKED TARGET</text>
 
   <!-- BUILD column -->
-  <rect class="boxAlt" x="860" y="130" width="368" height="54"/>
-  <text class="disp" x="1044" y="164" text-anchor="middle" style="font-size:18px">DOSSIER</text>
+  <rect class="boxAlt" x="860" y="146" width="368" height="68"/>
+  <text class="disp" x="1044" y="176" text-anchor="middle" style="font-size:18px">DOSSIER</text>
+  <text class="tag mono" x="1044" y="196" text-anchor="middle">/WAVE &#183; JD &#183; RESEARCH &#183; REFERRALS &#183; PREP</text>
 
-  <rect class="boxAlt" x="860" y="200" width="368" height="54"/>
-  <text class="disp" x="1044" y="234" text-anchor="middle" style="font-size:18px">R&#201;SUM&#201; + COVER LETTER</text>
+  <rect class="boxAlt" x="860" y="228" width="368" height="68"/>
+  <text class="disp" x="1044" y="258" text-anchor="middle" style="font-size:18px">R&#201;SUM&#201; + COVER LETTER</text>
+  <text class="tag mono" x="1044" y="278" text-anchor="middle">5&#8209;PASS REVIEW, EVERY TIME</text>
 
-  <rect class="boxAlt" x="860" y="270" width="368" height="54"/>
-  <text class="disp" x="1044" y="304" text-anchor="middle" style="font-size:18px">OUTREACH DRAFTS</text>
+  <rect class="boxAlt" x="860" y="310" width="368" height="68"/>
+  <text class="disp" x="1044" y="340" text-anchor="middle" style="font-size:18px">OUTREACH DRAFTS</text>
+  <text class="tag mono" x="1044" y="360" text-anchor="middle">/OUTREACH &#183; TRACKER &#183; REFERRALS &#183; LEDGERS</text>
 
   <!-- Build -> Gate -->
-  <path class="flow" d="M1044,324 L1044,346 L660,346 L660,366" marker-end="url(#arrow)"/>
+  <path class="flow" d="M1044,378 L1044,398 L660,398 L660,412" marker-end="url(#arrow)"/>
 
-  <!-- GATE, the hero -->
-  <rect x="72" y="368" width="1176" height="220" fill="#E1DBCC" stroke="#16130E" stroke-width="1.75"/>
-  <rect x="72" y="368" width="1176" height="12" fill="url(#haz)"/>
-  <text class="gateTitle" x="660" y="450" text-anchor="middle">THE GROUNDING GATE</text>
-  <text class="edgeLabel mono" x="660" y="474" text-anchor="middle" style="font-size:12px">EVERY CLAIM MUST TRACE TO A SOURCE, OR IT IS CUT</text>
+  <!-- GATE, the hero: two rows, two different jobs -->
+  <rect x="72" y="414" width="1176" height="316" fill="#E1DBCC" stroke="#16130E" stroke-width="1.75"/>
+  <rect x="72" y="414" width="1176" height="12" fill="url(#haz)"/>
+  <text class="gateTitle" x="660" y="496" text-anchor="middle">THE GROUNDING GATE</text>
+  <text class="edgeLabel mono" x="660" y="520" text-anchor="middle" style="font-size:12px">EVERY CLAIM MUST TRACE TO A SOURCE, OR IT IS CUT</text>
 
   <g>
-    <rect class="pill" x="104" y="504" width="205" height="48"/>
-    <text class="pillLabel" x="207" y="533" text-anchor="middle">verify_claims</text>
+    <rect class="pill" x="104" y="550" width="205" height="64"/>
+    <text class="pillLabel" x="207" y="577" text-anchor="middle">verify_claims</text>
+    <text class="pillSub mono" x="207" y="598" text-anchor="middle">QUOTES TRACE TO A SOURCE</text>
 
-    <rect class="pill" x="331" y="504" width="205" height="48"/>
-    <text class="pillLabel" x="434" y="533" text-anchor="middle">canon</text>
+    <rect class="pill" x="331" y="550" width="205" height="64"/>
+    <text class="pillLabel" x="434" y="577" text-anchor="middle">canon</text>
+    <text class="pillSub mono" x="434" y="598" text-anchor="middle">NO RETIRED CLAIM SHIPS</text>
 
-    <rect class="pill" x="558" y="504" width="205" height="48"/>
-    <text class="pillLabel" x="660" y="533" text-anchor="middle">visa_gate</text>
+    <rect class="pill" x="558" y="550" width="205" height="64"/>
+    <text class="pillLabel" x="660" y="577" text-anchor="middle">visa_gate</text>
+    <text class="pillSub mono" x="660" y="598" text-anchor="middle">MATCHES YOUR OWN KB</text>
 
-    <rect class="pill" x="785" y="504" width="205" height="48"/>
-    <text class="pillLabel" x="888" y="533" text-anchor="middle">resume_gate</text>
+    <rect class="pill" x="785" y="550" width="205" height="64"/>
+    <text class="pillLabel" x="888" y="577" text-anchor="middle">resume_gate</text>
+    <text class="pillSub mono" x="888" y="598" text-anchor="middle">ONE PAGE, 88%+ FILLED</text>
 
-    <rect class="pill" x="1012" y="504" width="205" height="48"/>
-    <text class="pillLabel" x="1114" y="533" text-anchor="middle">voice + subject</text>
+    <rect class="pill" x="1012" y="550" width="205" height="64"/>
+    <text class="pillLabel" x="1114" y="577" text-anchor="middle">voice + subject</text>
+    <text class="pillSub mono" x="1114" y="598" text-anchor="middle">NO AI&#8209;SLOP TELLS</text>
+  </g>
+
+  <!-- divider between the two gate rows -->
+  <line x1="104" y1="628" x2="1217" y2="628" stroke="#16130E" stroke-width="1" stroke-dasharray="1 4"/>
+  <text class="rowLabel mono" x="660" y="646" text-anchor="middle">ALSO ENFORCED REPO&#8209;WIDE, EVERY SESSION, FROM THE HARNESS ITSELF, NOT JUST THIS DOSSIER</text>
+
+  <g>
+    <rect class="pillWide" x="180" y="660" width="300" height="50"/>
+    <text class="pillLabel" x="330" y="683" text-anchor="middle" style="font-size:13px">check_law</text>
+    <text class="pillSub mono" x="330" y="700" text-anchor="middle">NO DANGLING REFERENCES</text>
+
+    <rect class="pillWide" x="510" y="660" width="300" height="50"/>
+    <text class="pillLabel" x="660" y="683" text-anchor="middle" style="font-size:13px">throughput</text>
+    <text class="pillSub mono" x="660" y="700" text-anchor="middle">NOTHING SITS UNSENT</text>
+
+    <rect class="pillWide" x="840" y="660" width="300" height="50"/>
+    <text class="pillLabel" x="990" y="683" text-anchor="middle" style="font-size:13px">injection_scan</text>
+    <text class="pillSub mono" x="990" y="700" text-anchor="middle">JD TEXT CAN&#8217;T GIVE ORDERS</text>
   </g>
 
   <!-- FAIL loop back to Build, the one red path -->
-  <path class="flowFail" d="M1248,494 C 1288,494 1288,240 1232,240" marker-end="url(#arrowFail)"/>
-  <rect x="1253" y="358" width="50" height="22" fill="#E4002B"/>
-  <text x="1278" y="373" text-anchor="middle" class="mono onDark" style="font-size:11px; font-weight:700">FAIL</text>
+  <path class="flowFail" d="M1248,582 C 1300,582 1300,262 1232,262" marker-end="url(#arrowFail)"/>
+  <rect x="1246" y="404" width="54" height="22" fill="#E4002B"/>
+  <text x="1273" y="419" text-anchor="middle" class="mono onDark" style="font-size:11px; font-weight:700">FAIL</text>
 
   <!-- PASS down, split to two human actions -->
-  <path class="flow" d="M660,588 L660,616 L370,616 L370,634" marker-end="url(#arrow)"/>
-  <path class="flow" d="M660,616 L950,616 L950,634" marker-end="url(#arrow)"/>
-  <text class="edgeLabel mono" x="672" y="608">PASS</text>
+  <path class="flow" d="M660,730 L660,758 L370,758 L370,776" marker-end="url(#arrow)"/>
+  <path class="flow" d="M660,758 L950,758 L950,776" marker-end="url(#arrow)"/>
+  <text class="edgeLabel mono" x="672" y="750">PASS</text>
 
   <!-- HUMAN ACTION -->
-  <rect class="actionBox" x="180" y="636" width="380" height="92"/>
-  <text class="disp nodeTitle" x="370" y="672" text-anchor="middle">FILL THE REAL FORM</text>
-  <text class="nodeSub" x="370" y="695" text-anchor="middle">isolated browser, DOM&#8209;verified fields</text>
-  <text class="nodeSub" x="370" y="713" text-anchor="middle">never auto&#8209;submits</text>
+  <rect class="actionBox" x="180" y="778" width="380" height="108"/>
+  <text class="disp nodeTitle" x="370" y="812" text-anchor="middle">FILL THE REAL FORM</text>
+  <text class="nodeSub" x="370" y="834" text-anchor="middle">isolated browser, DOM&#8209;verified fields</text>
+  <text class="nodeSub" x="370" y="852" text-anchor="middle">never auto&#8209;submits</text>
+  <text class="tag mono" x="370" y="872" text-anchor="middle">chrome&#8209;devtools&#8209;mcp, its own profile</text>
 
-  <rect class="actionBox" x="760" y="636" width="380" height="92"/>
-  <text class="disp nodeTitle" x="950" y="672" text-anchor="middle">SEND OUTREACH</text>
-  <text class="nodeSub" x="950" y="695" text-anchor="middle">personalized notes</text>
-  <text class="nodeSub" x="950" y="713" text-anchor="middle">gated the same way as the r&#233;sum&#233;</text>
+  <rect class="actionBox" x="760" y="778" width="380" height="108"/>
+  <text class="disp nodeTitle" x="950" y="812" text-anchor="middle">SEND OUTREACH</text>
+  <text class="nodeSub" x="950" y="834" text-anchor="middle">personalized notes</text>
+  <text class="nodeSub" x="950" y="852" text-anchor="middle">gated the same way as the r&#233;sum&#233;</text>
+  <text class="tag mono" x="950" y="872" text-anchor="middle">LINKEDIN NOTE + DM</text>
 
-  <rect x="574" y="756" width="172" height="30" fill="#16130E"/>
-  <text x="660" y="776" text-anchor="middle" class="mono onDark" style="font-size:12px; font-weight:700">YOU DECIDE</text>
+  <rect x="574" y="908" width="172" height="30" fill="#16130E"/>
+  <text x="660" y="928" text-anchor="middle" class="mono onDark" style="font-size:12px; font-weight:700">YOU DECIDE</text>
 
   <!-- feedback loop back to tracker -->
-  <path class="flow" d="M270,728 L270,802 L36,802 L36,290 L90,290" marker-end="url(#arrow)"/>
-  <text class="edgeLabel mono" x="18" y="546" transform="rotate(-90 18 546)" text-anchor="middle" style="font-size:10.5px">OUTCOME FEEDS BACK TO THE TRACKER</text>
+  <path class="flow" d="M270,886 L270,956 L36,956 L36,320 L90,320" marker-end="url(#arrow)"/>
+  <text class="edgeLabel mono" x="18" y="638" transform="rotate(-90 18 638)" text-anchor="middle" style="font-size:10.5px">STATUS &#183; SPONSORSHIP &#183; NEXT ACTION</text>
 
   </g>
 
   <!-- footer: legend / barcode+folio -->
-  <line x1="72" y1="990" x2="1248" y2="990" stroke="#16130E" stroke-width="1.25"/>
-  <g transform="translate(72,1016)" class="mono" style="font-size:12px">
+  <line x1="72" y1="1145" x2="1248" y2="1145" stroke="#16130E" stroke-width="1.25"/>
+  <g transform="translate(72,1171)" class="mono" style="font-size:12px">
     <rect x="0" y="-10" width="18" height="18" fill="#E4002B"/>
     <text x="27" y="4" class="dim">GATE FAILS &#8594; KICKED BACK TO BUILD</text>
     <rect x="420" y="-10" width="18" height="18" fill="none" stroke="#16130E" stroke-width="1.5"/>
     <text x="447" y="4" class="dim">A HUMAN, NOT THE AGENT, MUST ACT</text>
   </g>
 
-  <g transform="translate(1248,1006)" fill="#16130E">
+  <g transform="translate(1248,1161)" fill="#16130E">
     <rect x="-96" y="0" width="2" height="26"/><rect x="-91" y="0" width="4" height="26"/><rect x="-83" y="0" width="1" height="26"/>
     <rect x="-79" y="0" width="3" height="26"/><rect x="-73" y="0" width="1" height="26"/><rect x="-69" y="0" width="5" height="26"/>
     <rect x="-61" y="0" width="1" height="26"/><rect x="-56" y="0" width="3" height="26"/><rect x="-50" y="0" width="4" height="26"/>
     <rect x="-43" y="0" width="1" height="26"/><rect x="-38" y="0" width="3" height="26"/><rect x="-32" y="0" width="2" height="26"/>
   </g>
-  <text class="mono" x="1248" y="1050" text-anchor="end" style="font-size:12px">ARCHITECTURE&#183;01</text>
+  <text class="mono" x="1248" y="1205" text-anchor="end" style="font-size:12px">ARCHITECTURE&#183;01</text>
 
 </svg>
