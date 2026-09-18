@@ -36,10 +36,21 @@ except ImportError:
 REPO = Path(__file__).resolve().parents[1]
 PATCH_FILE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$", re.M)
 FORCE_PUSH = re.compile(
-    r"(?:^|[;&|]\s*)git\s+push\b[^\n;&|]*(?:--force(?:-with-lease)?\b|-f\b)", re.I
+    # A force-push is a history rewrite (forbidden; the point of the auto-commit convention is a
+    # rewindable history that never gets rewritten). The flag forms are `--force` /
+    # `--force-with-lease` / `-f`, but a `+`-prefixed REFSPEC (`git push origin +main`,
+    # `+HEAD:main`) forces a non-fast-forward update with no flag at all. The command is
+    # NORMALIZED before this runs (quotes stripped, whitespace collapsed; see the caller), so a
+    # quoted refspec (`"+main"`), leading whitespace, and an env-var prefix
+    # (`GIT_SSH_COMMAND=... git push`) all reduce to the plain form. The anchor accepts `git push`
+    # at line start, after a shell separator, or after any whitespace (the env prefix).
+    # ` \+(?=[\w/])` catches the refspec: a space, then `+`, then a ref character.
+    r"(?:^|[;&|]|\s)git\s+push\b[^\n;&|]*(?:--force(?:-with-lease)?\b|-f\b|\s\+(?=[\w/]))", re.I
 )
 SENSITIVE = re.compile(
-    r"(?:^|[\s/\"'=])(?:\.mcp\.json|\.env(?:\.[^\s/\"']+)?)"
+    # re.I: a case-insensitive filesystem serves `cat .MCP.JSON` as the real `.mcp.json`. A
+    # case-sensitive guard let every upper/mixed-case spelling through.
+    r"(?:^|[\s/\"'=])(?:\.mcp\.json|\.env(?:\.[^\s/\"']+)?)", re.I
 )
 SAFE_SECRET_METADATA = re.compile(
     r"^\s*(?:git\s+(?:status|check-ignore)|grep\s+-l|wc\s+-c|shasum\b)", re.I
@@ -152,14 +163,31 @@ def pre_tool(data: dict) -> dict | None:
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
     if not isinstance(command, str):
         return None
-    if tool_name == "Bash" and FORCE_PUSH.search(command):
-        return deny("Force-push is forbidden in this repo. Pull with rebase and push normally.")
+    # Normalize before the force-push check: strip quotes and collapse whitespace so a quoted
+    # refspec (`git push origin "+main"`), leading whitespace, and an env-var prefix all reduce to
+    # the plain form the regex matches.
+    if tool_name == "Bash":
+        fp_cmd = re.sub(r"\s+", " ", command.replace('"', " ").replace("'", " "))
+        if FORCE_PUSH.search(fp_cmd):
+            return deny("Force-push is forbidden in this repo. Pull with rebase and push normally.")
     if tool_name in {"Bash", "apply_patch"} and SENSITIVE.search(command):
-        if tool_name == "apply_patch" or not SAFE_SECRET_METADATA.search(command):
-            return deny(
-                "Do not read or modify .mcp.json or .env files. Check only presence or metadata "
-                "with git status, git check-ignore, grep -l, wc -c, or shasum."
-            )
+        _secret_deny = deny(
+            "Do not read or modify .mcp.json or .env files. Check only presence or metadata "
+            "with git status, git check-ignore, grep -l, wc -c, or shasum."
+        )
+        if tool_name == "apply_patch":
+            return _secret_deny
+        # Per-SEGMENT, not per-command. SAFE_SECRET_METADATA is `^`-anchored, so the old check let
+        # a safe LEADING verb whitelist the WHOLE compound command: `git status && cat .env` would
+        # dump the secret. Split on the shell separators AND treat the inside of a
+        # $(...)/backtick command substitution as its own segment: `wc -c $(cat .mcp.json)` has a
+        # safe leading verb but RUNS `cat .mcp.json` inside the substitution, leaking the secret.
+        # Deny if ANY segment that touches a secret file is not itself metadata-only.
+        segs = re.split(r"&&|\|\||[;&|\n]", command)
+        segs += [g for mm in re.finditer(r"\$\(([^)]*)\)|`([^`]*)`", command) for g in mm.groups() if g]
+        for seg in segs:
+            if SENSITIVE.search(seg) and not SAFE_SECRET_METADATA.search(seg):
+                return _secret_deny
     return None
 
 
@@ -232,8 +260,25 @@ def selftest() -> int:
     paths = patch_paths({"cwd": str(REPO), "tool_input": {"command": patch}})
     checks.append(("multi-file apply_patch paths are extracted", {p.name for p in paths} == {"README.md", "x.json"}))
     checks.append(("force-push is denied wherever the flag appears", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git push origin main --force"}}))))
+    # A `+`-prefixed refspec forces a non-fast-forward push with no flag at all, and slipped both
+    # this guard and the settings.json deny globs before it was named explicitly.
+    checks.append(("🔴 force-push via +refspec is denied (git push origin +main)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git push origin +main"}}))))
+    checks.append(("a normal push is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}) is None))
     checks.append(("secret-file reads are denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "sed -n 1,20p .env.local"}}))))
+    # SAFE_SECRET_METADATA is ^-anchored, so a safe leading verb used to whitelist the WHOLE
+    # compound command and leak the secret in a later segment.
+    checks.append(("🔴 a secret read behind a safe prefix is denied (git status && cat .env)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git status && cat .env"}}))))
+    checks.append(("🔴 metadata-then-read compound is denied (wc -c .env && cat .env)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c .env && cat .env"}}))))
+    # Three more bypasses of the two guards above, all closed the same pass.
+    checks.append(("🔴 secret read via command substitution is denied (wc -c $(cat .mcp.json))", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(cat .mcp.json)"}}))))
+    checks.append(("🔴 secret read via backtick substitution is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c `cat .env`"}}))))
+    checks.append(("🔴 UPPER-case secret spelling is denied (cat .MCP.JSON on a case-insensitive filesystem)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "cat .MCP.JSON"}}))))
+    checks.append(("🔴 quoted +refspec force-push is denied (git push origin \"+main\")", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": 'git push origin "+main"'}}))))
+    checks.append(("🔴 leading-whitespace +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "   git push origin +main"}}))))
+    checks.append(("🔴 env-prefixed +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "GIT_SSH_COMMAND='ssh -i k' git push origin +main"}}))))
     checks.append(("safe commands remain allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "git status --short"}}) is None))
+    checks.append(("a real metadata-only secret check is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c .env"}}) is None))
+    checks.append(("a metadata check with an unrelated substitution is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(ls) .env"}}) is None))
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     passed = all(ok for _, ok in checks)

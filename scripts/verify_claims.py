@@ -21,7 +21,10 @@ On every piece of OUTBOUND copy in an application dossier (the referral messages
 cover-letter body, the form answers):
 
   R0  STRUCTURE     `referrals.md` must exist, stored sources must exist, and `## The
-                     messages` must be locatable.
+                     messages` must be locatable. Also FAILS CLOSED per person: a section
+                     carrying a bold message label (Note/DM/Connection note/etc.) from
+                     which no sendable body could be parsed is a loud finding, never a
+                     silent pass, because it means every rule below ran on nothing.
   R1  QUOTATION      Every quoted string must appear verbatim in a file under `sources/`,
                      and, when the copy attributes it to a PERSON, in a file that
                      plausibly belongs to THAT person. A job posting may never source a
@@ -48,10 +51,19 @@ cover-letter body, the form answers):
   R9  RESUME RETIRED `resume/resume.html` must not contain a string you have explicitly
                      retired from your résumé (a former employer you decided not to list,
                      a title correction). Populate `RESUME_RETIRED` below. This rule also
-                     imports `canon.py`'s retired-claims registry and applies it to the
-                     dossier's résumé and cover letter (R9b): a decision recorded only in
-                     a knowledge base and never applied to the actual outbound document is
-                     not a decision that shipped.
+                     imports `canon.py`'s retired-claims registry and applies it to EVERY
+                     outbound surface an employer or a real person receives (R9b): the
+                     résumé HTML and rendered PDF, the cover-letter HTML/md and rendered
+                     PDF, `application.md` (the exact form answers and free-text),
+                     `correspondence/*.md`, and `referrals.md`'s sendable message blocks.
+                     A decision recorded only in a knowledge base and never applied to the
+                     actual outbound document is not a decision that shipped. A rendered
+                     PDF that cannot be read, or that yields almost no extractable text
+                     (image-only, or a broken text layer), is a loud finding, never a
+                     silent skip: the stale-PDF shape is exactly how a corrected claim
+                     keeps shipping after the source file was fixed. An embedded
+                     `canon:allow` comment inside outbound copy is stripped before
+                     scanning, so a dossier can never silence its own gate.
   R10 LINK-CLAIM     Every portfolio link in a sendable block or a résumé entry is checked
                      against `projects/CLAIMS-MANIFEST.md`: a term from the slug's
                      `never-claim-here:` list in the same block/entry = RED; a work-claim
@@ -146,6 +158,7 @@ Exit 0 = clean. Exit 1 = something unsourced is about to be sent to a real human
 from __future__ import annotations
 import re
 import sys
+import textwrap
 import unicodedata
 from pathlib import Path
 
@@ -166,6 +179,16 @@ RETRACTED: list[dict] = []
 # FABRICATED FRAMINGS OF YOUR OWN load-bearing facts specifically: your own employer,
 # your own past work, which nothing else in this gate is positioned to catch, because
 # R1/R2 guard OTHER people's words, not your own.
+#
+# 🔴 A STRUCTURAL RULE FOR THIS SECTION, LEARNED THE HARD WAY: `truth` must never itself
+# contain a claim that was fabricated and then retired, even as a "for context" mention.
+# A downstream file that reads `truth` as ground truth cannot tell the difference between
+# "this is what really happened" and "this is the fabrication we corrected away from":
+# it just sees the words and repeats them. A retired claim that keeps resurfacing because
+# some OTHER file still teaches it as fact is a symptom of exactly this mistake: the
+# correction lived in one place while the disproved wording kept sitting, quotable, in
+# another. Write `truth` as the corrected fact alone; if you need to document what was
+# wrong for the historical record, do that in an ADR or a decision log, never here.
 #
 # Ships EMPTY. Each entry carries `truth` (the grounded descriptor to reach for instead)
 # and `banned` (compiled regexes for the FALSE framings, ANCHORED to your own
@@ -883,41 +906,259 @@ def _record_suppression(where: str, mark: str, rules: frozenset[str]) -> None:
         _SUPPRESSED.append(entry)
 
 
-def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
-    """(kind, text, exempt_rules) for the sendable quote-blocks in a person's section.
+# ── Message-body extraction: label + body, robust to every house format. ──────────
+# A dossier corpus written by several agents over time drifts into MULTIPLE body shapes
+# for the same kind of content, none of them wrong, all of them different:
+#   1. a `> ` blockquote at column 0
+#   2. an INDENTED `  > ` blockquote (a list-continuation quote under a bullet)
+#   3. an INDENTED plain-text block (a bold label, then a 2-space-indented body)
+#   4. a fenced ``` code block
+#   5. an INLINE body on the label line itself (`**Connection note** (223 chars): Hi …`)
+#   6. a FLUSH-LEFT plain-text block (a bold label at column 0, then a column-0 body)
+# and the labels themselves drift too: `**Connection note**` / `**First DM**` /
+# `**Direct message**` alongside a newer house style like `**Note (...)**` /
+# `**DM (...)**` / `**DM · Use InMail: NO**`.
+#
+# A parser that recognizes only shape 1 under the two original labels misses real,
+# drafted outreach copy the moment a dossier is written in any of the other shapes: the
+# copy is invisible to every rule below, and the gate reports a false PASS on content it
+# never read. This version reads the body by STRUCTURE and derives the kind from the
+# nearest message label, closing all six shapes.
+#
+# The deliberate restraints that keep this from crying wolf (a linter that flags
+# documentation gets turned off within a week, which is why sendable_blocks is, and
+# stays, deliberately narrow):
+#   · An INDENTED or FLUSH-LEFT plain-text block is swept only when it is anchored to a
+#     message LABEL, never arbitrary prose. Blockquotes and fences are swept anywhere in
+#     a person's section, exactly as the old catch-all did for `>` blocks.
+#   · The label regexes anchor the keyword to the START of the bold span (after an
+#     optional `#N` ordinal), so a bold PROSE sentence that merely mentions the words
+#     ("**Messages: NOT-DRAFTED … (profile · connection note · DM) …**",
+#      "**The question in the DM was checked …**") is NOT read as a label.
+#   · A flush-left body stops at the next label, heading, rule, blockquote/fence, italic
+#     grounding note, or operator line, so it collects the message, not the prose after.
 
-    Annotated blocks are not DROPPED: they are returned with the set of rules their
-    annotation may legitimately silence, and every rule outside that set still runs on
-    them. See ANNOTATION_EXEMPTIONS.
+# An optional ordinal prefix inside the bold: "#1 ", "2. ", "3 · ".
+_LABEL_ORD = r"(?:#?\s*\d+\s*[.):·\-–—]*\s*)?"
+# A DM label wins over a note label: a DM label routinely names its InMail alternative,
+# e.g. "**First DM (Use InMail: NO, free connection note is available)**", so a loose
+# note pattern would otherwise claim the DM's body and R4 would cap a long DM at 300.
+# Keyword anchored to the START of the bold span (after the optional ordinal) so a bold
+# prose sentence that only mentions "DM"/"note" mid-sentence is not mistaken for a label.
+# The tail is unbounded WITHIN the line (`[^*\n]*` stops at the first `*`/newline, i.e.
+# the closing `**`): the keyword-at-START anchor is what rejects prose, so no length cap
+# is needed, and a real label with a verbose qualifier must not be missed: a missed
+# label lets a preceding flush-left body run through it.
+_DM_LABEL = re.compile(
+    rf"\*\*\s*{_LABEL_ORD}(?:First\s+DM|Direct\s+message|DM)\b[^*\n]*\*\*", re.I)
+_NOTE_LABEL = re.compile(
+    rf"\*\*\s*{_LABEL_ORD}(?:Connection\s+note|Connection\s+request|Note)\b[^*\n]*\*\*", re.I)
+# `**Note on the req ID:**` / `**Note on the req reference:**` are operator annotations,
+# never sendable copy: they must not be read as a message label.
+_NOTE_ANNOTATION = re.compile(r"\*\*\s*Note\s+on\b", re.I)
+# A section (or an inline body) that explicitly says there is nothing to send is
+# legitimately empty; fail-closed must not cry wolf on it (a research-stage roster with
+# no drafted copy yet, or an email-only channel with no LinkedIn note to draft).
+_NOT_SENDABLE = re.compile(
+    r"\b(not\s+drafted|not\s+sendable|not\s+applicable|none\s+(are\s+)?drafted|no\s+message|"
+    r"no\s+recipient|no\s+draft|no\s+second\s+note|superseded|do\s+not\s+use|"
+    r"invite\s+already\s+pending|excluded)\b", re.I)
+# Where a FLUSH-LEFT body ends: the next label, a heading, a horizontal rule, a
+# blockquote/fence (a differently-shaped body), an italic grounding note `*(…)*`, or an
+# operator line. Everything up to that boundary is the message.
+_BODY_BOUNDARY = re.compile(
+    r"^\s*(?:#{1,6}\s|-{3,}\s*$|>|```|\*\(|\*[A-Z].*\*\s*$|"
+    r"(?:🔴|⚠|🎯|✅|📌)|\*{0,2}OPERATOR-VERIFY|\*\*OPERATOR)")
 
-    Any contiguous `> ` quote-block inside a person's section counts as sendable copy;
-    the bold markers (`**Connection note**`, `**First DM**` / `**Direct message**`) only
-    refine the kind label, so a draft written without them is still swept.
 
-    DM IS MATCHED FIRST, DELIBERATELY. A DM label routinely explains its InMail verdict
-    by naming the alternative, e.g. `**First DM (Use InMail: NO, free connection note
-    is available...)**`, so a loose connection-note pattern would happily claim the
-    DM's body and then R4 would cap a legitimately long DM at 300 characters. Matching
-    DM first, and skipping bodies already claimed, is what keeps the two kinds apart.
+def _label_kind(line: str) -> str | None:
+    """'DM' | 'connection note' | None: the message kind a bold label declares."""
+    if _DM_LABEL.search(line):
+        return "DM"
+    if _NOTE_ANNOTATION.search(line):
+        return None
+    if _NOTE_LABEL.search(line):
+        return "connection note"
+    return None
+
+
+def has_message_label(section: str) -> bool:
+    """Does this section carry a bold outreach-message label at all?
+
+    Used by the FAIL-CLOSED check in check_dossier: a section with a message label but
+    zero extracted blocks means real outreach copy went UNPARSED, and the whole rule set
+    ran on nothing, a loud finding, never a silent pass. A section that carries no such
+    label (a "None drafted / NOT DRAFTED" research-stage roster) stays clean, so the
+    backstop never fires on a legitimately empty section.
     """
-    blocks = []
-    seen = set()
-    for kind, pat in [("DM",
-                       r"\*\*[^*\n]*?(?:First DM|Direct message)[^*\n]*?\*\*[^\n]*\n((?:> ?.*\n)+)"),
-                      ("connection note",
-                       r"\*\*(?![^*\n]*(?:First DM|Direct message))[^*\n]*?[Cc]onnection note[^*\n]*?\*\*[^\n]*\n((?:> ?.*\n)+)")]:
-        for m in re.finditer(pat, section):
-            body = "\n".join(l[2:] if l.startswith("> ") else l.lstrip(">")
-                             for l in m.group(1).strip().splitlines())
-            if norm(body) in seen:
+    return any(_label_kind(l) for l in section.splitlines())
+
+
+def _quote_body(lines: list[str], i: int) -> tuple[str, int]:
+    """Collect a contiguous blockquote: `>` at col 0 OR indented `  > `, from line i."""
+    body = []
+    while i < len(lines) and lines[i].lstrip().startswith(">"):
+        s = lines[i].lstrip()
+        body.append(s[2:] if s.startswith("> ") else s[1:])
+        i += 1
+    return "\n".join(body), i
+
+
+def _fence_body(lines: list[str], i: int) -> tuple[str, int]:
+    """Collect a fenced ``` code block; lines[i] is the opening fence."""
+    body = []
+    i += 1
+    while i < len(lines) and not lines[i].lstrip().startswith("```"):
+        body.append(lines[i])
+        i += 1
+    i += 1  # consume the closing fence (past-end is harmless)
+    return textwrap.dedent("\n".join(body)).strip("\n"), i
+
+
+def _indented_body(lines: list[str], i: int) -> tuple[str, int]:
+    """Collect an indented (>= 2 spaces or a tab) plain-text block; blanks preserved as
+    paragraph breaks; stops at the first non-blank line indented < 2 (the next label)."""
+    body = []
+    while i < len(lines):
+        l = lines[i]
+        if l.strip() == "":
+            body.append("")
+            i += 1
+            continue
+        if l.startswith("\t") or (len(l) - len(l.lstrip(" ")) >= 2):
+            body.append(l)
+            i += 1
+            continue
+        break
+    return textwrap.dedent("\n".join(body)).strip("\n"), i
+
+
+def _inline_body(label_line: str) -> str:
+    """Body text written on the SAME line as the label, or '' (shape 5).
+
+    `**Connection note** (223 chars): Hi Nev, …`  ->  "Hi Nev, …"
+    Strips the leading `(N chars)` / `(Use InMail: …)` qualifier parentheticals and the
+    separating colon. Returns '' when nothing sendable follows the label (the body is on
+    the next lines instead), e.g. `**Note (270 chars):**` or `**DM …:** ` then a newline.
+    """
+    m = re.search(r"\*\*.*?\*\*", label_line)
+    if not m:
+        return ""
+    rest = label_line[m.end():]
+    prev = None
+    while rest != prev:                        # peel one or more leading parentheticals
+        prev = rest
+        rest = re.sub(r"^\s*\([^)]*\)", "", rest)
+    return rest.lstrip(" :·–—-\t").strip()
+
+
+def _flush_left_body(lines: list[str], i: int, single_para: bool = False) -> tuple[str, int]:
+    """Collect a column-0 plain-text body after a label (shape 6), stopping at the next
+    label / heading / rule / blockquote / fence / grounding note / operator line (see
+    _BODY_BOUNDARY). Anchored to a label by the caller, never used on free prose.
+
+    `single_para=True` (a connection note, always one paragraph under LinkedIn's 300-char
+    cap) stops at the FIRST blank line, so a trailing annotation paragraph after the note
+    is not swept into the message. A DM is multi-paragraph, so it spans blank lines until
+    a structural boundary."""
+    body = []
+    while i < len(lines):
+        l = lines[i]
+        if l.strip() == "":
+            if single_para and body:            # a note ends at its first blank line
+                break
+            body.append("")
+            i += 1
+            continue
+        if _label_kind(l.strip()) or _BODY_BOUNDARY.match(l):
+            break
+        body.append(l)
+        i += 1
+    return "\n".join(body).strip("\n"), i
+
+
+def message_blocks(section: str) -> list[tuple[str, str, frozenset[str]]]:
+    """(kind, text, exempt_rules) for every sendable quote-block in a person's section.
+
+    Reads the body by STRUCTURE (blockquote, col-0 or indented; fenced ```; or a
+    label-anchored indented/flush-left block), so it is robust to every house format in
+    the corpus rather than one hardcoded shape. See the format note above.
+
+    The third element is the set of rules an ANNOTATION on the block may legitimately
+    silence; every rule outside that set still runs on it. See ANNOTATION_EXEMPTIONS.
+    """
+    lines = section.split("\n")
+    blocks: list[tuple[str, str, frozenset[str]]] = []
+    seen: set[str] = set()
+    current_kind: str | None = None  # kind implied by the nearest preceding label
+
+    def add(kind: str | None, body: str) -> None:
+        body = body.strip("\n")
+        if not body.strip():
+            return
+        key = norm(body)
+        if key in seen:
+            return
+        blocks.append((kind or "message", body, annotation_exemption(body)[1]))
+        seen.add(key)
+
+    i, n = 0, len(lines)
+    while i < n:
+        stripped = lines[i].strip()
+
+        k = _label_kind(stripped)
+        if k:
+            current_kind = k
+            # Shape 5: an inline body on the label line itself (>= 20 chars of real copy,
+            # never a short trailing qualifier remnant). A not-sendable inline ('not
+            # applicable (email)') consumes the label without adding a block.
+            inline = _inline_body(lines[i])
+            if len(inline) >= 20:
+                if not _NOT_SENDABLE.search(inline):
+                    add(k, inline)
+                i += 1
                 continue
-            blocks.append((kind, body, annotation_exemption(body)[1]))
-            seen.add(norm(body))
-    for m in re.finditer(r"((?:^> ?.*\n?)+)", section, re.M):
-        body = "\n".join(l[2:] if l.startswith("> ") else l.lstrip(">") for l in m.group(1).strip().splitlines())
-        if body.strip() and norm(body) not in seen:
-            blocks.append(("message", body, annotation_exemption(body)[1]))
-            seen.add(norm(body))
+            j = i + 1
+            while j < n and lines[j].strip() == "":  # skip blanks after the label line
+                j += 1
+            if j < n and lines[j].lstrip().startswith("```"):
+                body, i = _fence_body(lines, j)
+                add(k, body)
+                continue
+            if j < n and lines[j].lstrip().startswith(">"):
+                body, i = _quote_body(lines, j)
+                add(k, body)
+                continue
+            if j < n and (lines[j].startswith("\t")
+                          or (len(lines[j]) - len(lines[j].lstrip(" ")) >= 2)):
+                body, i = _indented_body(lines, j)
+                add(k, body)
+                continue
+            # Shape 6: a flush-left (column-0) plain-text body under the label. A
+            # connection note is one paragraph (stops at its first blank line); a DM
+            # spans paragraphs to a structural boundary.
+            if j < n and not _label_kind(lines[j].strip()) and not _BODY_BOUNDARY.match(lines[j]):
+                body, i = _flush_left_body(lines, j, single_para=(k == "connection note"))
+                add(k, body)
+                continue
+            i += 1
+            continue
+
+        # Bare bodies (no message label just before): keep the old catch-all's reach, so
+        # any blockquote or fence in a person's section is sendable copy, classified by
+        # the nearest preceding label. Indented plain text is NOT swept here (only when
+        # label-anchored above), so documentation prose never trips the gate.
+        if stripped.startswith("```"):
+            body, i = _fence_body(lines, i)
+            add(current_kind, body)
+            continue
+        if stripped.startswith(">"):
+            body, i = _quote_body(lines, i)
+            add(current_kind, body)
+            continue
+
+        i += 1
+
     return blocks
 
 
@@ -1081,6 +1322,20 @@ def check_dossier(folder: Path) -> list[Finding]:
         # the only one asked.
         ptokens = person_name_tokens(person)
         blocks = message_blocks(section)
+
+        # FAIL CLOSED. A section carrying a bold message label
+        # (**Note**/**DM**/**Connection note**/**First DM**/**Direct message**) from
+        # which NO body parsed means real outreach copy exists that every rule below
+        # just skipped. That is worse than no gate at all: it passes SILENTLY, UNLESS
+        # the section explicitly says nothing is drafted yet (a research-stage roster
+        # is legitimately empty, not a parse failure).
+        if not blocks and has_message_label(section) and not _NOT_SENDABLE.search(section):
+            findings.append(Finding(
+                "R0", f"referrals.md · {person}",
+                "A message label (Note / DM / connection note) is present, but no sendable "
+                "body could be parsed under it, so R1-R7 and R12 ran on NOTHING for this "
+                "person. Write the body as an indented block under the label, a > "
+                "blockquote, or a ``` fence."))
 
         for kind, msg, exempt in blocks:
             where = f"referrals.md · {person} · {kind}"
@@ -1324,6 +1579,33 @@ def check_dossier(folder: Path) -> list[Finding]:
                     targets.append((f"cover-letter/{cl.name}", cl.read_text(encoding="utf-8")))
                 except OSError:
                     pass
+        # application.md records the exact answer to every form question: the free-text
+        # a recruiter reads AND the values typed into the employer's form, so a retired
+        # claim here reaches a human exactly like the résumé does. correspondence/*.md
+        # are drafted recruiter emails: also outbound copy. The rendered PDFs are
+        # scanned below; these two are text-only.
+        app_md = folder / "application.md"
+        if app_md.is_file():
+            try:
+                targets.append(("application.md", app_md.read_text(encoding="utf-8")))
+            except OSError:
+                pass
+        for corr in sorted((folder / "correspondence").glob("*.md")):
+            try:
+                targets.append((f"correspondence/{corr.name}", corr.read_text(encoding="utf-8")))
+            except OSError:
+                pass
+        # referrals.md's SENDABLE MESSAGE BLOCKS: the connection notes and DMs a real
+        # person actually receives. R3 already catches a LITERAL retired string here;
+        # canon adds the whole SEMANTIC family a reworded phrase can slip past R3's
+        # blocklist with. Only the sendable blocks, NEVER the whole file: the why-them
+        # analysis and the card IN/OUT declarations are internal planning, and a line
+        # like "OUT: the old console framing" asserts nothing, and whole-file scanning
+        # would false-fire on exactly that kind of note. sendable_blocks() is the
+        # tested outbound-message extractor, so this scans exactly what is sent.
+        for where, body, _exempt in sendable_blocks(folder):
+            if where.startswith("referrals.md"):
+                targets.append((where, body))
         # AND THE RENDERED PDFs: the files an employer actually receives. Scanning
         # only the HTML source assumes the PDF was rebuilt from it, which is exactly
         # the assumption that leaves a stale, already-corrected PDF unguarded.
@@ -1331,14 +1613,43 @@ def check_dossier(folder: Path) -> list[Finding]:
             for doc in sorted((folder / sub).glob("*.pdf")):
                 try:
                     import fitz as _fitz
-                    targets.append((f"{sub}/{doc.name}",
-                                    "\n".join(pg.get_text() for pg in _fitz.open(doc))))
-                except Exception:
-                    pass
+                    _txt = "\n".join(pg.get_text() for pg in _fitz.open(doc))
+                    if len(_txt.strip()) < 40:
+                        # A PDF that OPENS but yields almost no text (image-only, or a
+                        # broken text layer) is UNSCANNED, not clean. A real résumé or
+                        # cover letter always has hundreds of characters, so this fails
+                        # loud like a read error rather than reporting a false PASS.
+                        findings.append(Finding(
+                            "R9", f"{sub}/{doc.name}",
+                            f"the rendered PDF extracted only {len(_txt.strip())} chars: it is "
+                            f"image-only or has a broken text layer, so it was NOT checked against "
+                            f"the retired-claim registry. Re-render it as real text; do not trust "
+                            f"this PASS."))
+                    else:
+                        targets.append((f"{sub}/{doc.name}", _txt))
+                except Exception as _pe:
+                    # NEVER silently skip a PDF that EXISTS: it is the exact file a real
+                    # person would receive. A silent skip here lets a clean HTML source
+                    # sit beside a stale, still-fabricated PDF while the gate reports
+                    # CLEAN. Fail LOUD instead, exactly like the canon-import guard below.
+                    findings.append(Finding(
+                        "R9", f"{sub}/{doc.name}",
+                        f"the rendered PDF a real person would RECEIVE could not be read "
+                        f"({type(_pe).__name__}: {_pe}), so it was NOT checked against the "
+                        f"retired-claim registry. Install PyMuPDF (fitz) or re-render the PDF "
+                        f"from its clean HTML; do not trust this PASS. A stale PDF is exactly "
+                        f"how a corrected claim keeps shipping."))
         try:
             import canon as _canon
             for where, body in targets:
-                for cf in _canon.scan_text(f"{folder.name}/{where}", body):
+                # An outbound artifact must not be able to silence its OWN gate.
+                # canon:allow is an escape for DOCUMENTATION surfaces; a résumé, cover
+                # letter, or outreach note a real person receives has no legitimate
+                # reason to carry one, and honoring it here would let a dossier embed
+                # `<!-- canon:allow some-rule-id -->` beside the fabrication to bypass
+                # this check entirely. Strip every canon:allow before scanning.
+                clean_body = re.sub(r"<!--\s*canon:allow\b.*?-->", " ", body, flags=re.I | re.S)
+                for cf in _canon.scan_text(f"{folder.name}/{where}", clean_body):
                     findings.append(Finding(
                         "R9", where,
                         f"Retired claim [{cf.rule_id}] asserted on this dossier's outbound copy. "
@@ -1470,7 +1781,12 @@ SELFTEST_CASES = [
 
 # Ratchet. Raise it when you add cases; never lower it to make a run pass: that is the
 # denominator-shrinking this whole section exists to make impossible.
-MIN_SELFTEST_CASES = 33
+# Raised 33 -> 57: the six message-body shapes, the anti-false-label guard, the
+# single-paragraph note rule, the not-sendable inline guard, DM-first, the dossier-level
+# fail-closed R0 case, and the R9b hardening cases (unreadable PDF, an embedded
+# canon:allow that cannot silence its own gate, application.md/correspondence/referrals.md
+# entering the outbound scan, and the correction-banner negative that keeps it honest).
+MIN_SELFTEST_CASES = 57
 
 
 def implemented_rules() -> set[str]:
@@ -1627,6 +1943,76 @@ def _selftest_r11(h: _Harness) -> None:
             if hits:
                 h.covered.add("R11")
             print(f"  {'PASS' if hits else 'FAIL'}  [R11] {name}")
+
+
+def _selftest_message_formats(h: _Harness) -> None:
+    """message_blocks must read every house body shape, must fail closed on a
+    labelled-but-unparseable section, and must NOT fire on bold PROSE that merely
+    mentions the words. Unit-level, so it stays independent of any one dossier's
+    corpus format."""
+    mb = message_blocks
+
+    # Shape 1: col-0 `>` blockquote (the original house style; must still work).
+    b = mb("### P\n**Connection note**\n> Hi there, this is the col-zero note body.\n")
+    h.assert_true("[message-formats] shape 1: col-0 blockquote body is parsed",
+                  any("col-zero note body" in x[1] for x in b))
+
+    # Shape 2: INDENTED `  > ` blockquote (a list-continuation quote; the old `^>`
+    # catch-all missed it).
+    b = mb("### P\n**Connection note (254 chars):**\n  > Hi there, an indented quote body.\n")
+    h.assert_true("[message-formats] shape 2: indented (list-continuation) blockquote body is parsed",
+                  any("indented quote body" in x[1] for x in b))
+
+    # Shape 3: INDENTED plain-text under a `- **DM (...):**` label.
+    b = mb("### P\n- **DM (Use InMail: NO):**\n  Hi there,\n\n  A second paragraph of the DM.\n\n"
+           "- **Note:**\n  the note body.\n")
+    h.assert_true("[message-formats] shape 3: indented plain-text DM body (house format) is parsed",
+                  any("second paragraph of the DM" in x[1] for x in b))
+    h.assert_true("[message-formats] a `- **DM (...):**` house label is classified as a DM",
+                  any(x[0] == "DM" and "second paragraph" in x[1] for x in b))
+    h.assert_true("[message-formats] a `- **Note:**` house label is classified as a connection note",
+                  any(x[0] == "connection note" and "note body" in x[1] for x in b))
+
+    # Shape 4: fenced ``` code block.
+    b = mb("### P\n**Connection note (243 chars):**\n```\nHi there, a fenced note body.\n```\n")
+    h.assert_true("[message-formats] shape 4: fenced code-block body is parsed",
+                  any("fenced note body" in x[1] for x in b))
+
+    # Shape 5: inline body on the label line.
+    b = mb("### P\n**Connection note** (223 chars): Hi there, this whole note sits on the label "
+           "line and runs well past twenty characters.\n")
+    h.assert_true("[message-formats] shape 5: inline body on the label line is parsed",
+                  any("sits on the label line" in x[1] for x in b))
+
+    # Shape 6: flush-left plain-text under a `**DM …:**` label.
+    b = mb("### P\n**Direct message · Use InMail: NO** (send after accept):\nHi there,\n\n"
+           "The flush-left DM body spanning two paragraphs.\n\n## Notes\n")
+    h.assert_true("[message-formats] shape 6: flush-left DM body under a label is parsed",
+                  any("flush-left DM body" in x[1] for x in b))
+
+    # A connection note is ONE paragraph: a trailing annotation after it is NOT swept in.
+    b = mb("### P\n**Connection note (250 chars):**\nHi there, the real note ends here.\n\n"
+           "Per the wave brief, messages are drafted in a later pass.\n")
+    note = next((x[1] for x in b if x[0] == "connection note"), "")
+    h.assert_true("[message-formats] a note's trailing annotation is NOT swept into the note body",
+                  "the real note ends here" in note and "Per the wave brief" not in note)
+
+    # A bold PROSE sentence that mentions the words is NOT a message label (no false fire).
+    prose = ("### P\n**Messages: NOT-DRAFTED here, research-stage roster. The full three-part "
+             "handover (profile · connection note · DM) is drafted in a later pass; the send is "
+             "deferred.**\nProfile: https://example.com/in/x\n")
+    h.assert_true("[message-formats] bold prose mentioning 'connection note · DM' is NOT read as a label",
+                  not has_message_label(prose) and len(mb(prose)) == 0)
+
+    # A not-sendable inline body ('not applicable') creates no block.
+    b = mb("### P\n**Connection note:** not applicable (email channel). **Use InMail: NO**\n")
+    h.assert_true("[message-formats] a 'not applicable' inline note creates no sendable block", len(b) == 0)
+
+    # DM-first: a DM label that names the connection-note alternative is a DM, not a note.
+    b = mb("### P\n**First DM (Use InMail: NO, a free connection note is available):**\n"
+           "> Hi there, the DM body.\n")
+    h.assert_true("[message-formats] a DM label naming 'connection note' is classified DM (not note)",
+                  any(x[0] == "DM" for x in b) and not any(x[0] == "connection note" for x in b))
 
 
 def selftest() -> int:
@@ -1888,6 +2274,80 @@ def selftest() -> int:
                               "actually receives.")
             except ImportError:
                 pass
+            # (f) an EXISTING but UNREADABLE PDF fails LOUD, never a silent skip: a clean HTML
+            #     source beside a stale/corrupt PDF (or a missing PyMuPDF) must not report CLEAN
+            #     while the fabrication ships in the file a real person would actually receive.
+            for _p in (live / "resume").glob("*.pdf"):
+                _p.unlink()
+            (live / "resume" / "corrupt.pdf").write_bytes(b"%PDF-1.4 not a real pdf, unreadable bytes")
+            h.assert_true("[R9b] an EXISTING but unreadable PDF fails LOUD, never a silent skip",
+                          any(f.rule == "R9" and "could not be read" in f.detail
+                              for f in check_dossier(live)),
+                          "A PDF a real person would receive could not be read and the gate stayed "
+                          "silent, the exact way a stale fabrication-carrying PDF ships.")
+            # (g) a dossier CANNOT silence its own outbound gate with an embedded canon:allow;
+            #     that escape is for documentation surfaces only.
+            for _p in (live / "resume").glob("*"):
+                _p.unlink()
+            (live / "resume" / "resume.html").write_text(
+                "This tool runs itself with zero maintenance. "
+                "<!-- canon:allow example-retired-claim - bypass attempt -->", encoding="utf-8")
+            h.assert_true("[R9b] an embedded canon:allow in outbound copy does NOT silence the gate",
+                          any(f.rule == "R9" and "zero maintenance" in f.detail
+                              for f in check_dossier(live)),
+                          "A dossier silenced its OWN outbound gate with a canon:allow comment.")
+            # (h) application.md's free-text form answer is OUTBOUND copy: a retired claim there
+            #     reaches a real person exactly like the résumé does.
+            (live / "application.md").write_text(
+                '## Optional free-text ("Why us")\n'
+                "> This tool runs itself with zero maintenance, which is why I want to join.\n",
+                encoding="utf-8")
+            h.assert_true("[R9b] a retired claim in application.md's free-text answer is CAUGHT",
+                          any(f.rule == "R9" and f.where == "application.md"
+                              for f in check_dossier(live)),
+                          "application.md is outbound copy a real person reads; a fabrication "
+                          "there must fail the gate, not slip through.")
+            # (i) a genuine correction banner (a correction verb plus the quoted OLD value, on
+            #     ONE line) is a DOCUMENTATION record, not outbound copy: it must NOT false-fire,
+            #     or a clean dossier goes red and the gate gets scrolled past out of habit.
+            (live / "application.md").write_text(
+                "## Exact form answers\n"
+                '> Corrected (ADR-0001): the free-text answer was rewritten. **What was originally '
+                'submitted said "this tool runs itself with zero maintenance."** Recover the '
+                "original from source control.\n", encoding="utf-8")
+            h.assert_true("[R9b] a correction banner (correction + quoted old value on ONE line) "
+                          "in application.md does NOT false-fire",
+                          not any(f.rule == "R9" and f.where == "application.md"
+                                  and "zero maintenance" in f.detail.lower()
+                                  for f in check_dossier(live)),
+                          "A documentation banner recording a CORRECTION was flagged as an "
+                          "assertion. That false-red is how a real gate gets ignored.")
+            # (j) correspondence/*.md are drafted recruiter emails: outbound copy, also scanned.
+            (live / "correspondence").mkdir(exist_ok=True)
+            (live / "correspondence" / "draft-email.md").write_text(
+                "Hi, the tool I'm proudest of runs itself with zero maintenance, end to end.\n",
+                encoding="utf-8")
+            h.assert_true("[R9b] a retired claim in correspondence/*.md is CAUGHT",
+                          any(f.rule == "R9" and f.where.startswith("correspondence/")
+                              for f in check_dossier(live)),
+                          "A drafted recruiter email carrying a retired claim slipped the "
+                          "outbound gate.")
+            # (k) referrals.md's sendable DM/notes are outbound too, and this must reach them
+            #     through the SAME canon registry as the résumé, not just verify_claims' own R3
+            #     literal-string list.
+            ref = live / "referrals.md"
+            t = ref.read_text(encoding="utf-8").replace(
+                "## The messages",
+                "## The messages\n\n### Retired-Claim Person, Design Lead at Acme Corp\n\n"
+                "**Connection note**\n> Hi, would love to connect about the Design Lead role.\n\n"
+                "**Direct message (Use InMail: NO)**\n> This tool runs itself with zero "
+                "maintenance, and that is exactly the craft I want to bring to the team.\n", 1)
+            ref.write_text(t, encoding="utf-8")
+            h.assert_true("[R9b] a retired claim (canon registry) in a referrals.md DM is CAUGHT",
+                          any(f.rule == "R9" and f.where.startswith("referrals.md")
+                              for f in check_dossier(live)),
+                          "An outreach DM carrying a retired claim slipped the outbound gate that "
+                          "reaches the résumé.")
 
     # TWO R10 NEGATIVE cases: the gate must NOT fire on the true claim+link pairs.
     # A false positive here teaches the next agent that a red R10 means "strip the
@@ -1915,6 +2375,26 @@ def selftest() -> int:
         for f in live:
             print(f); print()
     _selftest_r11(h)
+
+    # The six message-body shapes + the anti-false-label guard (unit-level).
+    _selftest_message_formats(h)
+
+    # FAIL CLOSED, at the dossier level: a section carrying a message LABEL from which
+    # no body parses must be a LOUD R0 finding, never a silent pass. This turns the
+    # parsing-hole class into a permanent case, so a future regression that stops
+    # parsing a body goes red instead of quiet.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "dossier"
+        shutil.copytree(real, tmp)
+        ref = tmp / "referrals.md"
+        t = ref.read_text(encoding="utf-8").replace(
+            "## The messages",
+            "## The messages\n\n### Dana Reyes, Head of Design\n"
+            "**Profile: https://example.com/in/dana**\n"
+            "- **DM (Use InMail: NO):**\n\n### Next placeholder\n", 1)
+        ref.write_text(t, encoding="utf-8")
+        h.assert_true("[R0] a message label with no parseable body is a fail-closed finding",
+                      any(f.rule == "R0" and "no sendable" in f.detail for f in check_dossier(tmp)))
 
     # ── THE TWO ASSERTIONS THAT MAKE A GREEN RUN MEAN SOMETHING. ───────────────────
     # A count alone proves nothing: neuter a rule, delete its case, and `passed ==

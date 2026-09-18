@@ -147,9 +147,19 @@ NEGATION = re.compile(
     # the 80-char before-window keeps it from excusing unrelated prose.
     # The lookarounds exclude hyphen-joined compounds: `builder-not-engineer` is an identity, not a
     # negation, and its embedded "not" hid a real slogan survivor from this checker.
+    #
+    # "instead of" / "rather than" and "correct(s|ed|ion)" used to sit in this list as bare
+    # markers, and both turned out to excuse an ASSERTION instead of a retraction:
+    #   "Instead of letting a model answer, I built it to resolve into a typed filter." asserts
+    #   the retired claim (the typed filter) in a LATER clause; a bare "instead of" earlier in
+    #   the sentence wrongly excused it.
+    #   "The correction here is that the platform runs itself with zero maintenance." asserts the
+    #   retired claim while wearing the word "correction"; a bare "correct*" wrongly excused it.
+    # Both are re-added below as NARROWER checks that require the retired claim to actually be
+    # the thing being retracted (`_INSTEAD_OF`, `_corrected_with_cue`), not just nearby vocabulary.
     r"(?<![-\w])(?:never|not|no|no longer|nowhere|drop(?:ped|s)?|delete[sd]?|retire[sd]?|forbidden|"
-    r"banned?|blocklist(?:ed)?|avoid|instead of|rather than|supersed(?:e|ed|es)|"
-    r"correct(?:s|ed|ion)?|wrong|incorrect|do not|don't|must not|cannot|false|fabricat\w*|"
+    r"banned?|blocklist(?:ed)?|avoid|supersed(?:e|ed|es)|"
+    r"wrong|incorrect|do not|don't|must not|cannot|false|fabricat\w*|"
     # "old" is narrowed to old *wording*, never old *things*. A bare "the old" once suppressed a
     # real fabrication ("The old tracking page guessed at delivery times"): the artifact was
     # genuinely old; the claim about it was invented.
@@ -165,6 +175,24 @@ STRONG_RETIREMENT = re.compile(
     r"fabricat\w*|not real|no CI runner|historical record)\b|[⛔❌]|~~", re.I
 )
 
+# "correct*" excuses a retired claim only when the same window ALSO carries a corroborating cue:
+# the shape of a real correction note (a date, an ADR-style reference, "old", "instead", or the
+# quoted old claim itself). Without a cue, "correction/corrected" is being used to ASSERT the claim
+# while dressed as a retraction, not to retract it.
+_CORRECT_MARKER = re.compile(r"\bcorrect(?:s|ed|ion)?\b", re.I)
+_CORRECTION_CUE = re.compile(r"ADR-\d{4}|20\d\d|\bold\b|\binstead\b|[\"“'][^\"”']+[\"”']", re.I)
+
+
+def _corrected_with_cue(window: str) -> bool:
+    return bool(_CORRECT_MARKER.search(window)) and bool(
+        _CORRECTION_CUE.search(window) or STRONG_RETIREMENT.search(window))
+
+# "instead of X" / "rather than X" rejects X, but only when X is its IMMEDIATE object. Anchored
+# to the END of the before-window with no comma between, so "instead of the old approach, I built
+# X" excuses the OLD approach (its true object) while "Instead of a plain answer, I built X"
+# does NOT excuse X, which sits in a later, separate clause.
+_INSTEAD_OF = re.compile(r"\b(?:instead\s+of|rather\s+than)\b[^,\n]{0,25}$", re.I)
+
 # The explicit escape hatch. Heuristics handle the ordinary "never say X" idioms; this covers the
 # rest: a section-level supersession banner too far above to see, a quotation of the retired claim
 # in a record, a legitimate homonym. It is deliberately NOT a bare "ignore":
@@ -172,7 +200,11 @@ STRONG_RETIREMENT = re.compile(
 #   * it must carry a reason, because a silent suppression is the same lie by omission this whole
 #     file exists to stop.
 # Audit every escape in the repo with:  grep -rn 'canon:allow' --include=*.md .
-ALLOW = re.compile(r"<!--\s*canon:allow\s+([a-z0-9-]+)\s*(?:—|--|-)\s*(.+?)-->", re.I)
+#
+# One escape may name SEVERAL rule-ids as a comma list: a single DO-NOT-SAY line legitimately
+# quotes a whole family of related retired claims at once ("don't say X, Y, or Z") and needs each
+# one excused. A single id is just a one-element list, so this stays backward-compatible.
+ALLOW = re.compile(r"<!--\s*canon:allow\s+([a-z0-9-]+(?:\s*,\s*[a-z0-9-]+)*)\s*(?:—|--|-)\s*(.+?)-->", re.I)
 
 # ...UNLESS the line is labelled as copy meant to be used. A line that says "Résumé-ready:" is a
 # line an agent will paste, no matter what the paragraph above it warns. This override is the
@@ -412,8 +444,11 @@ def scan_text(rel: str, text: str) -> list[Finding]:
 
             # Explicit, named, reasoned escape, checked before anything else. See ALLOW.
             # Read from the RAW lines: the escape is a literal comment a human wrote, and it is
-            # honoured on any line the match touches.
-            if any((a := ALLOW.search(rl)) and a.group(1).lower() == entry["id"] for rl in spanned):
+            # honoured on any line the match touches. The comma-list form means this entry's id
+            # only needs to be ONE of the names in the escape, not the only one.
+            if any((a := ALLOW.search(rl))
+                   and entry["id"] in {i.strip() for i in a.group(1).lower().split(",")}
+                   for rl in spanned):
                 continue
 
             # An "assertion" label beats every excuse: a line marked Résumé-ready is copy meant
@@ -466,10 +501,30 @@ def scan_text(rel: str, text: str) -> list[Finding]:
             banner_ok = bool(STRONG_RETIREMENT.search(banner)) and bool(
                 re.search(r"ADR-\d{4}|20\d\d-\d\d-\d\d", banner)
             )
+            # A SAME-LINE correction banner. A record note can carry both its correction and the
+            # quoted old value in ONE sentence ("the files now carry the corrected dates (…).
+            # What was actually sent said '…'"), so the correcting words sit on the match's own
+            # line, BEFORE the match, past the 80-char before-window. Held to the SAME bar as a
+            # preceding-line banner: either STRONG_RETIREMENT plus an ADR/date, or a `correct*`
+            # marker with a corroborating cue. Outbound copy does not cite an ADR before asserting
+            # a claim, so this excuses documentation records, never fresh assertions.
+            line_prefix = norm[lo:m.start()]
+            same_line_banner = (
+                (bool(STRONG_RETIREMENT.search(line_prefix))
+                 and bool(re.search(r"ADR-\d{4}|20\d\d-\d\d-\d\d", line_prefix)))
+                or _corrected_with_cue(line_prefix)
+            )
             excused = (
                 NEGATION.search(before)
                 or STRONG_RETIREMENT.search(after)
                 or banner_ok
+                or same_line_banner
+                # a "correction" in the before-window, but ONLY if it cites what it corrects:
+                # an assertion dressed as a correction no longer excuses on the bare word alone.
+                or _corrected_with_cue(before)
+                # "instead of / rather than <match>" excuses ONLY when the retired claim is its
+                # immediate object (within 25 chars, no clause boundary), never a later clause.
+                or _INSTEAD_OF.search(before)
             )
             if excused:
                 continue  # documenting the ban, not committing it
@@ -687,6 +742,52 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("the correct replacement wording must NOT fire",
      "knowledge-base/06-projects-portfolio.md",
      "A three-person team built the platform; each owned one layer of the stack.", False),
+
+    # ==================================================================================
+    # 'correct*' IS NOT A RETRACTION ON ITS OWN. A real audit of this file found it
+    # excusing an ASSERTION dressed as a correction ("the correction here is that X"),
+    # not a genuine retraction. It now needs a corroborating cue (a date, an ADR-style
+    # reference, "old", or the quoted old claim): the shape of a real correction note.
+    # ==================================================================================
+    ("an ASSERTION dressed as a 'correction' does NOT excuse the retired claim",
+     "knowledge-base/06-projects-portfolio.md",
+     "The correction here is that she built the entire platform solo.", True),
+    ("a real correction that CITES the old claim (old + quoted) IS still excused",
+     "knowledge-base/06-projects-portfolio.md",
+     'The real number is 200,000 active users. This corrects the old "1 million+ active users" '
+     'figure.', False),
+
+    # --- SAME-LINE correction banner: a record can carry its correction AND the quoted OLD
+    # value in ONE sentence, so the correcting words sit on the match's own line, past the
+    # 80-char before-window. It must be excused; a bare ADR mention with no correction verb
+    # beside an ASSERTED claim must not be. ---
+    ("a same-line correction banner (correction + quoted old value on ONE line) must NOT fire",
+     "applications/some-role/application.md",
+     '> Corrected (ADR-0001): the résumé file now carries the real figure. **What was actually '
+     'sent said "built the entire platform solo."** Recover the original from source control.',
+     False),
+    ("a bare ADR mention with no correction verb does NOT excuse an asserted retired claim",
+     "applications/some-role/application.md",
+     "She built the entire platform solo, see ADR-0001 for context.", True),
+
+    # --- multi-id canon:allow: one escape naming several rule-ids excuses each of them. Framed
+    # as a historical record (no negation wording) so the ALLOW mechanism, not plain negation,
+    # is what has to do the excusing. ---
+    ("multi-id canon:allow excuses every id in its list",
+     "knowledge-base/11-preferences-and-conventions.md",
+     'This paragraph is the historical record of two fictional overclaims, kept for reference: '
+     '"built the entire platform solo" and the codename "auto-deploy" used internally at the '
+     'time. <!-- canon:allow example-solo-build, example-auto-deploy - this line IS the '
+     'canonical historical record and must stay verbatim -->', False),
+
+    # --- "instead of X" / "rather than X" excuses X only when X is the IMMEDIATE object,
+    # never a later, separate clause. ---
+    ("'instead of' with the retired claim as a LATER clause (not its object) MUST still fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Instead of a slow rollout, the team decided to use auto-deploy for every commit.", True),
+    ("'instead of <the retired claim>' (the OBJECT rejection) must NOT fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Instead of auto-deploy, the pipeline now runs a manual review step before shipping.", False),
 ]
 
 

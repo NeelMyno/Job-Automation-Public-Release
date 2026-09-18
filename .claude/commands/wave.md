@@ -89,7 +89,14 @@ a GATE BUG → one-line workaround in the dossier + a debt note, keep moving.
 **The law lives in CLAUDE.md §14 (never click Submit · work-authorization answers per
 `knowledge-base/12` §3 read fresh · EEO per §5b · nothing typed that isn't in the bank). This
 stage is the PROCEDURE:**
-1. **Presubmit gate first:** `python3 scripts/presubmit_check.py "applications/<dossier>"`:
+0. **Fit/seniority gate first:** `python3 scripts/seniority_gate.py "applications/<dossier>"`
+   (or `--all --unsubmitted` across the whole wave) checks the JD's stated experience requirement
+   against your own `YOUR_YEARS_OF_EXPERIENCE` (`scripts/config.py`). A clear mismatch (DROP) means
+   you do not fill the form: drop it, update your tracker status, and note why. A borderline case
+   (REVIEW) gets surfaced to you before filling, never auto-filled past a real gap just because the
+   rest of the pipeline is already moving. Leave `YOUR_YEARS_OF_EXPERIENCE` unset and the gate is a
+   silent no-op, not a false pass: set it once during setup for this check to mean anything.
+1. **Presubmit gate:** `python3 scripts/presubmit_check.py "applications/<dossier>"`:
    exit 2 = unchecked `- [ ] BLOCKING:` operator items → REFUSE to open the browser, quote them.
 1b. **Cover-letter gate (mechanical):** `python3 scripts/fill_ready.py "applications/<dossier>"`:
    exit 2 = the bundle has no cover PDF, or the cover copy is stale/off-voice, or the PDF is older
@@ -127,9 +134,14 @@ stage is the PROCEDURE:**
    it); verify name+size via `input.files[0]` where scripts run.
 6. **Verify against the DOM, never the tool's success string: it lies both ways** (§14 owns the
    assertion list: value-tracker parity on React inputs, `:checked` read-back, file bytes vs disk,
-   `input[required]` empty-count zero, a custom toggle's CSS class). Re-set failures with the
-   native setter, re-verify. After any résumé rebuild, every open form is stale; re-upload before
-   handoff. If the form has a Cover Letter file field, assert a file is attached to it (name +
+   `input[required]` empty-count zero, a custom toggle's CSS class). **For any work-authorization /
+   sponsorship / citizenship field specifically, presence and parity are not enough:** read back the
+   SELECTED value (the chosen option's text, the checked radio's label) and confirm it equals what
+   `knowledge-base/12` §3 gives for that field's exact printed wording. A field can pass every other
+   check and still hold the opposite of the intended answer; only reading the value back catches
+   that. If the wording maps to no row in your answer bank, stop and ask rather than guessing.
+   Re-set failures with the native setter, re-verify. After any résumé rebuild, every open form is
+   stale; re-upload before handoff. If the form has a Cover Letter file field, assert a file is attached to it (name +
    bytes), same as the résumé; if it has none, the free-text About-you/anything-else box IS the
    cover-equivalent and must be filled. A form is never handed over with an empty cover field.
 7. **Hand over:** full-page screenshot to `.claude/tmp/`, one message with ALL forms + the exact

@@ -16,7 +16,7 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks.py\" --session-start",
-            "timeout": 30,
+            "timeout": 60,
             "statusMessage": "Deriving live job-search state"
           }
         ]
@@ -66,6 +66,8 @@
     "deny": [
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
+      "Bash(git push origin +:*)",
+      "Bash(git push +:*)",
       "Read(./.mcp.json)",
       "Read(./.env)",
       "Read(./.env.*)"

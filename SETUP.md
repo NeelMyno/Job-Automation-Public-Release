@@ -78,8 +78,8 @@ Two files, both under `pipeline/job-crawler/`:
   file's own comments before touching `exclude_patterns`/`flag_patterns`: what belongs in each
   depends on your own situation, not a universal answer.
 - **`boards.yaml`**: add your target companies. Each line needs a company name + which ATS they
-  use (Greenhouse/Lever/Ashby) + their board slug; the file's own comments show you how to find
-  each company's slug from their careers page URL.
+  use (Greenhouse/Lever/Ashby/SmartRecruiters/Workable/Workday) + their board slug; the file's own
+  comments show you how to find each company's slug from their careers page URL.
 
 Try it:
 ```

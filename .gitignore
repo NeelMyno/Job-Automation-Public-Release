@@ -3,6 +3,9 @@
 .env
 .env.*
 *.local
+# Per-machine Claude Code settings (local hook paths, permission grants). The `*.local`
+# glob above does NOT match this filename (it ends in .json), so name it explicitly.
+.claude/settings.local.json
 
 # Live working file (gitignored per ops/ convention in CLAUDE.md)
 ops/STATE.md

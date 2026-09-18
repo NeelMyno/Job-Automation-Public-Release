@@ -47,6 +47,11 @@ REPO = Path(__file__).resolve().parents[1]
 LAW_GLOBS = [
     "CLAUDE.md", "STRUCTURE.md", "README.md", "docs/DESIGN.md",
     "knowledge-base/*.md",
+    ".claude/*.md",               # root-level .claude/ instruction files. `.claude/commands` and
+    #                                `.claude/workflows` were globbed but a root-level file like
+    #                                `.claude/outreach-handover-format.md` sat outside both, so its
+    #                                restatement drift and §/ADR pointers were never machine-checked.
+    #                                A glob cannot drift out of date; a hand-typed file list can.
     ".claude/commands/*.md",
     ".claude/workflows/*.js",
     ".agents/skills/*/SKILL.md",
@@ -400,6 +405,16 @@ def selftest() -> int:
     passed, failed = (passed + 1, failed) if ops_ok else (passed, failed + 1)
     print(f"  {'✓ CAUGHT ' if ops_ok else '✗ WRONG   '}  ops-numbering: a duplicate NNNN- prefix "
           f"in a fixture ops/notes/ tree is detected exactly once")
+
+    # The `.claude/` ROOT instruction surface must be ON the law surface, not un-gated. A
+    # root-level file like `.claude/outreach-handover-format.md` used to sit outside both
+    # `.claude/commands/*.md` and `.claude/workflows/*.js`, so its single-owner compliance and
+    # §/ADR pointers were never machine-checked. This asserts the glob resolves it into law_files().
+    handover = ".claude/outreach-handover-format.md"
+    covered = (handover in set(law_files())) if (REPO / handover).is_file() else (".claude/*.md" in LAW_GLOBS)
+    passed, failed = (passed + 1, failed) if covered else (passed, failed + 1)
+    print(f"  {'✓ covered' if covered else '✗ UN-GATED'}   .claude/ root instruction files are on "
+          f"the check_law law surface")
 
     print()
     if failed:

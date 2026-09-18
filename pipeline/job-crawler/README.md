@@ -83,15 +83,19 @@ crawler-only release of this repo, if that's all you need).
 ## Add a company
 
 Open its careers page and read the URL:
-- `boards.greenhouse.io/<slug>` → `ats: greenhouse`
-- `jobs.lever.co/<slug>`         → `ats: lever`
-- `jobs.ashbyhq.com/<slug>`      → `ats: ashby`
+- `boards.greenhouse.io/<slug>`              → `ats: greenhouse`
+- `jobs.lever.co/<slug>`                     → `ats: lever`
+- `jobs.ashbyhq.com/<slug>`                  → `ats: ashby`
+- `jobs.smartrecruiters.com/<slug>`          → `ats: smartrecruiters` (slug is case-sensitive)
+- `apply.workable.com/<slug>`                → `ats: workable`
+- `<tenant>.<host>.myworkdayjobs.com/<site>` → `ats: workday`, slug = `"tenant/host/site"`
 
 Add one line to `boards.yaml`. A wrong slug is harmless: the crawler skips it and lists it under
-`errors`.
+`errors`. Workday has no "list everything" mode, so it's queried with your own `filters.yaml`
+`include_titles` directly; see `boards.yaml`'s own header comment for the full detail.
 
 ## Not covered (yet)
 
-- **Workday / Rippling / SmartRecruiters** boards: the free ATS trio above covers a large share
-  of postings; add another provider's fetcher to `crawl.py` if a target you care about needs it.
+- **Rippling**: not yet supported; add another provider's fetcher to `crawl.py` if a target you
+  care about needs it.
 - **LinkedIn**: intentionally excluded (scraping risks an account ban).

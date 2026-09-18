@@ -204,6 +204,19 @@ def session_start() -> int:
     lines: list[str] = []
     add = lines.append
 
+    def flush() -> None:
+        """Print what has been buffered so far and clear it, so a LATER kill cannot discard it.
+
+        This used to build one big string and print it once at the very end, so when a slow
+        subprocess pushed the hook past its timeout, the harness killed it and the entire
+        readout, counts, the live-interviews block, everything, was silently lost. Flushing the
+        critical block first means the north-star information survives even if the gate-health
+        sweep below never finishes.
+        """
+        if lines:
+            print("\n".join(lines), flush=True)
+            lines.clear()
+
     add("═══ JOB SEARCH ENGINE: live state, re-derived this second (never quoted from a record) ═══")
 
     c = tracker_counts()
@@ -222,6 +235,23 @@ def session_start() -> int:
             "file is stale. Fix the file; never carry its number forward.")
     else:
         add("  pipeline/tracker.html has no rows yet. Nothing to report. See SETUP.md.")
+
+    # Live interviews and owed/awaited commitments, placed right under the interview count on
+    # purpose: a live interview's owed next-step is the north-star metric, and the failure this
+    # guards against is a commitment made on a call or in a thread that lives only there and never
+    # gets surfaced back to you. commitments.py makes it un-ignorable and flags any live-interview
+    # row that carries no tracked next-step.
+    try:
+        import commitments as _cm
+        for _l in _cm.session_lines():
+            add(_l)
+    except Exception as _e:  # noqa: BLE001, a bug here must never block a session from starting
+        add(f"  ⚠ commitments unavailable ({type(_e).__name__}: {_e}); run scripts/commitments.py by hand.")
+
+    # Flush the critical block now: counts plus the live-interviews next-steps. Everything below
+    # runs slower subprocesses (throughput, the gate selftests); if any of them ever pushes past
+    # the timeout, this block is already on stdout and survives the kill.
+    flush()
 
     rc, out = sh([sys.executable, "scripts/adr_debt.py"])
     debt = [l for l in out.splitlines() if l.strip()]
@@ -305,6 +335,11 @@ def session_start() -> int:
     except Exception as e:  # noqa: BLE001
         add(f"  ⚠ outreach_queue unavailable ({type(e).__name__}: {e}); run it by hand.")
 
+    # Flush again before the gate-health sweep: the gate selftests are the slowest cumulative part
+    # of this hook, so a kill is likeliest here. Debt/throughput/outreach are now already on
+    # stdout regardless of whether the sweep finishes.
+    flush()
+
     add("")
     add("  Gates:")
     for label, cmd in (
@@ -314,8 +349,12 @@ def session_start() -> int:
         ("resume_gate", ["scripts/resume_gate.py", "--selftest"]),
         ("subject_check", ["scripts/subject_check.py", "--selftest"]),
         ("voice_check", ["scripts/voice_check.py", "--selftest"]),
+        ("batch_voice_check", ["scripts/batch_voice_check.py", "--selftest"]),
         ("fill_ready", ["scripts/fill_ready.py", "--selftest"]),
         ("injection_scan", ["scripts/injection_scan.py", "--selftest"]),
+        ("seniority_gate", ["scripts/seniority_gate.py", "--selftest"]),
+        ("tracker_check", ["scripts/tracker_check.py", "--selftest"]),
+        ("commitments", ["scripts/commitments.py", "--selftest"]),
         ("codex_hook_adapter", ["scripts/codex_hook_adapter.py", "--selftest"]),
     ):
         rc, _ = sh([sys.executable] + cmd)
@@ -345,8 +384,27 @@ def session_start() -> int:
             f"(run: python3 scripts/canon.py)")
     if rc_v != 0:
         crit = out_v.count("[CRITICAL]")
-        add(f"    ⚠ visa_gate: {crit} CRITICAL work-authorization defect(s) "
+        high = out_v.count("[HIGH]")
+        sev = f"{crit} CRITICAL" + (f" + {high} HIGH" if high else "")
+        add(f"    ⚠ visa_gate: {sev} work-authorization defect(s) "
             f"(run: python3 scripts/visa_gate.py); CLAUDE.md §5")
+
+    # A job posting asking for meaningfully more years of experience than you actually have is a
+    # seniority mismatch, not a stretch worth a dossier. Surface any dossier still awaiting that
+    # call so a mismatched req never gets filled and sent on autopilot.
+    rc_s, out_s = sh([sys.executable, "scripts/seniority_gate.py", "--all", "--unsubmitted"])
+    m_s = re.search(r"=>\s*(\d+)\s+UNHANDLED", out_s)
+    if m_s and int(m_s.group(1)) > 0:
+        add(f"    ⚠ seniority_gate: {m_s.group(1)} unhandled dossier(s) exceed your target "
+            f"seniority band; drop them (run: python3 scripts/seniority_gate.py --all --unsubmitted)")
+
+    # A single malformed row in the tracker's data can throw a JS error that renders the WHOLE
+    # tracker blank, and every other tool here parses the file tolerantly, so nothing else would
+    # notice; a browser will not be so forgiving. Surface a tracker that won't render, loudly.
+    rc_tc, out_tc = sh([sys.executable, "scripts/tracker_check.py"])
+    if rc_tc != 0:
+        add(f"    🔴 tracker_check: pipeline/tracker.html has a JS error and renders BLANK; "
+            f"{out_tc.strip()[:160]} (run: python3 scripts/tracker_check.py)")
 
     add("")
     add("  §0 north star: interview calls. The single most-repeated failure across sessions like "
@@ -354,7 +412,7 @@ def session_start() -> int:
         "wave, the deliverable is a FILLED FORM (CLAUDE.md §14.0), not a dossier.")
     add("═" * 88)
 
-    print("\n".join(lines))
+    flush()
     return 0
 
 
@@ -365,6 +423,118 @@ def session_start() -> int:
 LIVE_SURFACE = ("knowledge-base/", "resume/", "pipeline/", "CLAUDE.md",
                 "STRUCTURE.md", "README.md", ".claude/", ".codex/",
                 ".agents/")
+
+# ── The plain-voice gate, wired into Stop. §11 (write like a human, not a robot) is one of the
+# oldest, most-repeated corrections a career-copy repo like this one gets, and until now
+# voice_check only *selftested* here, it never ran against a session's actual writing. An agent
+# can draft outbound copy in machine voice, show it in chat for approval, and never run
+# voice_check on it unless it remembers to, and the moment it forgets is exactly the moment a
+# machine-voice answer reaches you. The honesty gates were mechanized this way already; voice was
+# the one left out. It runs now on two surfaces: files a session wrote, and draft copy an agent
+# presents in chat.
+# Only surfaces that are CLEAN copy-written-as-you end to end. interview-prep.md is deliberately
+# excluded: it is a mixed file (spoken answers plus strategy/gap analysis), and treating the whole
+# thing as copy false-fires on its analytical prose (a note ABOUT a gap is not copy, and a gate
+# that cries wolf on ordinary analysis trains an agent to route around it). The actual spoken
+# answers live in screener/narration files, which ARE gated.
+VOICE_SURFACE = re.compile(
+    r"(?:^|/)cover-note\.md$"
+    r"|/screener/[^/]+\.md$"
+    r"|/correspondence/[^/]+\.md$"                                       # drafted recruiter emails
+    r"|(?:^|/)[^/]*(?:screener|spoken[- ]?answer|narration)[^/]*\.md$",  # also plausibly-named files
+    re.I)                                                                # outside a screener/ dir
+
+# Draft copy written as you, presented in chat, is fenced between `---` lines (the
+# narration/answer shape) AND introduced by a specific give-cue. Analysis is neither, so this
+# stays off ordinary chat. The cues are deliberately narrow ("here's your answer / here's Q7 /
+# say this / in your voice / the cover note"), never the generic "here's the …", so an analytical
+# reply cannot trip it.
+_DRAFT_CUE = re.compile(
+    r"here'?s (?:your answer|q\s*\d|your q\s*\d|the draft|the cover|the note|the message|the reply|"
+    r"the narration|the answer|the dm|what you'?d say|what to say|what to send)\b"
+    r"|say (?:this|it)\b|in your (?:own )?(?:voice|words)|to say into|for the recorder"
+    r"|read (?:this|it) (?:into|out|aloud|to)|the drafted (?:note|message|dm|reply)"
+    r"|(?:paste|send|use|try) this\b|your (?:message|note|dm|reply|answer) (?:is|reads|below)"
+    r"|the (?:response|message|dm|note|cover|answer) to send", re.I)
+
+
+# Categories voice_check flags that the Stop gate does NOT block on; an agent running voice_check
+# by hand still sees them. em/en-dash: a pause marker in a spoken narration, not a machine tell.
+# "too-neat mirror": a deliberate blanket ban on the bare words already/exactly (high recall, low
+# precision on purpose), and as a hard blocker it would stop a genuinely required answer like "I
+# have already relocated" or "exactly five years." The specific high-signal "mirror-in-disguise"
+# category still blocks.
+_VOICE_ADVISORY = {"em/en-dash", "too-neat mirror"}
+
+
+def _voice_block_findings(text: str) -> list[tuple[str, str]]:
+    """voice_check findings that should BLOCK the turn: the CONTENT machine-tells, minus the
+    advisory categories (see _VOICE_ADVISORY)."""
+    try:
+        import voice_check
+    except Exception:
+        return []
+    return [(c, frag) for c, frag, _ in voice_check.check(text) if c not in _VOICE_ADVISORY]
+
+
+def _looks_like_copy_as_you(seg: str) -> bool:
+    """A fenced/quoted block reads as copy written as you: it has first-person prose
+    (case-insensitive, including 'me') and is not a markdown table."""
+    return bool(seg) and bool(re.search(r"\bI\b|\bmy\b|\bme\b|\bmyself\b|\bI'?m\b", seg, re.I)) \
+        and "|--" not in seg and "| ---" not in seg
+
+
+def _chat_draft_blocks(msg: str) -> list[str]:
+    """The sendable prose of each draft-copy-written-as-you block in an assistant chat message,
+    but ONLY when the message carries a narrow give-cue. Reads the shapes an agent actually hands
+    copy over in: `---` fences, ``` fences (the outreach handover shape), and runs of `>`
+    blockquote lines. Empty for ordinary analysis (no give-cue)."""
+    if not msg or not _DRAFT_CUE.search(msg):
+        return []
+    try:
+        import voice_check
+    except Exception:
+        return []
+    out: list[str] = []
+    for fence in (r"(?m)^[ \t]*---[ \t]*$", r"(?m)^[ \t]*```[^\n]*$"):
+        parts = re.split(fence, msg)
+        for i in range(1, len(parts), 2):          # segments between fences = fenced copy
+            seg = parts[i].strip()
+            if _looks_like_copy_as_you(seg):
+                out.append(voice_check.sendable_prose(seg))
+    # a run of 2+ consecutive `>` blockquote lines (the connection-note / DM handover shape).
+    for m in re.finditer(r"(?m)((?:^[ \t]*>.*\n?){2,})", msg):
+        seg = re.sub(r"(?m)^[ \t]*>\s?", "", m.group(1)).strip()
+        if _looks_like_copy_as_you(seg):
+            out.append(seg)
+    return out
+
+
+def _last_assistant_text(transcript_path: str) -> str:
+    """Text of the last assistant message in a Claude Code transcript (JSONL), or ''. Fully
+    guarded: any read/parse failure returns '' so the Stop hook fails OPEN on this best-effort
+    surface."""
+    try:
+        lines = Path(transcript_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return ""
+    for ln in reversed(lines):
+        try:
+            o = json.loads(ln)
+        except Exception:
+            continue
+        msg = o.get("message") or {}
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            t = "".join(b.get("text", "") for b in content
+                        if isinstance(b, dict) and b.get("type") == "text")
+            if t.strip():
+                return t
+    return ""
 
 
 def post_edit() -> int:
@@ -410,7 +580,7 @@ def post_edit() -> int:
 
     if re.search(r"applications/[^/]+/application\.md$", rel):
         rc, out = sh([sys.executable, "scripts/visa_gate.py", rel])
-        if rc == 1 and "[CRITICAL]" in out:
+        if rc == 1 and ("[CRITICAL]" in out or "[HIGH]" in out):
             msgs.append(f"🔴 visa_gate: a work-authorization answer in {rel} is WRONG "
                         f"(CLAUDE.md §5); run `python3 scripts/visa_gate.py {rel}`")
 
@@ -459,25 +629,67 @@ def changed_files() -> list[str]:
                         pass
         else:
             files.append(path)
-    return files
+    # A repo that auto-commits mid-session can have a defect written AND committed within a turn,
+    # so it is no longer in `git status` at Stop time and would otherwise escape the gate
+    # entirely. Also include files carried by commits NOT yet pushed to the remote: "touched this
+    # session but not yet finalized." Once pushed they drop off (they are out the door), which
+    # keeps the gate from re-litigating settled history. Fail-open if the remote ref is
+    # unavailable.
+    rc2, out2 = sh(["git", "diff", "--name-only", "origin/main...HEAD"])
+    if rc2 == 0:
+        for path in out2.splitlines():
+            path = path.strip().strip('"')
+            if path and (REPO / path).is_file():
+                files.append(path)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for f in files:
+        if f not in seen:
+            seen.add(f)
+            uniq.append(f)
+    return uniq
 
 
-def stop(changed: list[str] | None = None) -> int:
-    """Block the turn if a file changed this session carries a defect.
+def stop(changed: list[str] | None = None, last_message: str | None = None) -> int:
+    """Block the turn if a file changed this session carries a defect, or if a machine-voice DRAFT
+    was presented in chat this turn.
 
-    `changed` is injectable so the selftest can exercise the blocking path itself, not just call a
-    function and trust its return value. A gate with no test of its own teeth is the one gate that
-    can silently stop biting.
+    `changed` and `last_message` are injectable so the selftest can exercise the blocking path
+    itself, not just call a function and trust its return value. A gate with no test of its own
+    teeth is the one gate that can silently stop biting.
     """
+    real_call = changed is None
     changed = changed_files() if changed is None else changed
-    if not changed:
+    # On a REAL Stop invocation the payload on stdin carries transcript_path; read the last
+    # assistant message from it for the chat-draft voice gate (a machine-voice draft shown only in
+    # CHAT, never saved to a file, would otherwise be invisible to a file-only gate). Guarded;
+    # fails open.
+    if real_call and last_message is None:
+        try:
+            payload = json.load(sys.stdin)
+            tp = payload.get("transcript_path") or ""
+            last_message = _last_assistant_text(tp) if tp else None
+        except Exception:
+            last_message = None
+    if not changed and not last_message:
         return 0
 
     blocking: list[str] = []
 
+    def _ran(rc: int, gate: str, ctx: str = "") -> None:
+        # A gate that could not RUN (timeout, crash, any exit that is neither clean (0) nor a
+        # finding (1)) must FAIL CLOSED, never pass silently. sh() returns -1 on a
+        # timeout/exception, and the checks below only block on rc==1, so a slow subprocess or any
+        # subprocess error would otherwise let the turn END unguarded, exactly the case where the
+        # mechanical backstop this repo leans on would be failing open.
+        if rc not in (0, 1):
+            blocking.append(f"{gate} could NOT run{(' on ' + ctx) if ctx else ''} (exit {rc}); a gate "
+                            f"that cannot run must not pass silently; fix the error/timeout and retry.")
+
     live = [f for f in changed if any(f.startswith(s) or f == s for s in LIVE_SURFACE)]
     if live:
         rc, out = sh([sys.executable, "scripts/canon.py"] + live)
+        _ran(rc, "canon")
         if rc == 1:
             for l in out.splitlines():
                 if re.match(r"^\s+\S+:\d+\s+\[", l):
@@ -486,6 +698,7 @@ def stop(changed: list[str] | None = None) -> int:
     apps = [f for f in changed if re.search(r"applications/[^/]+/application\.md$", f)]
     if apps:
         rc, out = sh([sys.executable, "scripts/visa_gate.py"] + apps)
+        _ran(rc, "visa_gate")
         if rc == 1:
             for l in out.splitlines():
                 if "[CRITICAL]" in l or "[HIGH]" in l:
@@ -495,6 +708,7 @@ def stop(changed: list[str] | None = None) -> int:
              if re.search(r"(applications/[^/]+/referrals|pipeline/outreach-[^/]+)\.md$", f)]
     if reach:
         rc, out = sh([sys.executable, "scripts/outreach_format.py"] + reach)
+        _ran(rc, "outreach_format")
         for l in out.splitlines():
             if " is missing: " in l:
                 blocking.append("outreach " + l.strip())
@@ -502,7 +716,8 @@ def stop(changed: list[str] | None = None) -> int:
     dossiers = sorted({m.group(1) for f in changed
                        if (m := re.match(r"(applications/[^/]+)/", f))})
     for d in dossiers:
-        rc, out = sh([sys.executable, "scripts/verify_claims.py", d], timeout=40)
+        rc, out = sh([sys.executable, "scripts/verify_claims.py", d], timeout=60)
+        _ran(rc, "verify_claims", d)
         if rc == 1:
             n = len([l for l in out.splitlines() if re.match(r"^\s*R\d+\s", l)])
             blocking.append(f"verify_claims: {d} FAILS the grounding gate"
@@ -512,10 +727,52 @@ def stop(changed: list[str] | None = None) -> int:
     if any(f in ("CLAUDE.md", "STRUCTURE.md") or
            f.startswith((".claude/", ".codex/", ".agents/")) for f in changed):
         rc, out = sh([sys.executable, "scripts/check_law.py"])
+        _ran(rc, "check_law")
         if rc == 1:
             for l in out.splitlines():
                 if re.match(r"^\s+\[(HIGH|MEDIUM)\]", l):
                     blocking.append("check_law " + l.strip())
+
+    # Résumé employment-OMISSION check on any résumé HTML this session touched. resume_gate is the
+    # ONLY gate that catches a DROPPED employment entry: verify_claims catches false assertions,
+    # not omissions, and canon does not scan applications/. Block on the omission CLASS only, a
+    # missing employer, the current job not listed, or a multi-page résumé, and leave page-fill
+    # as the advisory it already is elsewhere.
+    resumes = [f for f in changed if re.search(r"(?:^|/)resume/[^/]+\.html$", f)]
+    for r in resumes:
+        rc, out = sh([sys.executable, "scripts/resume_gate.py", r], timeout=40)
+        _ran(rc, "resume_gate", r)
+        if rc == 1:
+            for l in out.splitlines():
+                if ("employment entry MISSING" in l or "is not listed as employment" in l
+                        or re.search(r"\bpage[s]?\. A résumé is ONE page", l)):
+                    blocking.append("resume_gate " + l.strip())
+
+    # 🔴 THE PLAIN-VOICE GATE (§11), on two surfaces: the fix for an agent shipping machine-voice
+    # copy past you because voice_check was never forced to run.
+    # (1) FILES a session wrote that carry copy-written-as-you and that verify_claims does not
+    # read (screener answers, narrations, cover notes, interview-prep). em/en-dash is advisory
+    # here, not blocking (a spoken narration's pause dashes are not a machine tell); CONTENT tells
+    # block.
+    try:
+        import voice_check as _vc
+        for f in [f for f in changed if VOICE_SURFACE.search(f)]:
+            try:
+                prose = _vc.sendable_prose(Path(f).read_text(encoding="utf-8", errors="replace"))
+            except Exception:
+                continue
+            for cat, frag in _voice_block_findings(prose)[:4]:
+                blocking.append(f"voice_check: {f}, [{cat}] “{frag[:48]}” (§11 plain-voice). "
+                                f"Run `python3 scripts/voice_check.py --sendable {f}` and rewrite plainly.")
+        # (2) DRAFT COPY written as you, presented in CHAT this turn: a machine-voice draft shown
+        # only in chat, never saved to a file, that nothing else here would catch.
+        for seg in _chat_draft_blocks(last_message or ""):
+            for cat, frag in _voice_block_findings(seg)[:3]:
+                blocking.append(f"voice (chat draft): [{cat}] “{frag[:48]}”, you presented copy "
+                                f"written as you that trips §11. Rewrite it plainly and run voice_check "
+                                f"BEFORE showing it to the operator.")
+    except Exception:
+        pass  # the voice gate must never break the turn; fail open, like every other gate here.
 
     if blocking:
         print(json.dumps({
@@ -558,9 +815,30 @@ def selftest() -> int:
           f"(submitted={hc['submitted']}, live={hc['live']}, interviews={hc['interview']})")
     ok &= hc_ok
 
-    rc = session_start_quiet()
+    # ONE recorded session_start run answers BOTH checks: it runs clean AND it flushes the
+    # critical block (the banner plus counts) before the slow gate sweep, so a timeout kill
+    # cannot discard it. A single end-of-run print (the old behavior) would emit the banner and
+    # the gate block in ONE write; the fix emits them in separate flushes. (One run, not two:
+    # session_start is not fast.)
+    import io as _io, contextlib as _cl
+    class _Rec(_io.StringIO):
+        def __init__(self):
+            super().__init__(); self.chunks: list[str] = []
+        def write(self, s):
+            if s.strip():
+                self.chunks.append(s)
+            return super().write(s)
+    _rec = _Rec()
+    with _cl.redirect_stdout(_rec):
+        rc = session_start()
     print(f"  {'✓' if rc == 0 else '✗'} --session-start runs clean (exit {rc})")
     ok &= rc == 0
+    _crit = next((i for i, c in enumerate(_rec.chunks) if "JOB SEARCH ENGINE" in c), -1)
+    _gates = next((i for i, c in enumerate(_rec.chunks) if "Gates:" in c), -1)
+    early_flush = 0 <= _crit < _gates
+    print(f"  {'✓' if early_flush else '✗'} critical block is flushed BEFORE the gate sweep "
+          f"(survives a timeout kill)")
+    ok &= early_flush
 
     import io
     saved = sys.stdin
@@ -603,6 +881,91 @@ def selftest() -> int:
         quiet = buf2.getvalue().strip() == ""
         print(f"  {'✓' if quiet else '✗'} --stop stays silent on a clean file")
         ok &= quiet
+
+        # A gate that cannot RUN (timeout / subprocess error, sh() returns -1) must FAIL CLOSED,
+        # never pass silently.
+        _orig_sh = globals()["sh"]
+        globals()["sh"] = lambda *a, **k: (-1, "TimeoutExpired: simulated")
+        try:
+            buf3 = io.StringIO()
+            with contextlib.redirect_stdout(buf3):
+                stop([rel])   # rel = the planted probe file; verify_claims runs on its dossier
+            raw3 = buf3.getvalue().strip()
+            failclosed = (bool(raw3) and _json.loads(raw3).get("decision") == "block"
+                          and "could NOT run" in raw3)
+        finally:
+            globals()["sh"] = _orig_sh
+        print(f"  {'✓' if failclosed else '✗'} --stop FAILS CLOSED when a gate cannot run (timeout/-1)")
+        ok &= failclosed
+
+        # ── The plain-voice gate (§11), both surfaces. ──
+        bad_draft = ("Here's Q8, your answer.\n\n---\nYeah. I'm on top of it the whole time, and I "
+                     "learned this the hard way. Nobody used it. Like, nobody.\n---\n")
+        bv = io.StringIO()
+        with contextlib.redirect_stdout(bv):
+            stop(changed=[], last_message=bad_draft)
+        rv = bv.getvalue().strip()
+        v_block = bool(rv) and "voice (chat draft)" in rv and _json.loads(rv).get("decision") == "block"
+        print(f"  {'✓' if v_block else '✗'} --stop BLOCKS a machine-voice DRAFT shown in chat")
+        ok &= v_block
+
+        # the SAME tell words in ANALYSIS (no give-cue) must NOT block: the false-positive guard
+        # that keeps the gate off ordinary chat.
+        analysis = ("Here's the picture. The agent used a story-arc and I learned the hard way "
+                    "that the gate was not wired in.\n---\nMy read: the fix is to wire "
+                    "voice_check into Stop.\n---\n")
+        ba = io.StringIO()
+        with contextlib.redirect_stdout(ba):
+            stop(changed=[], last_message=analysis)
+        a_quiet = "voice (chat draft)" not in ba.getvalue()
+        print(f"  {'✓' if a_quiet else '✗'} --stop does NOT voice-block analysis (no give-cue = no FP)")
+        ok &= a_quiet
+
+        # a CLEAN drafted answer must pass
+        clean_draft = ("Here's your answer.\n\n---\nI design the product, then I build the front "
+                       "end myself. I write tests for the things that matter.\n---\n")
+        bc = io.StringIO()
+        with contextlib.redirect_stdout(bc):
+            stop(changed=[], last_message=clean_draft)
+        c_quiet = "voice (chat draft)" not in bc.getvalue()
+        print(f"  {'✓' if c_quiet else '✗'} --stop does NOT voice-block a CLEAN chat draft")
+        ok &= c_quiet
+
+        # evasion shapes: a `>` blockquote and a ``` code fence (the outreach handover shape) with
+        # a give-cue must also block, not just a `---` fence.
+        bq = ("Here's your answer:\n> Yeah. I'm on top of it the whole time and I learned this "
+              "the hard way.\n> That's how it goes.")
+        bbq = io.StringIO()
+        with contextlib.redirect_stdout(bbq):
+            stop(changed=[], last_message=bq)
+        print(f"  {'✓' if 'voice (chat draft)' in bbq.getvalue() else '✗'} --stop BLOCKS a "
+              f"machine-voice draft in a `>` blockquote")
+        ok &= "voice (chat draft)" in bbq.getvalue()
+
+        # advisory categories do NOT block: a legitimately required answer that happens to use the
+        # word "already" (e.g. confirming a relocation that already happened) must still pass, or
+        # the gate blocks an answer you are required to give.
+        mand = "Here's your answer:\n---\nI have already relocated and can start immediately.\n---"
+        bm = io.StringIO()
+        with contextlib.redirect_stdout(bm):
+            stop(changed=[], last_message=mand)
+        print(f"  {'✓' if 'voice (chat draft)' not in bm.getvalue() else '✗'} --stop does NOT "
+              f"block a required 'already relocated' answer (mirror is advisory)")
+        ok &= "voice (chat draft)" not in bm.getvalue()
+
+        # the FILE surface: a machine-voice narration file this session wrote blocks on §11.
+        vfile = tmpdir / "probe-narration.md"
+        vfile.write_text("# probe\n**note:** x\n---\nI learned this the hard way and that's why "
+                         "I keep it simple now.\n", encoding="utf-8")
+        vrel = str(vfile.resolve().relative_to(REPO))
+        bf = io.StringIO()
+        with contextlib.redirect_stdout(bf):
+            stop([vrel])
+        f_block = "voice_check:" in bf.getvalue()
+        print(f"  {'✓' if f_block else '✗'} --stop BLOCKS a machine-voice narration FILE (§11)")
+        ok &= f_block
+        if vfile.exists():
+            vfile.unlink()
     finally:
         if probe.exists():
             probe.unlink()
@@ -610,6 +973,56 @@ def selftest() -> int:
             tmpdir.rmdir()
         except OSError:
             pass
+
+    # The résumé employment-OMISSION teeth. A résumé that drops the current employer must BLOCK at
+    # Stop; a résumé that only underfills the page must NOT: page-fill stays the advisory it
+    # already is elsewhere. Exercised by faking resume_gate's subprocess output rather than
+    # mutating real repo files, the same technique the fail-closed test above uses for sh().
+    _orig_sh2 = globals()["sh"]
+    _missing_out = ("resume_gate.py checks 1 résumé PDF(s): one page, filled, current employer "
+                    "listed as employment\n  resume/resume.html\n"
+                    "    the CURRENT job (Acme Robotics, Mar 2024) is not listed as employment. "
+                    "It reads as though you last worked years ago.\n")
+
+    def _fake_sh_missing(cmd, cwd=REPO, timeout=25):
+        if any("resume_gate.py" in str(c) for c in cmd):
+            return 1, _missing_out
+        return 0, ""
+
+    globals()["sh"] = _fake_sh_missing
+    try:
+        b1 = io.StringIO()
+        with contextlib.redirect_stdout(b1):
+            stop(["resume/resume.html"])
+        raw1 = b1.getvalue().strip()
+        omission_blocks = bool(raw1) and _json.loads(raw1).get("decision") == "block" \
+            and "resume_gate" in raw1
+    finally:
+        globals()["sh"] = _orig_sh2
+    print(f"  {'✓' if omission_blocks else '✗'} --stop BLOCKS a résumé that dropped the current employer")
+    ok &= omission_blocks
+
+    _fill_out = ("resume_gate.py checks 1 résumé PDF(s): one page, filled, current employer "
+                 "listed as employment\n  resume/resume.html\n"
+                 "    fills only 80.0% of the page, about 168pt left blank at the bottom "
+                 "(floor is 88%). Empty space is unused evidence.\n")
+
+    def _fake_sh_fill(cmd, cwd=REPO, timeout=25):
+        if any("resume_gate.py" in str(c) for c in cmd):
+            return 1, _fill_out
+        return 0, ""
+
+    globals()["sh"] = _fake_sh_fill
+    try:
+        b2 = io.StringIO()
+        with contextlib.redirect_stdout(b2):
+            stop(["resume/resume.html"])
+        pagefill_advisory = "resume_gate" not in b2.getvalue()
+    finally:
+        globals()["sh"] = _orig_sh2
+    print(f"  {'✓' if pagefill_advisory else '✗'} --stop does NOT block on page-fill alone "
+          f"(that stays advisory)")
+    ok &= pagefill_advisory
 
     d = REPO / "knowledge-base" / ".hooks-selftest-newdir"
     try:
@@ -630,13 +1043,6 @@ def selftest() -> int:
     print()
     print("SELFTEST OK" if ok else "SELFTEST FAILED")
     return 0 if ok else 1
-
-
-def session_start_quiet() -> int:
-    import io
-    import contextlib
-    with contextlib.redirect_stdout(io.StringIO()):
-        return session_start()
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ once, following `SETUP.md`, and every session after that starts grounded instead
 - **For interview prep:** `03-career-narrative.md`, `04-experience-detail.md`,
   `06-projects-portfolio.md`, `15-interview-story-bank.md`.
 - **For positioning / getting found:** `14-positioning-and-visibility.md`.
+- **For figuring out where you actually sit on a target company's ladder:** `16-the-senior-gap.md`.
 
 ## Files (the true minimum is marked ★)
 
@@ -33,6 +34,7 @@ once, following `SETUP.md`, and every session after that starts grounded instead
 | — | `13-strengths-and-market-position.md` | A one-time adversarial audit of what's genuinely rare about you | Optional, advanced |
 | — | `14-positioning-and-visibility.md` | How to get *found*, not just apply: referrals, visible work | Optional, high-value once the basics work |
 | — | `15-interview-story-bank.md` | Your reusable STAR-format interview stories | Recommended once you have a real interview scheduled |
+| — | `16-the-senior-gap.md` | A method for figuring out where you actually sit on a target company's ladder (years floor vs. quality bar) and setting `YOUR_YEARS_OF_EXPERIENCE` for `scripts/seniority_gate.py` | Optional, advanced |
 
 **The four ★ files are the true minimum.** With just those four filled in, the résumé/cover-letter
 tailoring engine, the honesty gates, and the form-fill autofill all work end to end. Everything else

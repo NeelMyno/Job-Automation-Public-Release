@@ -95,7 +95,21 @@ class _Submitted:
 
 SUBMITTED = _Submitted
 NOT_APPLIED = re.compile(r"\bNOT[ _]APPLIED\b|\bnot yet applied\b|\bawaiting (?:the )?form\b", re.I)
+# For the self-contradiction check ONLY: a NOT-APPLIED that is THIS dossier's OWN status, not prose
+# ABOUT a sibling req ("the other posting, deliberately NOT applied to") or a correction timeline
+# ("the fix, not applied until 2026-07-21"). Those two prose shapes are real false positives a
+# whole-doc co-occurrence check can produce, so the bare "NOT APPLIED" branch refuses a
+# to/until/for/... continuation while the self-status forms ("not yet applied", "awaiting form") stay.
+_SELF_NOT_APPLIED = re.compile(
+    r"\bnot yet applied\b|\bawaiting (?:the )?form\b"
+    r"|\bNOT[ _]APPLIED\b(?!\s+(?:to|until|for|before|since|as of|by|in|when|elsewhere)\b)", re.I)
 DEAD = re.compile(r"\brejected\b|\bwithdrawn\b|\bclosed\b|\bpassed\b|\bdead\b", re.I)
+# A RECRUITER RÉSUMÉ-SEND is a legitimate terminal state that is NOT a portal application: an inbound
+# recruiter asks for a résumé, you send it, and there is no form and no cover-letter field at all.
+# Such a dossier has a rendered résumé PDF but will never have an "applied" tracker row or a cover
+# PDF, so ready-but-never-sent and cover-missing both false-fire on it. A DATED "résumé sent" record
+# is the honest, hard-to-fabricate signal it was actually sent.
+_RESUME_SENT = re.compile(r"r[ée]sum[ée]\s+sent\b\s*[:\-—]?\s*(?:on\s+)?20\d\d-\d\d-\d\d", re.I)
 
 # EXAMPLE-*/TEMPLATE-* dossiers are scaffolding (verify_claims.py's own fixture, and the blank
 # starter copy-from), never a real application. Every check below that sweeps applications/* for
@@ -174,7 +188,7 @@ def ready_but_never_sent() -> list[Finding]:
                 f"{d.name}: has a rendered résumé PDF and NO application.md or README.md at all",
                 "no record exists that this was ever sent, or ever will be. §13.3 requires both."))
             continue
-        if SUBMITTED.search(blob) or DEAD.search(blob):
+        if SUBMITTED.search(blob) or DEAD.search(blob) or _RESUME_SENT.search(blob):
             continue
         out.append(Finding(
             "HIGH", "ready-but-never-sent", f"{d.name}: has a rendered résumé PDF, no submit recorded",
@@ -199,8 +213,8 @@ def cover_missing() -> list[Finding]:
         for f in (d / "application.md", d / "README.md"):
             if f.is_file():
                 blob += f.read_text(encoding="utf-8", errors="replace")
-        if DEAD.search(blob):
-            continue  # a dossier we will never apply to needs no cover
+        if DEAD.search(blob) or _RESUME_SENT.search(blob):
+            continue  # a dead dossier, or a recruiter résumé-send (no form, no cover field), needs no cover
         cover_dir = d / "cover-letter"
         covers = list(cover_dir.glob("*.pdf")) if cover_dir.is_dir() else []
         if not covers:
@@ -230,6 +244,42 @@ def _norm_ats_url(u: str) -> str:
     # the latter re-introduces the "job-job-" typo it was meant to remove (the selftest caught this).
     u = re.sub(r"(?:job-)*boards\.greenhouse\.io", "greenhouse.io", u)
     return u
+
+
+# A dedup key is only meaningful for a JOB-SPECIFIC apply/JD URL. A shared login page, a generic
+# careers landing page, or a free-text placeholder is NOT a req, so keying on it collides unrelated
+# companies and shouts "do NOT re-apply" at genuinely-new roles: lost applications, the exact harm
+# this file exists to prevent. In real use this produced false "already applied" HIGHs from three
+# shapes: a shared authentication/login page used identically by many otherwise-unrelated postings
+# on the same platform (Y Combinator's own applicant login page is one real, publicly known
+# example), a free-text recruiter placeholder written in place of a real apply URL, and a bare
+# generic /careers landing page shared by two different roles at two different companies. A
+# non-req value returns "" and makes no dedup claim.
+_LOGINISH = re.compile(r"(?:^|/)(?:authenticate|login|signin|sign-in|sso|account)(?:/|$)", re.I)
+_GENERIC_LANDING = re.compile(
+    r"/(?:careers|jobs|about-us/careers|about/careers|company/careers|work-with-us|opportunities)/?$", re.I)
+_REQ_ID_SIGNAL = re.compile(
+    r"\d{5,}"                                                           # long numeric id (GH/Lever/Amazon)
+    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"    # Ashby/Lever uuid
+    r"|\br-?\d{3,}\b|\bjr\d{3,}\b"                                      # e.g. R-100234 / JR55019 requisitions
+    r"|gh_jid|/jobs?/[^/]|/postings?/[^/]|/job-detail"                 # a specific ATS posting path
+    r"|ashbyhq\.com/[^/]+/[^/]|lever\.co/[^/]+/[^/]",                   # org + a posting segment
+    re.I)
+
+
+def _req_key(u: str) -> str:
+    """A comparison key ONLY for a job-specific apply/JD URL; '' for anything shared or non-req."""
+    raw = (u or "").strip()
+    if not raw or " " in raw:
+        return ""                      # a normalized URL never contains a space (kills free-text)
+    k = _norm_ats_url(raw)             # strips scheme/query/fragment, lowercases
+    if not k or "/" not in k:
+        return ""                      # a bare host is a landing page, not a specific req
+    if _LOGINISH.search(k) or _GENERIC_LANDING.search(k):
+        return ""                      # a shared auth page or a generic careers/jobs landing page
+    if not _REQ_ID_SIGNAL.search(k):
+        return ""                      # no job/req id means not specific enough to claim a duplicate
+    return k
 
 
 def duplicate_application() -> list[Finding]:
@@ -265,7 +315,7 @@ def duplicate_application() -> list[Finding]:
         rows.append(row)
         if row["status"] in APPLIED:
             for u in (row["apply"], row["jd"]):
-                k = _norm_ats_url(u)
+                k = _req_key(u)
                 if k:
                     applied_url[k] = (row["co"], row["role"], row["status"])
             applied_cr[(row["co"].lower().strip(), row["role"].lower().strip())] = (
@@ -276,7 +326,7 @@ def duplicate_application() -> list[Finding]:
         # Only rows we might still act on: fill-ready (active) or an un-worked lead with a dossier.
         if row["status"] not in {"active", "lead"} or not row["folder"]:
             continue
-        key = _norm_ats_url(row["apply"]) or _norm_ats_url(row["jd"])
+        key = _req_key(row["apply"]) or _req_key(row["jd"])
         hit = applied_url.get(key) if key else None
         if hit:
             out.append(Finding(
@@ -297,11 +347,14 @@ def duplicate_application() -> list[Finding]:
 
 
 def status_contradicts_itself() -> list[Finding]:
-    """A dossier whose header says one thing and whose body says another.
+    """A dossier that asserts both a real submission and NOT-APPLIED, in either order.
 
-    `/wave` step 2 reads these to rank what to work on, so a dossier that says NOT APPLIED at the
-    top and SUBMITTED lower down gets re-worked, or worse, re-applied. Two companies came back as
-    "fresh leads" on 2026-07-23 having already been applied to at the same URLs.
+    A wave reads a dossier's status to rank what to work on, so a dossier that says NOT APPLIED
+    somewhere and SUBMITTED somewhere else gets re-worked, or worse, re-applied. This check is
+    whole-document and bidirectional (not a fixed header-vs-body split), since in real use both
+    arrangements occur: a stale NOT-APPLIED marker left near the top after a later submission, or
+    a dated submission banner added near the top while an older status row below still reads
+    NOT-APPLIED.
 
     DEAD dossiers (tracker status rejected/passed/withdrawn/closed) are EXEMPT: a wave never
     re-works them and CLAUDE.md §13.8 rule 3 makes them read-only forever, so an internal header/body
@@ -325,14 +378,22 @@ def status_contradicts_itself() -> list[Finding]:
         if f.parent.name in dead_folders or is_scaffold_dossier(f.parent.name):
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-        head = "\n".join(lines[:12])
-        body = "\n".join(lines[12:])
-        if NOT_APPLIED.search(head) and SUBMITTED.search(body):
+        # BIDIRECTIONAL, whole-doc. A head/body split only catches NOT-APPLIED-in-header +
+        # SUBMITTED-in-body. In real use a fill wave can produce the REVERSE just as easily: a
+        # dated "applied" banner near the top while a status ROW further down still reads "NOT YET
+        # APPLIED, prepared earlier", or a shape where both markers sit in the same short header
+        # a 12-line head/body split can't separate. A dossier that asserts BOTH a real submission
+        # and NOT-APPLIED is contradicting itself in EITHER arrangement; a wave reads it to decide
+        # what to (re-)work. `_SELF_NOT_APPLIED` (not the looser `NOT_APPLIED`) keeps this from
+        # firing on prose ABOUT a sibling req or a correction timeline (see its own comment).
+        sub = SUBMITTED.search(text)
+        naa = _SELF_NOT_APPLIED.search(text)
+        if sub and naa and text[:sub.start()].count("\n") != text[:naa.start()].count("\n"):
             out.append(Finding(
                 "HIGH", "status-contradiction",
-                f"{f.parent.name}/{f.name}: header says NOT APPLIED, body says SUBMITTED",
-                "the header is what a wave reads first; fix the header or the body so they agree."))
+                f"{f.parent.name}/{f.name}: asserts BOTH a submission and 'NOT APPLIED'",
+                "one is stale. Make the status say one thing: applied? drop the NOT-APPLIED row; "
+                "not applied? drop the submission banner. A wave reads this to decide what to work on."))
     return out
 
 
@@ -350,15 +411,50 @@ _FUTURE_LEADIN = re.compile(
     r"\b(?:to be|will be|once|after|before this is|not yet|going to|plan(?:ned)? to)\b", re.I)
 
 
+def _own_status_line(blob: str, m) -> bool:
+    """True when the dated marker sits at the START of its own line's meaningful content, a
+    heading/status line the dossier declares about ITSELF ('## ✅ SUBMITTED 2026-08-19 by hand',
+    '**Status: SUBMITTED …**', '**Applied on:** …'), NOT a submission attributed to a SIBLING role
+    in mid-sentence prose.
+
+    In real use, a dossier that cross-references a sibling role in prose can carry that sibling's
+    own dated submission mid-sentence: '(a related role, submitted 2026-08-27)', or
+    '$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets a different posting.' Every such
+    marker is buried MID-LINE inside a reference to a DIFFERENT role; every REAL submission record
+    BEGINS its line with the marker (a `##`/`**Status:` heading). Anchoring to the line start
+    separates the two.
+    """
+    ls = blob.rfind("\n", 0, m.start()) + 1
+    prefix = blob[ls:m.start()]
+    # strip leading markdown / list / quote / emoji decoration
+    p = re.sub(r"^[\s>#*_`·•\-✅🟢🔴🟡🎯]+", "", prefix)
+    # an optional "Status:" / "Status —" label may precede the marker on its own status line
+    p = re.sub(r"^status\s*[:\-—]\s*[*_`✅🟢🔴🟡\s]*", "", p, flags=re.I)
+    return p == ""
+
+
 def _dated_submission(blob: str):
     """The first REAL dated-submission marker in a dossier, or None.
 
     A submission record here is a heading or status line carrying a date: '✅ SUBMITTED 2026-08-27
     by hand', '**Applied on:** 2026-07-22', 'applied_on: 2026-07-23'. Future-tense prose ('To be
-    submitted by hand once it's ready') is not one, so a ~24-char future lead-in vetoes the match.
+    submitted by hand once it's ready') is not one, so a ~24-char future lead-in vetoes the match;
+    and a SIBLING role's submission mentioned in this dossier's prose is not one either, so the
+    marker must sit at the start of its own status/heading line (`_own_status_line`).
     """
     for m in _SUB_DATED.finditer(blob):
         if _FUTURE_LEADIN.search(blob[max(0, m.start() - 24):m.start()]):
+            continue
+        if not _own_status_line(blob, m):
+            continue
+        # A submission marker on a line that ALSO records rejected/withdrawn/closed/passed/dead is
+        # describing a DEAD role, a sibling thread, or a submit-then-reject, never an undercount to
+        # flip to "applied". A dossier can restate its own dead sibling's status line-start as
+        # "**Submitted 2026-07-21, rejected 2026-07-23.** Dead, read-only, never rebuilt", which the
+        # line-start anchor alone would misread as a live submission.
+        ls = blob.rfind("\n", 0, m.start()) + 1
+        le = blob.find("\n", m.end())
+        if DEAD.search(blob[ls: le if le != -1 else len(blob)]):
             continue
         return m
     return None
@@ -387,6 +483,19 @@ def tracker_behind_dossier() -> list[Finding]:
         return []
     src = tracker.read_text(encoding="utf-8", errors="replace")
     PRESUBMIT = {"lead", "sponsor", "active"}
+    SUBMITTED_STATUS = {"applied", "rejected", "interview", "offer", "passed"}
+    # Guard 2: a folder already linked to a submitted-status row is NOT undercounted, a SEPARATE
+    # lead/active row for the SAME folder is a stale DUPLICATE row (the tracker carries both an
+    # "applied" row and a "lead" row for one dossier), so its own submission record is real but the
+    # application is already counted. Flagging it "flip to applied" would double-count. The
+    # duplicate itself is surfaced by duplicate_application; it is not an undercount, which is the
+    # only thing this check exists to catch.
+    submitted_folders: set[str] = set()
+    for rec in re.split(r"\n\s*\{", src):
+        fm = re.search(r'folder:\s*"(applications/[^"]+)"', rec)
+        sm = re.search(r'status:\s*"([^"]+)"', rec)
+        if fm and sm and sm.group(1) in SUBMITTED_STATUS:
+            submitted_folders.add(fm.group(1).rstrip("/"))
     out: list[Finding] = []
     for rec in re.split(r"\n\s*\{", src):
         fm = re.search(r'folder:\s*"(applications/[^"]+)"', rec)
@@ -394,6 +503,8 @@ def tracker_behind_dossier() -> list[Finding]:
         if not (fm and sm) or sm.group(1) not in PRESUBMIT:
             continue
         folder = fm.group(1).rstrip("/")
+        if folder in submitted_folders:
+            continue  # already counted by its own applied/rejected/.../passed row: a duplicate lead row
         d = REPO / folder
         blob = ""
         for f in (d / "application.md", d / "README.md"):
@@ -451,24 +562,112 @@ def tracker_renders() -> list[Finding]:
         "string; a data file the browser executes needs a syntax gate.")]
 
 
-def site_matches_repo() -> list[Finding]:
+# Optional: set LIVE_RESUME_URL in scripts/config.py to the exact URL a recruiter downloads your
+# résumé from on your published site (e.g. "https://your-site.example/resume/your-resume.pdf").
+# When set, site_matches_repo() fetches that URL directly and checks the DEPLOYED artifact itself,
+# not just a local checkout of the site repo, the strongest version of this check, since a local
+# checkout can itself silently drift from what is actually live. Left unset (the default, and the
+# fallback used if config.py has never defined it at all), this feature is a no-op and the check
+# falls back to the SITE_CHECKOUT_PATH comparison below (also optional).
+LIVE_RESUME_URL: str | None = getattr(config, "LIVE_RESUME_URL", None)
+
+
+def _fetch_live_resume(url: str, timeout: float = 4.0):
+    """(sha256[:12], raw_bytes) for the résumé at `url`, or None if it could not be fetched.
+
+    Best-effort and fully guarded: any failure (offline, timeout, a moved/404 URL) returns None so
+    the gate degrades to a Finding instead of hanging or crashing.
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "throughput-gate"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = r.read()
+        return hashlib.sha256(data).hexdigest()[:12], data
+    except Exception:
+        return None
+
+
+def _canon_scan_pdf_bytes(data: bytes, label: str):
+    """Retired-claim findings (canon.py) inside a PDF's text, or None if it could not be scanned.
+
+    Best-effort: canon.py and PyMuPDF are both optional dependencies of this ONE extra check; a
+    missing import degrades to "not scanned" rather than failing the whole gate.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import tempfile
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import canon
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as tf:
+            tf.write(data)
+            tf.flush()
+            text = "\n".join(pg.get_text() for pg in fitz.open(tf.name))
+        return canon.scan_text(label, text)
+    except Exception:
+        return None
+
+
+def site_matches_repo(check_live: bool = True) -> list[Finding]:
     """The artifact a recruiter downloads vs the artifact this repo believes it ships.
 
-    STRUCTURE.md-equivalent docs assert the built PDF IS the live-site file. This repo caught that
-    assertion being false for four days straight; nothing had ever checked it, because every OTHER
-    check here reads files inside this repo.
+    A repo can assert that its built résumé PDF IS the live-site file while that assertion is
+    quietly false, and nothing catches it if every other check here reads only files inside this
+    repo. Two independent ways this check can verify the deployed artifact, both optional and both
+    configured in scripts/config.py:
 
-    Optional: set SITE_CHECKOUT_PATH in scripts/config.py to a sibling checkout of your published
-    site/portfolio repo. Left unset (the default), this check is a silent no-op: "not configured"
-    is deliberately not a Finding, so a fresh clone with no config.py customization stays clean.
+      1. LIVE_RESUME_URL: fetch the résumé from the actual live URL and (a) canon-scan it for a
+         retired/fabricated claim, and (b) hash-compare it against this repo's own résumé of the
+         same filename. This is the strongest version, since only the live URL proves what a
+         recruiter really receives.
+      2. SITE_CHECKOUT_PATH: hash-compare against a sibling checkout of your site repo (no network
+         needed). Used when LIVE_RESUME_URL is not set, or when the live fetch above fails.
+
+    Left fully unset (the default), this whole check is a silent no-op, exactly like the rest of
+    this repo's optional config-driven checks: a fresh clone with no customization stays clean.
+    `check_live=False` skips the network fetch even when LIVE_RESUME_URL is set (used by the
+    selftest, to stay deterministic and offline).
     """
-    out: list[Finding] = []
+    live_attempted = bool(LIVE_RESUME_URL) and check_live
+    if live_attempted:
+        fname = LIVE_RESUME_URL.rsplit("/", 1)[-1] or "resume.pdf"
+        fetched = _fetch_live_resume(LIVE_RESUME_URL)
+        if fetched is not None:
+            live_hash, data = fetched
+            findings = _canon_scan_pdf_bytes(data, f"LIVE/{fname}")
+            if findings:  # a retired claim is LIVE on the résumé an employer downloads.
+                fam = ", ".join(sorted({f.rule_id for f in findings}))
+                return [Finding(
+                    "HIGH", "live-site-fabrication",
+                    f"the LIVE résumé at {LIVE_RESUME_URL} asserts retired claim(s): {fam}",
+                    "a recruiter downloading your résumé right now gets the fabrication. The repo "
+                    "copy is not what is deployed; redeploy the clean résumé to the public site.")]
+            repo_pdf = REPO / "resume" / fname
+            if repo_pdf.is_file():
+                repo_hash = hashlib.sha256(repo_pdf.read_bytes()).hexdigest()[:12]
+                if repo_hash != live_hash:
+                    return [Finding(
+                        "HIGH", "live-site-drift",
+                        f"resume/{fname}: repo {repo_hash} ≠ LIVE {live_hash}",
+                        "every recruiter downloads the LIVE copy. Redeploy the repo file to the "
+                        "public site, or a correction you made here never reaches an employer.")]
+            return []  # live fetch succeeded, clean, and (where comparable) matches the repo copy
+        # The live fetch failed (offline, URL changed, timeout): fall through rather than silently
+        # reporting nothing, since the operator explicitly asked this to be checked.
+
     if SITE is None:
-        return out  # not configured: optional feature, degrades gracefully (see config.py)
+        if live_attempted:
+            return [Finding("HIGH", "live-site-unchecked",
+                            f"could NOT verify the LIVE résumé ({LIVE_RESUME_URL}): the fetch failed "
+                            f"and no SITE_CHECKOUT_PATH is configured as a fallback",
+                            "the file a recruiter actually downloads was not checked this run. Check "
+                            "the URL by hand, or set SITE_CHECKOUT_PATH to a local checkout.")]
+        return []  # neither knob configured: optional feature, degrades gracefully (see config.py)
     if not SITE.is_dir():
         return [Finding("MEDIUM", "site-unchecked",
                         f"public site checkout not found at {SITE}",
                         "cannot compare; clone it beside this repo or check the live URL by hand.")]
+    out: list[Finding] = []
     for pdf in sorted(REPO.glob("resume/*.pdf")):
         site_pdf = SITE / "resume" / pdf.name
         if not site_pdf.is_file():
@@ -753,6 +952,13 @@ def selftest() -> int:
             (d / "cover-letter" / "Cover.pdf").unlink()
             (d / "README.md").write_text("# Probe\nStatus: rejected 2026-07-14\n", encoding="utf-8")
             check("a DEAD dossier needs no cover (exempt)", len(cover_missing()) == 0)
+            # A recruiter résumé-send (no form, so no cover, and it WAS sent) is exempt from both.
+            (d / "README.md").write_text(
+                "# Probe\n> ✅ RÉSUMÉ SENT 2026-08-01 — recruiter résumé-send, not a portal application\n",
+                encoding="utf-8")
+            check("a recruiter RÉSUMÉ-SEND needs no cover (exempt)", len(cover_missing()) == 0)
+            check("a recruiter RÉSUMÉ-SEND is not flagged 'never sent' (it was sent)",
+                  len(ready_but_never_sent()) == 0)
         finally:
             REPO = saved
 
@@ -765,10 +971,22 @@ def selftest() -> int:
         applied = "https://boards.greenhouse.io/acme/jobs/123?gh_jid=123"
         dup = "https://job-job-boards.greenhouse.io/acme/jobs/123"
         newurl = "https://jobs.ashbyhq.com/beta/7c1c-2f44"
+        # A shared NON-REQ value must never collide two distinct roles into a "do NOT re-apply"
+        # HIGH: a shared login page, a generic careers landing page, and a free-text recruiter
+        # placeholder are the three real false-positive shapes this key is designed against.
+        loginwall = "https://account.example-platform.com/authenticate?continue=x"
+        careers = "https://www.example-health.com/about-us/careers"
+        placeholder = "via a recruiter, do not cold-apply"
         rows = [
             '{co:"Acme", role:"Product Designer", status:"applied", apply:"' + applied + '", jd:"", folder:"applications/acme-old"}',
             '{co:"Acme", role:"Product Designer, Growth", status:"active", apply:"' + dup + '", jd:"", folder:"applications/acme-dup"}',
             '{co:"Beta", role:"Designer", status:"active", apply:"' + newurl + '", jd:"", folder:"applications/beta-new"}',
+            '{co:"Gamma", role:"Founding Designer", status:"applied", apply:"' + loginwall + '", jd:"", folder:"applications/gamma-co"}',
+            '{co:"Delta", role:"Design Engineer", status:"active", apply:"' + loginwall + '", jd:"", folder:"applications/delta-co"}',
+            '{co:"Epsilon", role:"Staff Product Designer", status:"applied", apply:"' + careers + '", jd:"", folder:"applications/epsilon-co"}',
+            '{co:"Zeta", role:"Design Technologist", status:"active", apply:"' + careers + '", jd:"", folder:"applications/zeta-co"}',
+            '{co:"Eta", role:"Founding PD", status:"applied", apply:"' + placeholder + '", jd:"", folder:"applications/eta-co"}',
+            '{co:"Theta", role:"Product Designer", status:"active", apply:"' + placeholder + '", jd:"", folder:"applications/theta-co"}',
         ]
         (pl / "tracker.html").write_text("APPLICATIONS=[\n  " + ",\n  ".join(rows) + "\n]\n", encoding="utf-8")
         saved = REPO
@@ -779,6 +997,12 @@ def selftest() -> int:
                   any(h.severity == "HIGH" and "acme-dup" in h.what for h in hits))
             check("a genuinely new req is NOT flagged as a duplicate",
                   not any("beta-new" in h.what for h in hits))
+            check("two companies sharing a login/auth wall URL do NOT collide into a HIGH duplicate",
+                  not any(h.severity == "HIGH" and "delta-co" in h.what for h in hits))
+            check("two roles sharing a generic /about-us/careers page do NOT collide into a HIGH duplicate",
+                  not any(h.severity == "HIGH" and "zeta-co" in h.what for h in hits))
+            check("a free-text recruiter placeholder is not a req URL, no HIGH duplicate",
+                  not any(h.severity == "HIGH" and "theta-co" in h.what for h in hits))
         finally:
             REPO = saved
 
@@ -813,6 +1037,21 @@ def selftest() -> int:
           not _dated_submission("The form will be submitted 2026-09-01 once the operator reviews it."))
     check("'NOT SUBMITTED: dossier building' does NOT read as submitted",
           not _dated_submission("**Status: NOT SUBMITTED — dossier building.**"))
+    # A SIBLING role's dated submission mentioned in this dossier's PROSE is not THIS dossier's
+    # submission. The real false positives all had the marker buried MID-LINE inside a cross-
+    # reference to a different role; a real submission record BEGINS its own line.
+    check("a sibling '(a related role, submitted 2026-08-27)' mid-line is NOT this dossier's submission",
+          not _dated_submission("This role is distinct from `sibling-role` (a related role, submitted 2026-08-27)."))
+    check("a sibling '(Design Systems,\" SUBMITTED 2026-08-19)' mid-line is NOT a submission",
+          not _dated_submission('Different from `applications/x-growth` (Design Systems," SUBMITTED 2026-08-19).'))
+    check("'$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets ...' is NOT a submission",
+          not _dated_submission("$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets a different posting."))
+    check("'Submitted 2026-07-21, rejected 2026-07-23. Dead,' mid-prose is NOT a submission",
+          not _dated_submission("A prior thread there, Submitted 2026-07-21, rejected 2026-07-23. Dead,"))
+    check("'**Submitted 2026-07-21, rejected ...** Dead, read-only' (line-start but DEAD) is NOT a submission",
+          not _dated_submission("**Submitted 2026-07-21, rejected 2026-07-23.** Dead, read-only, never rebuilt."))
+    check("the dossier's OWN heading '## ✅ SUBMITTED 2026-08-19 - submitted via the ATS' still reads as one",
+          bool(_dated_submission("## ✅ SUBMITTED 2026-08-19 - submitted via the ATS; success page seen")))
     with tempfile.TemporaryDirectory() as td:
         pl = Path(td) / "pipeline"
         pl.mkdir(parents=True)
@@ -822,6 +1061,14 @@ def selftest() -> int:
             ("acme-designer", "**Status: SUBMITTED 2026-08-27 by hand (DOM-confirmed).**\n"),
             ("beta-designer", "**Status: NOT SUBMITTED.**\n- To be submitted by hand once ready.\n"),
             ("gamma-designer", "✅ SUBMITTED 2026-08-01 by hand — success page seen\n"),
+            # Guard 1: this dossier's own status is NOT submitted; the only dated marker is a
+            # SIBLING role's submission in prose. Must NOT be flagged.
+            ("delta-designer",
+             "**Status: DOSSIER BUILT ONLY, NOT submitted.**\n"
+             "Distinct from `applications/delta-growth` (Design Systems, SUBMITTED 2026-08-19).\n"),
+            # Guard 2: this dossier DID submit (own status line) but its folder ALSO carries an
+            # `applied` row: a stale duplicate lead row, not an undercount.
+            ("zeta-designer", "## ✅ SUBMITTED 2026-08-20 by hand (Ashby)\n"),
         ):
             dd = Path(td) / "applications" / name
             dd.mkdir(parents=True)
@@ -830,6 +1077,9 @@ def selftest() -> int:
             '{co:"Acme", role:"Designer", status:"lead", folder:null, folder:"applications/acme-designer"}',
             '{co:"Beta", role:"Designer", status:"active", folder:"applications/beta-designer"}',
             '{co:"Gamma", role:"Designer", status:"applied", folder:"applications/gamma-designer"}',
+            '{co:"Delta", role:"Designer", status:"lead", folder:"applications/delta-designer"}',
+            '{co:"Zeta", role:"Designer", status:"applied", folder:"applications/zeta-designer"}',
+            '{co:"Zeta", role:"Designer", status:"lead", folder:"applications/zeta-designer"}',
         ]
         (pl / "tracker.html").write_text("APPLICATIONS=[\n  " + ",\n  ".join(rows) + "\n]\n", encoding="utf-8")
         saved = REPO
@@ -840,6 +1090,10 @@ def selftest() -> int:
                   any("acme-designer" in h.what for h in hits))
             check("the not-yet-submitted shape (active row + 'to be submitted') is NOT flagged",
                   not any("beta-designer" in h.what for h in hits))
+            check("Guard 1: a sibling role's submission in prose does NOT flag this lead dossier",
+                  not any("delta-designer" in h.what for h in hits))
+            check("Guard 2: a lead row whose folder ALSO has an applied row is NOT flagged (dup row)",
+                  not any("zeta-designer" in h.what for h in hits))
             check("a correctly-applied row is NOT flagged", not any("gamma-designer" in h.what for h in hits))
         finally:
             REPO = saved
@@ -863,6 +1117,29 @@ def selftest() -> int:
                 REPO = saved
     else:
         check("tracker-unparseable selftest skipped (node absent); the guard is best-effort", True)
+
+    # live-site: the résumé an employer downloads, if the operator has configured either
+    # LIVE_RESUME_URL or SITE_CHECKOUT_PATH. Neither is set on a fresh clone, so this must be a
+    # silent no-op there, exactly like the SITE_CHECKOUT_PATH-only check has always been. The two
+    # config-driven module globals are monkeypatched directly (there is no setter function), the
+    # same pattern this selftest already uses for REPO itself.
+    global LIVE_RESUME_URL, SITE
+    saved_url, saved_site = LIVE_RESUME_URL, SITE
+    try:
+        LIVE_RESUME_URL, SITE = None, None
+        check("live-site: with NEITHER knob configured, this is a silent no-op (a fresh clone stays clean)",
+              site_matches_repo() == [])
+        # An unreachable loopback URL is a deterministic, offline-safe stand-in for "the fetch
+        # failed": it refuses the connection immediately, with no dependency on real network access.
+        LIVE_RESUME_URL = "http://127.0.0.1:9/none-such-resume.pdf"
+        check("live-site: LIVE_RESUME_URL configured but unreachable, no SITE fallback, is a LOUD "
+              "'live-site-unchecked' finding, never silent",
+              any(f.kind == "live-site-unchecked" and f.severity == "HIGH"
+                  for f in site_matches_repo()))
+    finally:
+        LIVE_RESUME_URL, SITE = saved_url, saved_site
+    check("live-site: an unreachable URL degrades _fetch_live_resume to None, it never raises",
+          _fetch_live_resume("http://127.0.0.1:9/none.pdf", timeout=0.5) is None)
 
     # Coverage: every registered check must be exercised above.
     exercised = {"ready-but-never-sent", "status-contradiction", "live-site-drift",

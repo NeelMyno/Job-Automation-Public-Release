@@ -59,26 +59,57 @@ FUTURE = re.compile(
     re.I,
 )
 BEGIN = re.compile(
-    r"(?:to\s+begin|to\s+commence|to\s+start|at\s+the\s+time\s+of\s+hire|at\s+hire|"
-    r"for\s+this\s+position|currently|right\s+now|to\s+work\s+for\s+us\s+now)",
+    # Present-tense / start-of-employment phrasings whose honest answer is typically No (many
+    # statuses cover an immediate start at no extra cost to the employer). "to work for <company>"
+    # and "at time of hire" (no "the") were originally missing, so present-tense questions like
+    # "...to work for us now?" or "Do you now / at time of hire require sponsorship?" fell through
+    # to the FUTURE hard-stop catch-all and a correct No was flagged as a violation. FUTURE is
+    # tested first, so a question that also says "now or in the future" still routes to class 3.
+    r"(?:to\s+begin|to\s+commence|to\s+start|at\s+(?:the\s+)?time\s+of\s+hire|at\s+hire|"
+    r"for\s+this\s+(?:position|role)|currently|right\s+now|now\s+(?:require|need)\b|"
+    r"to\s+work\s+for\b|to\s+be\s+employed|to\s+join)",
+    # "now require/need" is the present-tense "Will you NOW require sponsorship?" (question class 2,
+    # honest answer usually No). It cannot swallow the future question: FUTURE is tested first and
+    # owns "now or in the future", and this pattern needs "now" immediately followed by require/need,
+    # so "now or …" never matches it. Also fixes a table row where the "now" was bolded, which broke
+    # once the classifier stopped reading the answer annotation that followed the question.
     re.I,
 )
 SPONSOR = re.compile(r"\bsponsor\w*|\bvisa\s+(?:status|support)|\bH-?1B\s+sponsor", re.I)
 AUTHORIZED = re.compile(r"legally\s+authoriz|authoriz\w*\s+to\s+work|work\s+authoriz", re.I)
 
 # An answer token, bound tightly to its question. A loose "any nearby yes/no" regex produces a lot
-# of false positives against real dossier prose, so only two shapes count as a recorded answer:
-#   **Yes** / **No**              the canonical bold token
-#   Submitted answer: NO          an explicit label
+# of false positives against real dossier prose. Shapes that count as a recorded answer:
+#   **Yes** / **No**                       the canonical bold token
+#   **No.** / **Yes,**                     trailing punctuation inside the bold
+#   **"Yes, work authorization on file"**  a QUALIFIED answer that leads with yes/no, common on
+#                                          dropdowns that need a literal status name attached. A
+#                                          dropdown OPTION LIST like `**"Yes"** / **"No"**` still
+#                                          yields BOTH yes and no, which the contradictory-hits
+#                                          check in `_answer_in` rejects as no unambiguous record.
+#   Submitted answer: NO                   an explicit label
 ANSWER = re.compile(
-    r"\*\*(yes|no)\*\*"
-    r"|\b(?:answer|selected|submitted|chose|response)\b\s*[:\-]?\s*\*{0,2}(yes|no)\b",
+    # A bare, short bold answer, allowing trailing punctuation inside the bold (e.g. **No.**).
+    # Kept short on purpose: it must NOT read "No" out of a bold RECORD like
+    # **No work-authorization / visa / sponsorship question.** - there "No" is followed by a noun,
+    # so `\s*[punct]*\s*\*\*` cannot reach the closing `**` and the match fails.
+    r'\*\*\s*(yes|no)\s*[.,;:!?)\"“”\'’]*\s*\*\*'
+    # A QUALIFIED/QUOTED answer whose yes/no sits right after the opening quote - the real shape
+    # above, and the case where a WRONG hard-stop answer is written as a quoted option (e.g.
+    # **"No, I will not need sponsorship"**). A quoted QUESTION (**"Do you require…?"**) does NOT
+    # start with yes/no, so it is not read here.
+    r'|\*\*\s*[\"“”\'’]\s*(yes|no)\b'
+    r'|\b(?:answer|selected|submitted|chose|response)\b\s*[:\-]?\s*\*{0,2}[\"“”\'’]?\s*(yes|no)\b',
     re.I,
 )
 
 # Multi-question lines are real and common: "Worked here before: **No** · Authorized: **Yes**".
-# Matching across the whole line pairs the wrong question with the wrong answer.
-SEGMENT = re.compile(r"\s+·\s+|\s*\|\s*")
+# Matching across the whole line pairs the wrong question with the wrong answer. The `;` separator
+# was added after a real multi-dropdown line: `"restrictions?"=**No**; **"...sponsorship...?" =
+# "Yes,..."**; "country?"=**United States**` - split on nothing, so the cut-at-first-`?` landed on the
+# RESTRICTIONS question and read its **No** as the sponsorship answer, a false violation on the
+# highest-severity class.
+SEGMENT = re.compile(r"\s+·\s+|\s*\|\s*|\s*;\s*|\.\s+(?=[\"“])")
 
 # Conditional analysis is not a recorded answer. "If their form asks only about starting, my honest
 # answer is **No**" is correct reasoning about a form, not a value that was submitted.
@@ -94,9 +125,15 @@ SEVERITY = {Q_AUTH: "HIGH", Q_BEGIN: "HIGH", Q_FUTURE: "CRITICAL"}
 # future?" or "...without restriction?" A gate that demands a lie is worse than no gate at all, so
 # every inverted phrasing is handled explicitly rather than assumed away.
 INVERTED = re.compile(
-    r"without\s+(?:requiring\s+)?(?:visa\s+)?sponsor\w*"
+    # "without [the need for] [any] [employer/visa] sponsorship" - a real employer's phrasing,
+    # "without the need for sponsorship", slipped the earlier narrower regex (which only allowed
+    # "without (requiring) (visa) sponsor"), so an honest No was flagged as a violation and the gate
+    # demanded the answer be flipped to a lie.
+    r"without\s+(?:the\s+)?(?:need\s+for\s+)?(?:any\s+)?(?:requiring\s+)?(?:an?\s+)?(?:employer\s+|visa\s+)?sponsor\w*"
     r"|without\s+restriction"
+    r"|fine\s+without\b"
     r"|(?:do\s+)?not\s+(?:require|need)\s+(?:visa\s+)?sponsor\w*"
+    r"|no\s+need\s+for\s+(?:visa\s+)?sponsor\w*"
     r"|no\s+sponsorship\s+(?:is\s+)?(?:required|needed)",
     re.I,
 )
@@ -109,7 +146,7 @@ NO_QUESTION = re.compile(
     r"[^.\n]{0,60}?"
     r"(?:visa|work[-\s]?auth\w*|sponsorship|immigration)"
     r"[^.\n]{0,40}?"
-    r"(?:question|section|field|prompt)"
+    r"(?:question|section|field|prompt|phrasing)"
     r"|(?:visa|work[-\s]?auth\w*|sponsorship)[^.\n]{0,30}?(?:question|section|field)s?\s*[:\-][^.\n]{0,40}?"
     r"(?:\bnot\s+present\b|\bnone\b|\bno\b|\bn/a\b)"
     r"|(?:visa|work[-\s]?auth\w*|sponsorship|immigration)[^.\n]{0,30}?[:\-—][^.\n]{0,20}?"
@@ -187,23 +224,32 @@ def classify(question: str) -> tuple[str, bool] | None:
     `inverted` means the question asks the negative ("authorized WITHOUT sponsorship" / "WITHOUT
     restriction"), so the expected answer needs special handling: see `expected_answer()`.
     """
-    has_sponsor = bool(SPONSOR.search(question))
-    inv = bool(INVERTED.search(question))
-    if has_sponsor and FUTURE.search(question):
+    # Classify on the QUESTION only, never on an answer/annotation that follows it. A dossier line is
+    # often "<question>? -> **Yes** - maps to class 2 (…'sponsorship to begin/now'…)", and letting the
+    # commentary's sponsorship words reach the classifier can misroute an AUTHORIZATION answer to the
+    # hard-stop rule and flag a correct Yes. The question ends at the first '?'. Polarity ("without
+    # sponsorship") is likewise a property of the question, not the answer: an answer like
+    # **"No, I will not need sponsorship"** must not flip the expected value. Strip markdown emphasis
+    # so a bolded timeframe (`Will you **now** require sponsorship?`) still reads as "now require" -
+    # a real table row bolds the "now" inside a present-tense question.
+    q = re.sub(r"[*_`]", "", question.split("?", 1)[0])
+    has_sponsor = bool(SPONSOR.search(q))
+    inv = bool(INVERTED.search(q))
+    if has_sponsor and FUTURE.search(q):
         return Q_FUTURE, inv
-    if has_sponsor and BEGIN.search(question):
+    if has_sponsor and BEGIN.search(q):
         return Q_BEGIN, inv
-    if AUTHORIZED.search(question) and (not has_sponsor or inv):
+    if AUTHORIZED.search(q) and (not has_sponsor or inv):
         # "Authorized to work WITHOUT sponsorship" is the sponsorship question wearing an
         # authorization coat, so route it by its timeframe. But "authorized to work WITHOUT
         # RESTRICTION", with no sponsorship word and no timeframe, is the *authorization* question
         # itself, inverted, and its honest answer depends on whether your authorization is tied to
         # a specific status (see `restricted-authorization` in the KB block), not on flipping your
         # plain authorized-now answer.
-        if inv and (has_sponsor or BEGIN.search(question)):
+        if inv and (has_sponsor or BEGIN.search(q)):
             return Q_BEGIN, True
         return Q_AUTH, inv
-    if has_sponsor and re.search(r"require|need", question, re.I):
+    if has_sponsor and re.search(r"require|need", q, re.I):
         # Sponsorship asked with no timeframe. Treat as the strictest question: the safe reading of
         # an ambiguous sponsorship question is the one that cannot become a lie.
         return Q_FUTURE, inv
@@ -257,12 +303,27 @@ class Finding:
 
 def _answer_in(segment: str, is_continuation: bool = False) -> str | None:
     """The recorded answer inside ONE question segment, or None if this is not a record."""
-    if CONDITIONAL.search(segment) or QUOTED_OPTION.search(segment):
+    # QUOTED_OPTION is no longer an early-return: the broadened ANSWER regex reads a qualified
+    # quoted answer (`**"Yes, work authorization on file"**` -> YES), while a true option LIST
+    # (`**"Yes"** / **"No"**`) still yields contradictory hits below and is rejected. Suppressing
+    # every quoted token here made a real qualified answer unreadable, after which the next-line
+    # fallback grabbed an unrelated **No** and reported a false violation.
+    if CONDITIONAL.search(segment):
         return None
     tail = segment
     if not is_continuation:
         q = segment.find("?")
-        cut = q if q != -1 else segment.find(":")
+        if q != -1:
+            cut = q
+        else:
+            cut = segment.find(":")
+            # Do NOT cut at a ':' that closes an ANSWER LABEL ("Answer:", "Response:"): that discards
+            # the value and can leave a stray 'no' from later analysis prose ("Do not answer No") as
+            # the sole read. Keeping the whole segment then reads BOTH the real Yes and the warned-
+            # against No, which cancel as contradictory (None) rather than flag a false violation.
+            if cut != -1 and re.search(r"(?:answer|response|submitted|selected|chose)\s*$",
+                                       segment[:cut], re.I):
+                cut = -1
         if cut != -1 and cut < len(segment) - 1:
             tail = segment[cut + 1:]
     hits = [next(g for g in m.groups() if g).upper() for m in ANSWER.finditer(tail)]
@@ -299,13 +360,25 @@ def scan_text(rel: str, text: str, cfg: dict) -> list[Finding]:
         if line.lstrip().startswith("|") and sum(1 for s in segs if classify(s)) <= 1:
             segs = [line]
         for seg in segs:
+            # A segment that RECORDS the form carried no such question ("This form has no 'now or in
+            # the future' sponsorship question", "No 'sponsorship to begin/now' phrasing appears") is
+            # a record of absence, not an answer - reading its emphatic **no**/**Yes** as the answer
+            # is a false positive. `coverage_gap` already treats these as records; `scan_text` must too.
+            if NO_QUESTION.search(seg):
+                continue
             c = classify(seg)
             if c is None:
                 continue
             kind, inverted = c
             got = _answer_in(seg)
             if got is None:
-                if seg.strip() == line.strip() and i + 1 < len(lines):
+                # Fall back to the next line only when the question segment IS the whole line AND it
+                # carries no bold token of its own - the "question on one line, answer on the next"
+                # shape. If the line HAS a `**…**` token that failed to parse (a qualified answer or a
+                # contradictory option list), grabbing the next line's answer is a real bug: it pulls
+                # an unrelated **No** off the following line and reports a false violation on the
+                # hard-stop question.
+                if seg.strip() == line.strip() and "**" not in seg and i + 1 < len(lines):
                     got = _answer_in(lines[i + 1], is_continuation=True)
             if got is None:
                 continue
@@ -402,6 +475,23 @@ CASES: list[tuple[str, str, bool]] = [
      "| 7 | Will you now or in the future require sponsorship? | **No** |", True),
     ("a right answer inside a markdown table row must NOT fire",
      "| 7 | Will you now or in the future require sponsorship? | **Yes** |", False),
+
+    # --- a family of real phrasing shapes found in a live audit. The selftest suite was fully green
+    # while every one of these produced a WRONG verdict against a real dossier - proof a green
+    # selftest alone is not a sound gate. Each below is a minimal reproduction of the shape that
+    # failed, genericized: the specific status name a dropdown required is not load-bearing here,
+    # only its position (leading the quoted answer) is. ---
+    ("a qualified dropdown answer that leads with yes/no - honest Yes, must NOT fire",
+     '- Will you now or in the future require sponsorship? **"Yes, work authorization on file"**', False),
+    ("a semicolon-separated multi-question line - the sponsorship Yes is honest, must NOT fire",
+     '- Dropdowns: "restrictions?"=**No**; **"Will you now or in the future require sponsorship?" = '
+     '"Yes, work authorization on file"**; "country?"=**United States**', False),
+    ("inverted 'without the need for sponsorship' answered No - honest, must NOT fire",
+     "- Are you authorized to work without the need for sponsorship, now or in the future? **No**", False),
+    ("a wrong hard-stop answer written as a quoted option - the lie, MUST fire",
+     '- Will you now or in the future require sponsorship? **"No, I will not need sponsorship"**', True),
+    ("the hard-stop answered **No.** (a period inside the bold) - the lie, MUST fire",
+     "- Will you now or in the future require sponsorship? **No.**", True),
 ]
 
 COVERAGE_CASES: list[tuple[str, str, bool]] = [

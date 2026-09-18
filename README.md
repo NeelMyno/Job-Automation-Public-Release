@@ -26,10 +26,12 @@ browser to fill (never submit) real forms. See `CLAUDE.md` for the full operatin
 
 Everything an employer sees is checked by a script, not by an agent remembering to be careful.
 The diagram above shows the checks a single dossier's résumé, cover letter, and outreach draft
-must clear before a human ever sees them (`verify_claims`, `canon`, `visa_gate`, plus `resume_gate`
-and the voice/subject checks). The full repo-wide gate suite is wider than that and includes the
-rules and the goal themselves, not just one dossier's content. Five of those gates, each with a
-self-test that runs clean out of the box on a fresh clone:
+must clear before a human ever sees them. The full repo-wide gate suite is wider than that and
+includes the rules and the goal themselves, not just one dossier's content: 13 scripts ship their
+own `--selftest`, each green out of the box on a fresh clone (`verify_claims`, `canon`, `visa_gate`,
+`resume_gate`, `subject_check`, `voice_check`, `batch_voice_check`, `fill_ready`, `injection_scan`,
+`seniority_gate`, `tracker_check`, `commitments`, and the Codex adapter). The five you'll run by hand
+most often:
 
 ```
 python3 scripts/verify_claims.py "applications/<company>-<role>"   # outbound copy
@@ -40,8 +42,9 @@ python3 scripts/throughput.py       # the goal itself: finished work sitting uns
                                     # contradicting itself, commits held back
 ```
 
-They also run from the harness (`.claude/settings.json`): true state is printed at session start,
-every file written is checked, and a turn that introduces a defect is **blocked**.
+They also run from the harness (`.claude/settings.json`): true state, including every live-interview
+next-step, is printed at session start, every file written is checked, and a turn that introduces a
+defect is **blocked**.
 
 ## Layout
 

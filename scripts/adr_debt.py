@@ -78,8 +78,16 @@ def scan(sources: dict[str, str]) -> tuple[list[tuple[str, str, int, str]],
             if PENDING.search(line):
                 # "Consequences-pending: none" is a declaration that there is no debt, not debt
                 # itself. Counting it would make a clean bill of health look like an outstanding item.
+                #
+                # A later ADR can also write "Consequences-pending: cleared by the same commit (...)"
+                # when the debt was retired in the SAME commit that recorded it, so the line is
+                # self-clearing, not open debt. Keying only on none/n-a/nil made the gate cry wolf on
+                # that phrasing at every SessionStart, permanent noise that trains the reader to skim
+                # past the pending block and risks masking a genuinely open item elsewhere. A tail
+                # that BEGINS with "cleared" is treated as cleared; a real pending line never opens
+                # with it.
                 tail = PENDING.sub("", line).lstrip(" :*_-—")
-                if re.match(r"^(none|n/?a|nil)\b", tail, re.I):
+                if re.match(r"^(none|n/?a|nil|cleared|already\s+cleared)\b", tail, re.I):
                     continue
                 pending.append((num, name, lineno, line.strip()))
     return pending, cleared
@@ -166,6 +174,20 @@ CASES: list[tuple[str, dict[str, str], int, int]] = [
     ("`Consequences-pending: none` is a clean bill of health, not debt",
      {"0017-clearing-mechanism-unused.md":
       "- **Consequences-pending:** none. The clearing mechanism is live but deliberately unused."},
+     0, 0),
+
+    # --- self-clearing phrasing: a later ADR whose OWN pending line already says the debt was
+    #     retired in the same commit it was recorded in. Before this was recognized it was
+    #     broadcast as live debt at every SessionStart forever, a permanent false alarm. ---
+    ("'Consequences-pending: cleared by the same commit' is self-cleared, NOT debt",
+     {"0023-gate-plus-doc-shipped-together.md":
+      "Consequences-pending: cleared by the same commit (gate + selftest + doc shipped together)."},
+     0, 0),
+
+    ("the bold-colon self-cleared form is also NOT debt",
+     {"0025-mechanical-check-added.md":
+      "- **Consequences-pending:** already cleared by the same commit (hook wiring + fixture "
+      "coverage shipped together)."},
      0, 0),
 
     # --- clearing. The mechanism is exercised end to end. ---

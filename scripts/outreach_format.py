@@ -235,10 +235,19 @@ OPENING_REF = re.compile(
     re.I,
 )
 
+# A PREFIXED requisition (e.g. a hyphenated "R-100234" or "O-2233326965") is ONE token, but reasoning
+# about digit SUBSTRINGS breaks it: the leading letter-hyphen opens a word boundary right before the
+# digits, so a bare `\b(\d{6,10})\b` alternative matches only the inner digits and the whole real req
+# reads as invented. The prefixed alternative goes FIRST so finditer consumes the whole token at the
+# letter and never re-reads its digits. Bounds fit real reqs (a 1-letter prefix like "R-"/"O-"; a
+# 2-letter ATS prefix like "WD-"/"JR-"): the {1,2} cap, anchored at a word START, makes a 3+ letter
+# prefix (an ADR-style reference, or ordinary hyphenated prose) un-matchable, and \d{4,10} (a 4-digit
+# minimum) keeps it off short hyphenated tokens that are not requisitions at all.
 JOB_ID = re.compile(
-    r"\b(\d{6,10})\b"                                              # e.g. Amazon, Greenhouse, Lever
-    r"|\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b"   # Ashby uuid
+    r"\b([A-Za-z]{1,2}-\d{4,10})\b"                                # e.g. a prefixed req like R-100234
     r"|\b(R\d{4,6})\b"                                             # e.g. Datadog-style R20051
+    r"|\b(\d{6,10})\b"                                              # e.g. Amazon, Greenhouse, Lever
+    r"|\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b"   # Ashby uuid
     r"|\b([0-9A-F]{10})\b",                                        # e.g. Workable 7D5CF84724
     re.I,
 )
@@ -249,19 +258,29 @@ def _ids_in(text: str) -> set:
     return {g for m in JOB_ID.finditer(text) for g in m.groups() if g}
 
 
-def repo_verified_reqs() -> set:
-    """Every req ID this repo has ITSELF recorded, read from pipeline/tracker.html's apply/jd URLs.
+# An optional, manually-recorded allowlist of req IDs verified live but that this repo's OWN
+# tracker capture cannot see, for example a dossier built entirely outside pipeline/tracker.html's
+# write scope (a separate crawl pass, a one-off manual verification). Empty by default: nothing is
+# "pre-known good" out of the box. Add an entry here only for an ID you have personally verified
+# against the employer's own posting, with a comment naming how and when it was checked, exactly
+# the same discipline the tracker capture below applies automatically.
+MANUALLY_VERIFIED_REQS: set[str] = set()
 
-    This is a CAPTURE, never a plausible-shape regex: an ID counts only if this repo already
-    recorded it as the apply or jd URL of a row it built a dossier for. There is no pre-seeded
-    "known good" list: an invented number is never in this set and always fails, and a real one
-    becomes known the moment the crawler or a dossier records it.
+
+def repo_verified_reqs() -> set:
+    """Every req ID this repo can vouch for: MANUALLY_VERIFIED_REQS, plus every ID this repo has
+    ITSELF recorded, read from pipeline/tracker.html's apply/jd URLs.
+
+    The tracker capture is never a plausible-shape regex: an ID counts only if this repo already
+    recorded it as the apply or jd URL of a row it built a dossier for. An invented number is in
+    neither set and always fails; a real one becomes known the moment the crawler or a dossier
+    records it, or the moment it is added to MANUALLY_VERIFIED_REQS above.
     """
     try:
         t = (REPO / "pipeline" / "tracker.html").read_text()
     except OSError:
-        return set()
-    out = set()
+        return set(MANUALLY_VERIFIED_REQS)
+    out = set(MANUALLY_VERIFIED_REQS)
     for m in re.finditer(r'(?:apply|jd|link):"([^"]+)"', t):
         out.update(_ids_in(m.group(1)))
     out.update(re.findall(r"\b(R\d{4,6})\b", t))
@@ -363,7 +382,7 @@ def targets() -> list[Path]:
 
 
 # ── selftest fixtures: every name, handle, and company below is invented. ──────────────
-_KNOWN = {"5735407004", "2412e9c2-fdd4-43d6-bd13-7345e82c9ec7", "7D5CF84724", "R20051"}
+_KNOWN = {"5735407004", "2412e9c2-fdd4-43d6-bd13-7345e82c9ec7", "7D5CF84724", "R20051", "R-100234"}
 
 CASES: list[tuple[str, str, bool]] = [
     ('a GREENHOUSE 10-digit req id is a real id',
@@ -374,6 +393,12 @@ CASES: list[tuple[str, str, bool]] = [
      '## The messages\n### 1 · Req Person: a designer\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Staff Engineer role is open, Workable posting 7D5CF84724.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
     ('an R-prefixed requisition is a real id',
      '## The messages\n### 1 · Req Person: a designer\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Staff Engineer role is open, req R20051.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
+    # A HYPHENATED requisition is ONE token, not a digit substring: "R-100234" must pass whole,
+    # never be misread as the bare digits "100234" and flagged invented.
+    ('a hyphenated requisition is a real, verified req (whole token, not the substring after the hyphen)',
+     '## The messages\n### 1 · Req Person: a designer\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Staff Engineer role is open, req R-100234.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
+    ('an INVENTED hyphenated req must still be caught (whole-token, still gated)',
+     '## The messages\n### 1 · Req Person: a designer\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Staff Engineer role is open, req R-999999.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
     ('an INVENTED numeric req must still be caught',
      '## The messages\n### 1 · Req Person: a designer\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Staff Engineer role is open, job ID 99999999.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
     ('an INVENTED ashby uuid must still be caught',
@@ -515,6 +540,18 @@ def selftest() -> int:
     # portfolio_url() itself must run cleanly against the real repo (configured or not).
     p = portfolio_url()
     print(f"  ✓ CONFIG    portfolio_url() runs cleanly on the real repo (currently: {p or 'not configured'})")
+
+    # A PREFIXED requisition is read as ONE TOKEN, never split into its digit substring. Pins the
+    # tokenization directly (not just the pass/fail classification above), so the regression can
+    # never come back even if the classification set changes.
+    for text, want in (("point at req R-100234", {"R-100234"}),
+                       ("a hyphenated req O-2233326965", {"O-2233326965"}),
+                       ("Datadog-style req R20051", {"R20051"}),
+                       ("Greenhouse job 5735407004", {"5735407004"})):
+        got_ids = _ids_in(text)
+        ok = got_ids == want
+        passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+        print(f"  {'✓ token   ' if ok else '✗ TOKEN   '}  _ids_in({text!r}) == {sorted(want)} (got {sorted(got_ids)})")
     if failed:
         print(f"\nSELFTEST FAILED: {failed} of {passed + failed} wrong")
         return 1

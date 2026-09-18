@@ -35,6 +35,19 @@ SITE_CHECKOUT_PATH: str | None = None
 # "vettery", "torc") only if you use one and want the check to recognize it by name.
 RECRUITER_PLATFORM_KEYWORDS: list[str] = []
 
+# Your own years of professional experience, used by seniority_gate.py to flag a JD asking for
+# materially more years than you actually have (a role you'd be dropped from at the resume screen,
+# not one worth spending a tailored application on). Leave as None to skip that check entirely: it
+# is silently skipped (not a failure) rather than guessing a number.
+YOUR_YEARS_OF_EXPERIENCE: int | None = None
+
+# Absolute URL to your own LIVE, published résumé (the one a recruiter actually downloads), if you
+# publish one outside this repo. throughput.py's live-site-drift check fetches it and compares it
+# against this repo's own resume/ folder, so a stale or fabricated live file can never sit
+# undetected behind a clean-looking repo.
+# Leave as None to skip that check entirely: it is silently skipped (not a failure).
+LIVE_RESUME_URL: str | None = None
+
 # outreach_queue.py pacing preferences.
 # FOLLOWUP_DAYS: days of silence before the single permitted follow-up nudge.
 FOLLOWUP_DAYS: int = 4

@@ -35,6 +35,21 @@ naturally write in, something a friend would recognize as sounding like you.
 
 [Nothing logged yet.]
 
+**Maintaining the gate (fix the synonym space, not the one string).** `scripts/voice_check.py` is a
+register detector, not a keyword denylist, and it should stay that way as you extend it. When you
+(or an agent) catch a new AI-voice tell in real output, the fix that belongs in the same change is
+the whole synonym neighborhood for that claim, not the one literal phrase that happened to get
+caught. Banning "exactly how I work" and leaving "already how I work," "comes naturally to me," and
+"second nature" untouched is not a fix, it is a delay: the same underlying claim ships again a week
+later wearing a different grammatical shell. Every new or widened pattern should land with two
+selftest strings, one proving it fires on the tell, one proving it stays quiet on a plain, honest
+statement of the same underlying fact (a real "the hardest part was X" should never be indistinguishable
+from a performed "the hardest and most Y part"). A pattern with no false-positive control is a
+pattern nobody has actually pressure-tested yet. See `scripts/voice_check.py`'s own selftest for the
+worked pattern, and `scripts/batch_voice_check.py` for the companion check that catches sameness a
+single-text gate cannot see by construction (the same opening line or sentence reused across many
+notes).
+
 ## Design & UI
 
 If you keep a design-taste doc, a moodboard, or standing design instructions somewhere outside this

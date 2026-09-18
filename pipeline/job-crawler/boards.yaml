@@ -3,14 +3,28 @@
 # lists it under `errors` in its JSON output, so you'll see the fix to make.
 #
 # How to find a company's slug: open its careers page and read the URL.
-#   boards.greenhouse.io/<slug>   -> ats: greenhouse
-#   jobs.lever.co/<slug>          -> ats: lever
-#   jobs.ashbyhq.com/<slug>       -> ats: ashby
+#   boards.greenhouse.io/<slug>              -> ats: greenhouse
+#   jobs.lever.co/<slug>                     -> ats: lever
+#   jobs.ashbyhq.com/<slug>                  -> ats: ashby
+#   jobs.smartrecruiters.com/<slug>          -> ats: smartrecruiters   (slug is case-sensitive)
+#   apply.workable.com/<slug>                -> ats: workable
+#   <tenant>.<host>.myworkdayjobs.com/<site> -> ats: workday, slug = "tenant/host/site"
+#     e.g. acme.wd5.myworkdayjobs.com/External_Careers -> slug: "acme/wd5/External_Careers"
 #
-# Each ATS endpoint returns a company's ENTIRE job board; filters.yaml decides which of those
-# postings actually match what you're looking for, so you can list any company here regardless
-# of what role you're hunting; the title filter does the real targeting.
+# Each Greenhouse/Lever/Ashby/SmartRecruiters/Workable endpoint returns a company's ENTIRE job
+# board; filters.yaml decides which of those postings actually match what you're looking for, so
+# you can list any company here regardless of what role you're hunting. Workday is the one
+# exception: its API has no "list everything" mode, so it's queried with your own filters.yaml
+# `include_titles` directly (see crawl.py's from_workday) -- list it here the same way, you just
+# won't see non-matching titles reported under `errors` the way a bad slug would be.
+#
+# Note: Workday/iCIMS-style enterprise ATSes commonly put the APPLICATION form behind a login for
+# that specific company's careers site, separate from this crawler, which only reads their public
+# job list. Discovering a posting here never requires an account; applying to it might.
 
 boards:
   - {company: "Example Co", ats: greenhouse, slug: "example-slug"}
-  # Add your own companies below, then delete the example line above.
+  - {company: "Example Co (SmartRecruiters)", ats: smartrecruiters, slug: "ExampleCo"}
+  - {company: "Example Co (Workable)", ats: workable, slug: "example-co"}
+  - {company: "Example Co (Workday)", ats: workday, slug: "examplecoinc/wd1/External_Careers"}
+  # Add your own companies below, then delete the example lines above.

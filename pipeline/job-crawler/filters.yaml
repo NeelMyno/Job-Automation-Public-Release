@@ -40,6 +40,14 @@ include_keywords:
 # belong here too, IF they're genuinely a hard wall for you; see
 # knowledge-base/02-work-authorization.md before deciding. They are NOT prefilled, because
 # assuming everyone needs this filter (or that nobody does) would be wrong for someone.
+#
+# Worth a look once you add boards.yaml entries on the broader ATS platforms (Workday,
+# SmartRecruiters, Workable): a bigger, more generic ATS surfaces a wider mix of postings than
+# Greenhouse/Lever/Ashby's design/product/eng-heavy user base, so a title substring you'd expect
+# to be unambiguous in your own field can collide with an unrelated one elsewhere in a company's
+# full board (e.g. a broad word like "design" or "analyst" shows up in plenty of job families
+# that have nothing to do with what you're searching for). If you start seeing off-target matches
+# after adding one of those boards, this is the list to tighten.
 exclude_patterns: []
 
 # SOFT FLAG gate: the posting says something you want surfaced with a caveat, not hidden.

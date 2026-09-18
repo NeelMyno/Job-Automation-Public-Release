@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/hooks.py\" --session-start",
-            "timeout": 45,
+            "timeout": 60,
             "statusMessage": "Deriving live repo state",
             "additionalContextLimit": 5000
           }

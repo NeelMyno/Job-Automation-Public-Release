@@ -55,9 +55,11 @@ it, this turn, not from memory:
 | "the knowledge base is right" | `python3 scripts/canon.py` → exit 0 |
 | "the résumé is one full page" | `python3 scripts/resume_gate.py` → exit 0 |
 | "the visa/work-authorization answers are right" | `python3 scripts/visa_gate.py` → exit 0, **plus** DOM verification (the gate reads the record, not the actual clicked radio button) |
+| "no over-reach role was filled" | `python3 scripts/seniority_gate.py --all --unsubmitted` → **0 unhandled**. A JD requiring materially more years of experience than you actually have gets dropped, never filled; nothing checks this unless a gate does. |
 | "the rules are consistent" | `python3 scripts/check_law.py` → exit 0 |
 | "the wave is done" | `python3 scripts/throughput.py` → zero `ready-but-never-sent`. A finished résumé PDF with no submit recorded is not a completed application, it is an unshipped one. |
 | "the application bundle is complete" | `python3 scripts/throughput.py` → zero `cover-missing`. A cover letter PDF is mandatory in every bundle, exactly like the résumé. |
+| "no live interview lost its next-step" | `python3 scripts/commitments.py` → exit 0. Every `status:"interview"` row carries a dated `@OWED[owner\|date\|what]`; the SessionStart hook surfaces every live-interview next-step loudly and flags a missing one. A commitment that only ever lived in a call transcript is exactly the kind of thing this catches. |
 | "it's committed" | `git log -1` shows it, and `git status` is clean for those paths |
 
 If the command can't be named, the honest word is **"unverified"**: say that instead. A wrong
@@ -220,8 +222,14 @@ is **your call, and it belongs in `knowledge-base/11-preferences-and-conventions
 
 0. **The SessionStart hook already ran this for you** (`.claude/settings.json` →
    `scripts/hooks.py --session-start`). It prints your live application/network counts re-derived from
-   `pipeline/tracker.html`, any ADR debt, and the health of every gate. If it hasn't run, run it by
-   hand: `python3 scripts/hooks.py --session-start`.
+   `pipeline/tracker.html`, any ADR debt, and the health of the gates it selftests (verify_claims,
+   canon, visa_gate, resume_gate, subject_check, voice_check, batch_voice_check, fill_ready,
+   injection_scan, seniority_gate, tracker_check, commitments, and the Codex adapter: `check_law` and
+   `throughput` run at Stop, not among these). If it hasn't run, run it by hand:
+   `python3 scripts/hooks.py --session-start`. The hook opens with a **live-interviews block**: any
+   row you've marked `status:"interview"` and its owed next-step surface there first, loudest, before
+   anything else. Act on any overdue one before other task work: a live-interview next-step is the §0
+   north star.
    > **The hook's numbers outrank every written record.** If `ops/HANDOFF.md` or `ops/STATE.md`
    > disagrees with the hook, the hook is right and that file is stale: fix the file, never carry
    > its number forward.
@@ -315,7 +323,8 @@ someone to refer you into it.
 │   ├── 12-application-answers.md  # AUTOFILL SOURCE OF TRUTH: every value an agent may type into a form
 │   ├── 13-strengths-and-market-position.md   # your own adversarial self-audit (optional, advanced)
 │   ├── 14-positioning-and-visibility.md      # get found: referrals, visible work, don't just apply
-│   └── 15-interview-story-bank.md            # reusable STAR-format interview stories
+│   ├── 15-interview-story-bank.md            # reusable STAR-format interview stories
+│   └── 16-the-senior-gap.md                  # how to research the seniority bar you're targeting
 ├── scripts/                      # repo tooling (verify_claims.py = the grounding gate, §0.1)
 ├── pipeline/                     # engine output + live SSOT (crawler, tracker, ledgers)
 ├── ops/                          # this repo's own session record: see §8
@@ -382,6 +391,13 @@ be*: see §10 on making this genuinely yours, not an inherited assumption.
     location, or the next action becomes known → update the matching field.
   - *Network* (`NETWORK`): you mention someone you met, reached out to, or heard back from → add or
     update that contact.
+  - *Owed commitments & interview next-steps* (the `@OWED` token): the same turn a call or thread
+    produces a commitment or an awaited next-step, especially anything owed on a live interview,
+    capture it as `@OWED[owner|chase-date|what]` inside that row's `next:` (application) or `fu:`
+    (network) field (`owner` = `them`|`you`; `chase-date` = `YYYY-MM-DD`|`?`). `scripts/commitments.py`
+    surfaces every live-interview next-step at session start and flags a `status:"interview"` row that
+    carries none. A commitment left only in a call transcript is exactly the failure this exists to
+    catch.
 - Bump the `UPDATED` date. Use the existing status vocab (`lead · sponsor · active · applied ·
   interview · offer · rejected · passed`).
 - **Honesty:** reflect only what you actually said or what the agent verifiably found: never invent
@@ -439,6 +455,14 @@ nice-to-have.
 8. **Corporate connective tissue & intensifiers.** Cut "genuinely, truly, at the end of the day,
    that said, it's worth noting, deeply."
 9. **No em-dashes.** Ever. In shipped copy or in chat.
+
+> 🔴 **This is mechanical, not voluntary.** The Stop hook (`scripts/hooks.py`) runs `voice_check` on
+> the copy-written-as-you surfaces a session wrote, **and on any draft copy-as-you presented in
+> chat** (fenced copy under a "here's your answer / say this / in your voice" give-cue), and blocks
+> the turn on the content machine-tells. The failure mode this guards against: an agent drafting
+> answers in machine voice, showing them in chat, and the human having to catch it by hand. **Run
+> voice_check on any copy-as-you before it reaches you, whether it lands in a file or only in chat.**
+> Do not edit the checker to make a finding disappear (§0.1 ban #5).
 
 **Two tests before any copy ships:** (a) *Read it aloud*: would you actually say this to a person,
 or does it sound like a brand? (b) *The slop test*: could a competent AI have produced this from the

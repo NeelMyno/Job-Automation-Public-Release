@@ -2,8 +2,9 @@
 """
 Job crawler.
 
-Pulls REAL postings straight from companies' public ATS boards (Greenhouse / Lever / Ashby)
-AND the monthly Hacker News "Ask HN: Who is hiring?" thread, filters to your own target roles
+Pulls REAL postings straight from companies' public ATS boards (Greenhouse / Lever / Ashby /
+Workday / SmartRecruiters / Workable) AND the monthly Hacker News "Ask HN: Who is hiring?"
+thread, filters to your own target roles
 (configured in filters.yaml), DROPS hard blockers you define (e.g. citizenship/clearance/ITAR
 walls, if any apply to you), FLAGS soft "won't sponsor" postings (kept, not dropped, by default;
 edit filters.yaml if this doesn't apply to your situation), and returns the fresh matches. $0,
@@ -47,6 +48,15 @@ def load_yaml(name):
 
 def fetch(url, timeout=25):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def fetch_post(url, body, timeout=25):
+    """POST a JSON body, parse a JSON response. Workday's public jobs API is POST-only."""
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={
+        "User-Agent": UA, "Accept": "application/json", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
@@ -114,7 +124,116 @@ def from_lever(company, slug):
     return out
 
 
-FETCHERS = {"greenhouse": from_greenhouse, "ashby": from_ashby, "lever": from_lever}
+# ---- Workday / SmartRecruiters / Workable: three more public ATS platforms beyond the GH/Lever/
+#      Ashby core, useful because they host a different mix of employers (Workday in particular
+#      skews toward large enterprises the other three rarely reach). Discovery only: none of these
+#      list endpoints return the full JD body (fetch it from the posting URL yourself when you
+#      tailor), and Workday's list API gives only a RELATIVE post date ("Posted 3 Days Ago"), so its
+#      posted_at below is an APPROXIMATION, never exact. A wrong slug 404s and is reported like any
+#      other bad slug, same as the three ATSes above. ----
+WORKDAY_MAX_PER_TERM = 60  # 3 pages of 20; Workday relevance-sorts, so title matches surface first
+
+
+def _workday_posted(text):
+    """Workday's list API gives only RELATIVE text ('Posted Today', 'Posted 3 Days Ago', 'Posted 30+
+    Days Ago') -- never a real date. Convert to an APPROXIMATE tz-aware UTC datetime (best available
+    for recency ranking; the exact date lives on the job-detail page, not the list). None if
+    unparseable."""
+    if not text:
+        return None
+    t = text.lower()
+    now = datetime.now(timezone.utc)
+    if "today" in t or "just posted" in t or "hour" in t:
+        return now
+    if "yesterday" in t:
+        return now - timedelta(days=1)
+    m = re.search(r"(\d+)\s*\+?\s*day", t)
+    if m:
+        return now - timedelta(days=int(m.group(1)))
+    m = re.search(r"(\d+)\s*\+?\s*month", t)
+    if m:
+        return now - timedelta(days=30 * int(m.group(1)))
+    return None
+
+
+def from_workday(company, slug, terms):
+    """Workday. slug is COMPOUND: 'tenant/host/site' (e.g. 'acme/wd5/external_careers'). Read a
+    company's careers URL for all three: https://<tenant>.<host>.myworkdayjobs.com/<site>. The jobs
+    API is POST-only and, unlike Greenhouse/Lever/Ashby, has no "list the whole board" mode -- it
+    requires a search string per call, so `terms` (your own filters.yaml `include_titles`) is POSTed
+    one term at a time and the results de-duped. Returns relative post dates (approximated) and no
+    JD body (fetch that later). A wrong tenant/host/site 404s and is reported like any bad slug."""
+    parts = [p for p in slug.split("/") if p]
+    if len(parts) != 3:
+        raise ValueError(f"workday slug must be 'tenant/host/site', got '{slug}'")
+    tenant, host, site = parts
+    base = f"https://{tenant}.{host}.myworkdayjobs.com"
+    api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+    out, seen = [], set()
+    for term in terms:
+        offset = 0
+        while offset < WORKDAY_MAX_PER_TERM:
+            d = fetch_post(api, {"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": term})
+            jp = d.get("jobPostings", []) if isinstance(d, dict) else []
+            if not jp:
+                break
+            for j in jp:
+                path = (j.get("externalPath") or "").strip()
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                out.append(dict(company=company, title=(j.get("title") or "").strip(),
+                                location=(j.get("locationsText") or "").strip(),
+                                url=f"{base}/{site}{path}",
+                                posted_at=_workday_posted(j.get("postedOn")),
+                                remote=None, description=""))
+            offset += 20
+    return out
+
+
+def from_smartrecruiters(company, slug):
+    """SmartRecruiters public postings API (no auth). slug = the SR company identifier
+    (jobs.smartrecruiters.com/<slug>, case-sensitive). Paginated; JD body fetched later."""
+    out = []
+    offset = 0
+    while offset < 300:
+        d = fetch(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&offset={offset}")
+        content = d.get("content", []) if isinstance(d, dict) else []
+        if not content:
+            break
+        for j in content:
+            loc = j.get("location") or {}
+            locs = ", ".join(x for x in (loc.get("city") or "", loc.get("region") or "") if x) \
+                or ("Remote" if loc.get("remote") else "")
+            jid = j.get("id") or j.get("uuid") or ""
+            out.append(dict(company=company, title=(j.get("name") or "").strip(), location=locs,
+                            url=f"https://jobs.smartrecruiters.com/{slug}/{jid}",
+                            posted_at=parse_ts(j.get("releasedDate") or j.get("createdOn")),
+                            remote=bool(loc.get("remote")), description=""))
+        offset += 100
+        if offset >= (d.get("totalFound") or 0):
+            break
+    return out
+
+
+def from_workable(company, slug):
+    """Workable public widget API (no auth). slug = the Workable account (apply.workable.com/<slug>).
+    JD body included when present."""
+    d = fetch(f"https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true")
+    out = []
+    for j in (d.get("jobs", []) if isinstance(d, dict) else []):
+        locs = ", ".join(x for x in (j.get("city") or "", j.get("country") or "") if x) \
+            or ("Remote" if j.get("telecommuting") else "")
+        code = j.get("shortcode") or ""
+        url = j.get("url") or j.get("application_url") or f"https://apply.workable.com/{slug}/j/{code}/"
+        out.append(dict(company=company, title=(j.get("title") or "").strip(), location=locs, url=url,
+                        posted_at=parse_ts(j.get("published_on") or j.get("created_at")),
+                        remote=bool(j.get("telecommuting")), description=strip_html(j.get("description", ""))))
+    return out
+
+
+FETCHERS = {"greenhouse": from_greenhouse, "ashby": from_ashby, "lever": from_lever,
+            "workday": from_workday, "smartrecruiters": from_smartrecruiters, "workable": from_workable}
 
 
 def title_match(job, F):
@@ -349,7 +468,9 @@ def main():
             errors.append(f"{company}: unknown ats '{ats}'")
             continue
         try:
-            jobs = fetcher(company, slug)
+            # Workday has no "list the whole board" mode (see from_workday's docstring): it needs a
+            # search term per call, so it's the one fetcher that takes your own include_titles too.
+            jobs = fetcher(company, slug, F["include_titles"]) if ats == "workday" else fetcher(company, slug)
         except urllib.error.HTTPError as e:
             errors.append(f"{company} ({ats}:{slug}): HTTP {e.code} (bad slug?)")
             continue
