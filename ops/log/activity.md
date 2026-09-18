@@ -22,3 +22,14 @@ non-coincidentally in a test fixture, six comments citing real incidents by comp
 dangling references baked into the DJ repo's generated output). `git init`'d both repos locally (no
 push). Full findings: `ops/reports/0001-agnosticism-verification.md`. Next: operator creates the
 GitHub repos and asks for a push.
+
+## 2026-09-17: Mechanism sync from the private source repo (ops/reports/0002)
+
+Ported ~2 weeks of gate/harness/crawler hardening from the private repo (baseline `f1982c09` to
+current): 4 new gates (seniority, commitments, tracker-render, cross-file voice), 12 rebuilt gates
+(voice_check's 12 detectors, 4 real visa_gate bugs, canon/verify_claims parsing hardening,
+throughput dedup fixes), 3 new crawler ATS fetchers (Workday/SmartRecruiters/Workable, ported to
+this repo and `Job-Automation-Crawler-Module` both, verified live). Eight parallel workstreams +
+one fresh-context adversarial audit (zero blockers) before commit. Full findings:
+`ops/reports/0002-2026-09-mechanism-sync.md`. Commit `8d1940a`. Next: none open; this fork is
+current as of this sync.
