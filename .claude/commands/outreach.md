@@ -50,7 +50,8 @@ specific reqs) bind until the recorded condition clears.
 hiring node + 5-8 verified-real people (volume rule below), fetch their real work into `sources/`
 (CLAUDE.md §0.1 in full: the brief carries the Grounding Law verbatim; a subagent that cannot cite
 returns UNVERIFIED), write the roster skeleton into that dossier's `referrals.md`. Agents write ONLY
-their own dossier's files. Drafting stays main-thread.
+their own dossier's files. Send each research agent with `model: "sonnet"` (reading and
+extraction; the gates carry the quality). Drafting stays main-thread.
 
 **4. Draft (main thread, per person: the standing doctrine, unchanged):**
 - 🔴 **THE MANDATORY STRUCTURE:** every message carries, in order: **(1) one fetched, checkable

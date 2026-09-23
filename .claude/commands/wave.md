@@ -53,6 +53,8 @@ Each agent: company + sponsorship/work-authorization posture + hiring-node ident
 rostered `referrals.md` skeleton (5-8 verified-real people where they exist; the sends themselves
 are `/outreach`'s job) + `company-research.md` + `sources/`. Every brief carries the Grounding Law
 verbatim (CLAUDE.md §0.1); agents write ONLY their own dossier's files. The wave's only fan-out.
+Send each research agent with `model: "sonnet"`: research is reading and extraction, and the
+Grounding Law plus your gates carry the quality, so the top model only adds cost here.
 
 ### 5. Tailor (while agents run)
 **5a. Résumé:** copy `resume/resume.html`, apply the ONE delta and record it in
