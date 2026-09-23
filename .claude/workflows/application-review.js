@@ -63,7 +63,7 @@ const FINDING_SCHEMA = {
 const COMMON = `
 You are one of FIVE independent reviewers of a job application package. You see ONE lens. Do not try to do the other four.
 
-Think deeply and thoroughly. Maximum-effort reasoning, not pattern-matching.
+Check every finding against the real files before you report it.
 
 TARGET: ${role} at ${company}
 
@@ -99,10 +99,14 @@ Log every autonomy call (anything you did that deviates from this brief).
 Complete the task, check edge cases, verify against the real rendered artifact before reporting.
 `
 
+// Model + effort per lens: checklist-style lenses run on Sonnet to keep usage down;
+// the adversarial and honesty lenses (and the synthesis) judge, so they run on Opus.
 const LENSES = [
   {
     key: 'jd-fit-ats',
     lens: 'JD-fit & ATS',
+    model: 'sonnet',
+    effort: 'medium',
     brief: `LENS 1: JD-FIT & ATS.
 Build a requirement-by-requirement map: for EVERY responsibility, requirement, and nice-to-have in the JD, name the exact
 resume line (or cover sentence) that answers it, or mark it UNANSWERED. Then:
@@ -116,6 +120,8 @@ Report the requirement->line map inside your findings (one finding per gap).`,
   {
     key: 'recruiter-6s',
     lens: 'Recruiter 6-second screen',
+    model: 'sonnet',
+    effort: 'medium',
     brief: `LENS 2: THE RECRUITER'S SIX SECONDS.
 You are a recruiter with 200 resumes and six seconds each. Read only the top third first.
 - What do you see, in order? Name line, title line, tagline, first company, first bullet.
@@ -129,6 +135,8 @@ You are a recruiter with 200 resumes and six seconds each. Read only the top thi
   {
     key: 'hiring-manager-redteam',
     lens: 'Hiring-manager red team',
+    model: 'opus',
+    effort: 'high',
     brief: `LENS 3: HIRING-MANAGER RED TEAM (adversarial).
 You are the peer or boss this person would report to at ${company}. You are looking for reasons to say no.
 - Give the THREE STRONGEST REASONS TO REJECT this candidate based on this package. Be brutal and specific.
@@ -142,6 +150,8 @@ Then, and only then, give the fixes. Your findings should be dominated by the re
   {
     key: 'honesty-defensibility',
     lens: 'Honesty & defensibility audit',
+    model: 'opus',
+    effort: 'high',
     brief: `LENS 4: HONESTY & DEFENSIBILITY (the highest-stakes lens).
 Trace EVERY factual claim in the resume and cover letter to a source. For each: quote the claim, name the file/repo/URL that
 proves it, and mark VERIFIED / UNSOURCED / FALSE.
@@ -159,6 +169,8 @@ proves it, and mark VERIFIED / UNSOURCED / FALSE.
   {
     key: 'voice-antislop',
     lens: 'Voice & anti-slop',
+    model: 'sonnet',
+    effort: 'high',
     brief: `LENS 5: VOICE & ANTI-SLOP.
 Read ${repo}/CLAUDE.md §11 and the voice notes in knowledge-base/11-preferences-and-conventions.md FIRST. Then hunt every tell:
 - Em-dashes anywhere in shipped copy (the cover letter especially). Zero allowed.
@@ -186,6 +198,8 @@ const reviews = await parallel(
       label: `review:${L.key}`,
       phase: 'Review',
       schema: FINDING_SCHEMA,
+      model: L.model,
+      effort: L.effort,
     })
   )
 )
@@ -222,7 +236,7 @@ employers/titles/dates/degrees/GPA/licenses. Everything else about how the opera
 call: surface the concern once in the AMBER section with your evidence, then defer to them.
 
 Return well-structured markdown. Be concrete. Length only where it earns it.`,
-  { label: 'synthesize', phase: 'Synthesize' }
+  { label: 'synthesize', phase: 'Synthesize', model: 'opus', effort: 'high' }
 )
 
 return {
