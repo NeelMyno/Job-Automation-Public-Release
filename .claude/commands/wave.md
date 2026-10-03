@@ -1,6 +1,5 @@
 ---
 description: THE application pipeline, one command for the whole lane. "/wave [N]" runs a full batch end to end; "crawl", "letter <dossier>", "fill <url> [dossier]" run one stage alone.
-argument-hint: [N | crawl | letter <dossier> | fill <url> [dossier]]
 ---
 
 # /wave: the application lane, end to end, off one command

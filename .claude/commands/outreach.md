@@ -1,6 +1,5 @@
 ---
 description: THE outreach session pipeline, one command that derives all pending outreach + follow-ups from the shared records, researches, drafts, gates, and hands over. No arguments runs everything; "<person> <dossier>" runs one person.
-argument-hint: [person-name-or-linkedin-url] [dossier-folder]
 ---
 
 # /outreach: the outreach SESSION, end to end, off one command
