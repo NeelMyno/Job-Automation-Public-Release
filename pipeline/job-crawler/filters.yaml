@@ -8,16 +8,21 @@
 lookback_hours: 72
 
 # TITLE gate: keep only if the job title contains one of these (case-insensitive substring).
-# THIS IS THE FIELD THAT ACTUALLY TARGETS THE CRAWLER: put your own role titles here.
-# Example shape (delete these and write your own):
-include_titles:
-  - example title one          # e.g. "product designer"
-  - example title two          # e.g. "design engineer"
+# THIS IS THE FIELD THAT ACTUALLY TARGETS THE CRAWLER: put your own role titles here, for any
+# role in any industry. It ships empty, and crawl.py refuses to run until it has at least one
+# title (an empty list would match nothing). discover.py uses the same titles to decide which
+# company boards to add. Example shape:
+#   include_titles:
+#     - data analyst
+#     - registered nurse
+#     - mechanical engineer
+include_titles: []
 
 # SIGNAL boosters (optional): presence in the title/description bumps a match's score;
-# not required for a match, purely a ranking aid.
-include_keywords:
-  - example keyword            # e.g. "figma", "react", "0 to 1"
+# not required for a match, purely a ranking aid. Matches are ranked by this score, then by
+# title fit (exactly one of your titles, then whole words, then part of a word), then newest.
+# Left empty, the score is 0 for every match and plays no part (crawl.py's JSON says so).
+include_keywords: []           # e.g. ["sql", "python"] or ["icu", "pediatrics"]
 
 # ============================================================================
 # REJECT vs FLAG: two DIFFERENT gates. Keep them separate rather than merging one into
@@ -42,8 +47,8 @@ include_keywords:
 # assuming everyone needs this filter (or that nobody does) would be wrong for someone.
 #
 # Worth a look once you add boards.yaml entries on the broader ATS platforms (Workday,
-# SmartRecruiters, Workable): a bigger, more generic ATS surfaces a wider mix of postings than
-# Greenhouse/Lever/Ashby's design/product/eng-heavy user base, so a title substring you'd expect
+# SmartRecruiters, Workable): a bigger, more general ATS surfaces a wider mix of job families
+# than the smaller ones, so a title substring you'd expect
 # to be unambiguous in your own field can collide with an unrelated one elsewhere in a company's
 # full board (e.g. a broad word like "design" or "analyst" shows up in plenty of job families
 # that have nothing to do with what you're searching for). If you start seeing off-target matches
@@ -75,6 +80,25 @@ exclude_companies: []
 # US-geography data, not tied to any specific role, so they're left filled in as a starting
 # point; trim or extend them for your own target region.
 require_us: true
+
+# WORK-MODE gate: where you can actually work. The same rule decides which company boards
+# discover.py adds, so a board is never added for jobs you would then filter out.
+#   remote_ok: true | false              keep remote postings?
+#   onsite_ok: anywhere | home_metros | none
+#                                        onsite and hybrid postings: keep them anywhere (the
+#                                        default), only in a place under home_metros, or never
+#   home_metros: place names matched as whole words in the posting's location text
+# "Remote, or onsite in Denver, no relocation" is:
+#   remote_ok: true
+#   onsite_ok: home_metros
+#   home_metros: ["denver", "boulder"]
+# "Remote only" is remote_ok: true with onsite_ok: none. A posting whose location says nothing
+# readable is kept: the gate never guesses. Check the result with `python3 locations.py --selftest`
+# and a crawl's JSON `location_rule` line.
+remote_ok: true
+onsite_ok: anywhere
+home_metros: []
+
 us_markers:
   - united states
   - usa

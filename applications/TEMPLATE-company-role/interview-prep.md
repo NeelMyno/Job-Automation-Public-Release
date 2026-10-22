@@ -9,7 +9,7 @@
 - **"[anticipated question]"** → [which of your catalogued, reusable stories from
   `knowledge-base/15-interview-story-bank.md` answers it, and why it fits]
 
-## Portfolio/work-sample walkthrough order
+## Work-sample walkthrough order
 
 1. [ ]
 2. [ ]

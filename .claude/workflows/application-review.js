@@ -73,8 +73,8 @@ READ THESE FILES (they are real, on disk):
 - The rendered PDF (what the employer actually sees; read it with: pdftotext -layout "${A.resumePdf}" -): ${A.resumePdf}
 - The cover letter: ${A.coverPath}
 - The master resume (the honest source of truth for every claim): ${repo}/knowledge-base/07-master-resume.md
-- The rules you are enforcing: ${repo}/CLAUDE.md §5, §11, §13
-- Voice + preferences: ${repo}/knowledge-base/11-preferences-and-conventions.md
+- The rules you are enforcing: ${repo}/CLAUDE.md §5 and ${repo}/.claude/rules/application-protocol.md (§13, §14)
+- Preferences: ${repo}/knowledge-base/11-preferences-and-conventions.md; how the candidate's writing sounds: ${repo}/knowledge-base/17-writing.md
 - If present, a personal blocklist of specific facts/numbers the operator has personally gotten
   wrong before: ${repo}/knowledge-base/00-red-zone-facts.md; read it if it exists, skip silently
   if it doesn't. Nothing in it should ever slip back into shipped copy.
@@ -168,24 +168,18 @@ proves it, and mark VERIFIED / UNSOURCED / FALSE.
   },
   {
     key: 'voice-antislop',
-    lens: 'Voice & anti-slop',
+    lens: 'Voice (read-aloud, 17-writing)',
     model: 'sonnet',
     effort: 'high',
-    brief: `LENS 5: VOICE & ANTI-SLOP.
-Read ${repo}/CLAUDE.md §11 and the voice notes in knowledge-base/11-preferences-and-conventions.md FIRST. Then hunt every tell:
-- Em-dashes anywhere in shipped copy (the cover letter especially). Zero allowed.
-- The rule of three (reflexive balanced triads). Note: a factual enumeration of three REAL product features is not the same as a
-  rhetorical triad. Judge by whether it is doing rhythm work or information work.
-- Antithesis porn ("not X, but Y"), borrowed thought-leader aphorisms, mic-drop closers, uniform sentence rhythm,
-  floating abstraction, performed emotion ("passionate", "excited"), corporate connective tissue
-  ("genuinely", "truly", "at the end of the day", "that said", "it's worth noting", "deeply").
-- Read the cover letter ALOUD in your head: would a specific human say this to another human, or does it sound like a brand?
-- The slop test: could a competent AI have produced this cover letter from the same brief? If yes, it is not done. Say so, and say
-  which sentence reads like the machine's and which reads like the candidate's own voice.
-- Third-person slips ("his/her own" where first-person is meant), passive voice where active is stronger, and any sentence that
-  could be cut with zero loss.
-- Do NOT invent a personal detail to make it sound human. If a line needs a true specific detail the operator hasn't given, mark
-  it [NEEDS: one real detail] and say exactly what to ask them.`,
+    brief: `LENS 5: VOICE (a fresh read-aloud, per knowledge-base/17-writing.md).
+Read ${repo}/knowledge-base/17-writing.md FIRST, and the voice samples it names. It is the only owner of how the candidate's
+writing sounds. You see only that file, its samples, the cover letter and the facts it cites. Then:
+- Read the cover letter ALOUD in your head, as the candidate talking to this one person. Mark every sentence that sounds
+  machine-made, over-confident, salesy, unclear or untrue, and say why in one line each.
+- Run python3 scripts/voice_check.py --sendable on the cover note and report its exit code (it checks only hard facts, the
+  candidate's never-say list, over-confidence phrases and dashes; passing says nothing about the voice).
+- Do NOT invent a personal detail to make it sound human. If a line needs a true specific detail the candidate hasn't given,
+  mark it [NEEDS: one real detail] and say exactly what to ask them.`,
   },
 ]
 
@@ -235,7 +229,9 @@ Never propose anything in the operator's two RED categories (CLAUDE.md §5): wor
 employers/titles/dates/degrees/GPA/licenses. Everything else about how the operator frames their own real work is their
 call: surface the concern once in the AMBER section with your evidence, then defer to them.
 
-Return well-structured markdown. Be concrete. Length only where it earns it.`,
+Return well-structured markdown. Be concrete. Length only where it earns it.
+
+Finish the whole list before returning: every edit concrete, every AMBER item carried forward.`,
   { label: 'synthesize', phase: 'Synthesize', model: 'opus', effort: 'high' }
 )
 

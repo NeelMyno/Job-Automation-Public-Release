@@ -29,11 +29,32 @@ specific status/employer (see the `restricted-authorization` key in the same KB 
 simply the opposite of your #1 answer, which is exactly the subtlety a naive "just invert it" rule
 gets wrong for some users and not others.
 
+TWO OPTIONAL MAPPINGS IN THE SAME BLOCK (both yours, both off until you write them)
+  * `also-accept`: a third `|` field on a class line, e.g.
+        sponsorship-now-or-future: NO | reason | also-accept: YES
+    Your answer for that class changed, and you decided NOT to edit dossiers already built or forms
+    already submitted. The gate then accepts the old answer on records, while the configured answer
+    stays the one an agent types on every new form (the fill step's read-back enforces that).
+  * `wording`: a question printed a particular way gets its own answer, because the honest answer
+    follows the question AS PRINTED, e.g.
+        wording: renewal of your employment authorization; training plan => YES | reason
+    Phrases are separated by `;` and matched case-insensitively against the question text only. When
+    one matches a work-authorization question, its answer is required there as printed (no polarity
+    flip), and the plain class answer still governs every other wording.
+
+NOT CONFIGURED YET (a fresh clone)
+  The gate says so plainly and never crashes. When no file it was given records a
+  work-authorization answer, it exits 3 (NOT CHECKED): nothing was verified, so it must never
+  exit 0, which a reader or a hook would take as proof. If any file DOES record an answer, that
+  answer cannot be checked, and the gate exits 1 (UNVERIFIED).
+
 USAGE
     python3 scripts/visa_gate.py                     # every applications/*/application.md
     python3 scripts/visa_gate.py <path> ...          # specific files (used by the hook)
     python3 scripts/visa_gate.py --selftest          # a fixed, fictional regression suite
-Exit 0 = clean (or not yet configured; see below). Exit 1 = at least one wrong or missing answer.
+Exit 0 = clean: every recorded answer was checked against your configured rule. Exit 1 = at least
+one wrong or missing answer, or recorded answers that cannot be checked because §3 is not filled
+in. Exit 3 = NOT CHECKED: §3 is not filled in yet and nothing recorded needs it (a fresh clone).
 """
 
 from __future__ import annotations
@@ -129,7 +150,9 @@ INVERTED = re.compile(
     # "without the need for sponsorship", slipped the earlier narrower regex (which only allowed
     # "without (requiring) (visa) sponsor"), so an honest No was flagged as a violation and the gate
     # demanded the answer be flipped to a lie.
-    r"without\s+(?:the\s+)?(?:need\s+for\s+)?(?:any\s+)?(?:requiring\s+)?(?:an?\s+)?(?:employer\s+|visa\s+)?sponsor\w*"
+    # "without employer-sponsored visa support" slipped it too: the hyphen in "employer-sponsored"
+    # broke `employer\s+`, so an honest No read as the hard-stop question answered No.
+    r"without\s+(?:the\s+)?(?:need\s+for\s+)?(?:any\s+)?(?:requiring\s+)?(?:an?\s+)?(?:employer[\s-]+|visa[\s-]+)?sponsor\w*"
     r"|without\s+restriction"
     r"|fine\s+without\b"
     r"|(?:do\s+)?not\s+(?:require|need)\s+(?:visa\s+)?sponsor\w*"
@@ -149,7 +172,7 @@ NO_QUESTION = re.compile(
     r"(?:question|section|field|prompt|phrasing)"
     r"|(?:visa|work[-\s]?auth\w*|sponsorship)[^.\n]{0,30}?(?:question|section|field)s?\s*[:\-][^.\n]{0,40}?"
     r"(?:\bnot\s+present\b|\bnone\b|\bno\b|\bn/a\b)"
-    r"|(?:visa|work[-\s]?auth\w*|sponsorship|immigration)[^.\n]{0,30}?[:\-—][^.\n]{0,20}?"
+    r"|(?:visa|work[-\s]?auth\w*|sponsorship|immigration)[^.\n]{0,30}?[:\-\u2014][^.\n]{0,20}?"
     r"(?:\bno\b|\bnone\b|\bwithout\b|\bnot\b)[^.\n]{0,20}?(?:question|section|field|prompt)",
     re.I,
 )
@@ -172,7 +195,7 @@ CITIZENSHIP = re.compile(r"\b(?:u\.?s\.?\s+)?citizen(?:ship)?\b|\bgreen\s*card\b
 #   4. The finding still PRINTS, as an acknowledged note carrying its ADR. Nothing goes silent.
 #
 #     <!-- visa:decided ADR-0007 - my call 2026-01-01: not correcting the submitted answer -->
-DECIDED = re.compile(r"<!--\s*visa:decided\s+(ADR-\d{4})\s*(?:—|--|-)\s*(.*?)\s*-->", re.I)
+DECIDED = re.compile(r"<!--\s*visa:decided\s+(ADR-\d{4})\s*(?:\u2014|--|-)\s*(.*?)\s*-->", re.I)
 SUBMITTED = re.compile(r"\b(?:SUBMITTED|✅\s*Applied|applied[_ ]on\s*:\s*20\d\d-)")
 
 
@@ -190,6 +213,8 @@ def load_expected() -> dict | None:
         return None
     expected: dict[str, str] = {}
     rationale: dict[str, str] = {}
+    also: dict[str, set[str]] = {}
+    wording: list[tuple[list[str], str, str]] = []
     restricted: bool | None = None
     key_map = {
         "authorized-now": Q_AUTH,
@@ -203,19 +228,35 @@ def load_expected() -> dict | None:
             continue
         key, _, rest = line.partition(":")
         key = key.strip()
-        val, _, reason = rest.strip().partition("|")
-        val = val.strip().upper()
-        reason = reason.strip()
+        if key == "wording":
+            # wording: phrase one; phrase two => YES | reason
+            lhs, arrow, rhs = rest.partition("=>")
+            if not arrow:
+                continue
+            ans, _, why = rhs.strip().partition("|")
+            ans = ans.strip().upper()
+            phrases = [ph.strip().lower() for ph in lhs.split(";") if ph.strip()]
+            if ans in ("YES", "NO") and phrases and not placeholder.match(lhs.strip()):
+                wording.append((phrases, ans, why.strip() or "(no reason recorded)"))
+            continue
+        fields = [f.strip() for f in rest.split("|")]
+        val = fields[0].upper()
+        reason = fields[1] if len(fields) > 1 else ""
+        extra = " ".join(fields[2:])
         if placeholder.match(val) or val not in ("YES", "NO"):
             continue  # still a template placeholder like "[YES/NO]", not filled in
         if key in key_map:
             expected[key_map[key]] = val
             rationale[key_map[key]] = reason or "(no reason recorded, add one in the KB file)"
+            m_also = re.search(r"also-accept\s*:\s*(YES|NO)\b", extra, re.I)
+            if m_also and m_also.group(1).upper() != val:
+                also[key_map[key]] = {m_also.group(1).upper()}
         elif key == "restricted-authorization":
             restricted = val == "YES"
     if len(expected) < 3 or restricted is None:
         return None
-    return {"expected": expected, "rationale": rationale, "restricted": restricted}
+    return {"expected": expected, "rationale": rationale, "restricted": restricted,
+            "also": also, "wording": wording}
 
 
 def classify(question: str) -> tuple[str, bool] | None:
@@ -254,6 +295,26 @@ def classify(question: str) -> tuple[str, bool] | None:
         # an ambiguous sponsorship question is the one that cannot become a lie.
         return Q_FUTURE, inv
     return None
+
+
+def wording_override(question: str, cfg: dict) -> tuple[str, str] | None:
+    """(answer, reason) when your `wording` mapping names a phrase this question prints, else None."""
+    q = re.sub(r"[*_`]", "", question.split("?", 1)[0]).lower()
+    for phrases, ans, why in cfg.get("wording", []):
+        if any(ph in q for ph in phrases):
+            return ans, why
+    return None
+
+
+def accepted_answers(kind: str, inverted: bool, cfg: dict) -> set[str]:
+    """Every answer the record may hold: the configured one plus any `also-accept` (flipped the
+    same way when the question is inverted)."""
+    want = expected_answer(kind, inverted, cfg)
+    out = {want}
+    if not (kind == Q_AUTH and inverted):
+        for a in cfg.get("also", {}).get(kind, set()):
+            out.add(("NO" if a == "YES" else "YES") if inverted else a)
+    return out
 
 
 def expected_answer(kind: str, inverted: bool, cfg: dict) -> str:
@@ -349,10 +410,12 @@ def _adr_exists(adr: str) -> bool:
     return any((REPO / "ops" / "decisions").glob(f"{num}-*.md"))
 
 
-def scan_text(rel: str, text: str, cfg: dict) -> list[Finding]:
-    out: list[Finding] = []
+def recorded_answers(text: str) -> list[tuple[int, str, str, str, bool, str]]:
+    """Every recorded work-authorization answer: (line index, line, question segment, kind,
+    inverted, answer). Needs no configuration, so an unconfigured gate can still tell "nothing
+    recorded" from "recorded but unverifiable"."""
+    out: list[tuple[int, str, str, str, bool, str]] = []
     lines = text.splitlines()
-    is_submitted = bool(SUBMITTED.search(text))
     for i, line in enumerate(lines):
         if not (SPONSOR.search(line) or AUTHORIZED.search(line)):
             continue
@@ -382,10 +445,24 @@ def scan_text(rel: str, text: str, cfg: dict) -> list[Finding]:
                     got = _answer_in(lines[i + 1], is_continuation=True)
             if got is None:
                 continue
-            want = expected_answer(kind, inverted, cfg)
-            if got != want:
-                out.append(Finding(rel, i + 1, kind, got, line, want, cfg["rationale"].get(kind, ""),
-                                   _decision_on(lines, i, is_submitted)))
+            out.append((i, line, seg, kind, inverted, got))
+    return out
+
+
+def scan_text(rel: str, text: str, cfg: dict) -> list[Finding]:
+    out: list[Finding] = []
+    lines = text.splitlines()
+    is_submitted = bool(SUBMITTED.search(text))
+    for i, line, seg, kind, inverted, got in recorded_answers(text):
+        override = wording_override(seg, cfg)
+        if override:
+            accepted, want, why = {override[0]}, override[0], f"your wording mapping: {override[1]}"
+        else:
+            accepted = accepted_answers(kind, inverted, cfg)
+            want, why = expected_answer(kind, inverted, cfg), cfg["rationale"].get(kind, "")
+        if got not in accepted:
+            out.append(Finding(rel, i + 1, kind, got, line, want, why,
+                               _decision_on(lines, i, is_submitted)))
     return out
 
 
@@ -403,8 +480,16 @@ def coverage_gap(rel: str, text: str) -> str | None:
            f"contains NO work-authorization answer at all. Unverifiable, and that's a defect on its own."
 
 
-def targets() -> list[Path]:
-    return sorted(REPO.glob("applications/*/application.md"))
+# EXAMPLE-*/TEMPLATE-* dossiers are scaffolding (the selftest fixture and the blank starter), never
+# a real application. The template's own instructions mention a `## SUBMITTED` heading, so sweeping
+# it would report a "submitted with no answer" defect on every fresh clone.
+SCAFFOLD_PREFIXES = ("EXAMPLE-", "TEMPLATE-")
+
+
+def targets(root: Path | None = None) -> list[Path]:
+    root = REPO if root is None else root
+    return sorted(p for p in root.glob("applications/*/application.md")
+                  if not p.parent.name.startswith(SCAFFOLD_PREFIXES))
 
 
 # --- selftest -------------------------------------------------------------------------------
@@ -492,7 +577,63 @@ CASES: list[tuple[str, str, bool]] = [
      '- Will you now or in the future require sponsorship? **"No, I will not need sponsorship"**', True),
     ("the hard-stop answered **No.** (a period inside the bold) - the lie, MUST fire",
      "- Will you now or in the future require sponsorship? **No.**", True),
+    ("inverted 'without employer-sponsored visa support' answered No - honest, must NOT fire",
+     '- "Are you legally authorized to work in the United States without employer-sponsored visa '
+     'support now or in the future?": **No**', False),
+    ("the same hyphenated inverted question answered Yes - the lie, MUST fire",
+     '- "Are you legally authorized to work in the United States without employer-sponsored visa '
+     'support now or in the future?": **Yes**', True),
 ]
+
+# A second fictional configuration that exercises the two optional mappings: the future answer
+# changed from YES to NO with the old YES still accepted on records (also-accept), and a question
+# that names a renewal or a training plan is answered YES as printed (wording).
+_TEST_CFG_MAP = {
+    "expected": {Q_AUTH: "YES", Q_BEGIN: "NO", Q_FUTURE: "NO"},
+    "rationale": {Q_AUTH: "example.", Q_BEGIN: "example.", Q_FUTURE: "example: changed answer."},
+    "restricted": True,
+    "also": {Q_FUTURE: {"YES"}},
+    "wording": [(["renewal of your", "training plan"], "YES", "example: that wording asks about a renewal.")],
+}
+
+MAP_CASES: list[tuple[str, str, bool]] = [
+    ("also-accept: the new configured No on the future question is accepted",
+     "- Will you now or in the future require sponsorship? **No**", False),
+    ("also-accept: the old Yes on a built record is accepted too",
+     "- Will you now or in the future require sponsorship? **Yes**", False),
+    ("also-accept never widens another class: to-begin answered Yes still fires",
+     "- Do you require sponsorship to begin employment? **Yes**", True),
+    ("also-accept flips with polarity: inverted future question answered No (old) is accepted",
+     "- Are you authorized to work in the US without sponsorship, now or in the future? **No**", False),
+    ("also-accept flips with polarity: inverted future question answered Yes (new) is accepted",
+     "- Are you authorized to work in the US without sponsorship, now or in the future? **Yes**", False),
+    ("wording: a question naming a renewal is answered as printed, Yes accepted",
+     "- Do you now, or will you in the future, require sponsorship or a renewal of your employment "
+     "authorization? **Yes**", False),
+    ("wording: the same printed question answered No fires (the mapping says Yes)",
+     "- Do you now, or will you in the future, require sponsorship or a renewal of your employment "
+     "authorization? **No**", True),
+    ("wording: a phrase in the ANSWER annotation does not trigger the mapping",
+     "- Will you now or in the future require sponsorship? **No** (no training plan needed)", False),
+]
+
+_UNCONFIGURED_KB = """# answers
+```work-authorization
+authorized-now: [YES/NO] | [one-line reason]
+sponsorship-to-begin: [YES/NO] | [one-line reason]
+sponsorship-now-or-future: [YES/NO] | [one-line reason]
+restricted-authorization: [YES/NO] | [one-line reason]
+```
+"""
+_MAPPED_KB = """# answers
+```work-authorization
+authorized-now: YES | example
+sponsorship-to-begin: NO | example
+sponsorship-now-or-future: NO | example, changed | also-accept: YES
+restricted-authorization: YES | example
+wording: renewal of your; training plan => YES | example
+```
+"""
 
 COVERAGE_CASES: list[tuple[str, str, bool]] = [
     ("a SUBMITTED dossier with no work-authorization answer at all",
@@ -572,6 +713,61 @@ def selftest() -> int:
             mark = "✗ WRONG   "
         print(f"  {mark}  {label}")
     print()
+    for label, text, should in MAP_CASES:
+        got = bool(scan_text("t.md", text, _TEST_CFG_MAP))
+        ok = got == should
+        passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+        mark = ("✓ CAUGHT " if should else "✓ allowed") if ok else \
+               ("✗ MISSED " if should else "✗ FALSE-POSITIVE")
+        print(f"  {mark}  {label}")
+    print()
+    # Parsing and the unconfigured path, against throwaway KB files and dossiers.
+    import tempfile
+    global KB_ANSWERS
+    saved_kb = KB_ANSWERS
+    rec = "- Will you now or in the future require sponsorship? **Yes**\n"
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        try:
+            KB_ANSWERS = tdp / "kb.md"
+            KB_ANSWERS.write_text(_MAPPED_KB, encoding="utf-8")
+            cfg = load_expected() or {}
+            parse_ok = (cfg.get("also") == {Q_FUTURE: {"YES"}}
+                        and [w[0] for w in cfg.get("wording", [])] == [["renewal of your", "training plan"]])
+            KB_ANSWERS.write_text(_UNCONFIGURED_KB, encoding="utf-8")
+            unconf_none = load_expected() is None
+            (tdp / "with.md").write_text(rec, encoding="utf-8")
+            (tdp / "without.md").write_text("# A dossier with no answers yet\n", encoding="utf-8")
+            import io, contextlib
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc_with = main([str(tdp / "with.md")])
+                rc_without = main([str(tdp / "without.md")])
+            KB_ANSWERS = tdp / "missing.md"
+            with contextlib.redirect_stdout(io.StringIO()):
+                rc_missing = main([str(tdp / "with.md")])
+        finally:
+            KB_ANSWERS = saved_kb
+    for label, good in [
+        ("CONFIG    also-accept and wording lines parse from the block", parse_ok),
+        ("CONFIG    an unfilled template block reads as NOT configured", unconf_none),
+        ("CONFIG    unconfigured + a recorded answer exits 1 (UNVERIFIED, never a pass)", rc_with == 1),
+        ("CONFIG    unconfigured + nothing recorded exits 3 (not checked), never 0", rc_without == EXIT_NOT_CHECKED),
+        ("CONFIG    a missing answers file behaves the same as unconfigured (no crash)", rc_missing == 1),
+    ]:
+        passed, failed = (passed + 1, failed) if good else (passed, failed + 1)
+        print(f"  {'✓' if good else '✗'} {label}")
+    # The default sweep skips scaffold dossiers (S5): a TEMPLATE- dossier whose instructions name a
+    # `## SUBMITTED YYYY-MM-DD` heading must never read as a submitted application.
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        for name in ("TEMPLATE-company-role", "EXAMPLE-fixture", "acme-security-engineer"):
+            (tdp / "applications" / name).mkdir(parents=True)
+            (tdp / "applications" / name / "application.md").write_text(
+                "Write `## SUBMITTED YYYY-MM-DD` here once sent.\n", encoding="utf-8")
+        got = [p.parent.name for p in targets(tdp)]
+    skip_ok = got == ["acme-security-engineer"]
+    passed, failed = (passed + 1, failed) if skip_ok else (passed, failed + 1)
+    print(f"  {'✓' if skip_ok else '✗'} SWEEP     TEMPLATE-/EXAMPLE- dossiers are skipped; a real one is not")
     # Configuration-loading itself, independent of the fixed test config above.
     load_ok = load_expected() is None or isinstance(load_expected(), dict)
     passed, failed = (passed + 1, failed) if load_ok else (passed, failed + 1)
@@ -584,6 +780,9 @@ def selftest() -> int:
     return 0
 
 
+EXIT_NOT_CHECKED = 3
+
+
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
@@ -592,10 +791,29 @@ def main(argv: list[str]) -> int:
 
     cfg = load_expected()
     if cfg is None:
-        print("visa_gate.py: knowledge-base/12-application-answers.md §3 is not filled in yet.")
-        print("  Nothing was checked. Fill in the ```work-authorization``` block in that file before")
-        print("  relying on this gate; see SETUP.md.")
-        return 0
+        print("visa_gate.py: not checked: knowledge-base/12-application-answers.md §3 is not filled in yet.")
+        print("  Fill in the ```work-authorization``` block in that file (run /setup, or see SETUP.md)")
+        print("  before relying on this gate.")
+        unverifiable = []
+        for p in paths:
+            if not p.is_file():
+                continue
+            rec = recorded_answers(p.read_text(encoding="utf-8", errors="replace"))
+            if rec:
+                try:
+                    rel = str(p.resolve().relative_to(REPO))
+                except ValueError:
+                    rel = str(p)
+                unverifiable.append((rel, len(rec)))
+        if not unverifiable:
+            print("  No application record carries a work-authorization answer yet.")
+            print("  This is NOT a pass (exit 3): nothing was verified.")
+            return EXIT_NOT_CHECKED
+        print(f"\nUNVERIFIED: {len(unverifiable)} file(s) record work-authorization answers that cannot be")
+        print("checked until §3 is filled in. This is not a pass:")
+        for rel, n in unverifiable:
+            print(f"  {rel}  ({n} recorded answer(s))")
+        return 1
 
     findings: list[Finding] = []
     gaps: list[str] = []
@@ -617,6 +835,10 @@ def main(argv: list[str]) -> int:
     print(f"visa_gate.py: checked {checked} file(s) against knowledge-base/12-application-answers.md §3")
     print(f"  authorized-now = {cfg['expected'][Q_AUTH]} · sponsorship-to-begin = {cfg['expected'][Q_BEGIN]} "
           f"· now-or-in-the-future = {cfg['expected'][Q_FUTURE]}")
+    for k, extra in cfg.get("also", {}).items():
+        print(f"  also accepted on records for {k}: {', '.join(sorted(extra))} (your also-accept)")
+    if cfg.get("wording"):
+        print(f"  wording mappings: {len(cfg['wording'])} (a question printed that way gets its own answer)")
     print("  NOT checked: what was actually clicked in the browser. This reads the RECORD only;")
     print("               a correct record and a wrong radio button still diverge.")
     decided = [f for f in findings if f.decided]

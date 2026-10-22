@@ -1,6 +1,7 @@
 # Cover note: Company, Role Title
 
-Built [when/how, from which JD + facts files]. Style-check status: [ ] `voice_check.py` clean.
+Built [when/how, from which JD + facts files]. Checks: [ ] `voice_check.py --sendable` clean (hard facts only) · [ ] fresh read-aloud review per
+`knowledge-base/17-writing.md` done.
 
 <!-- The gate parses this file by splitting on a bare "---" line: everything between the first
      and second "---" is the actual sendable letter. Keep that fence exactly as shown. -->

@@ -10,5 +10,5 @@ method: fixture, invented for the selftest
      passes is forgery, and it is the one thing this whole system exists to prevent -- true here too,
      even though this specific file is a fixture and Jordan Rivera is not a real person. -->
 
-Jordan Rivera replied: "Loved your talk on design systems, especially the bit about shared tokens
+Jordan Rivera replied: "Loved your talk on internal tooling, especially the bit about shared dashboards
 across three product lines."

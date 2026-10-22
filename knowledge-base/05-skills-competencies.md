@@ -18,7 +18,7 @@ don't lead with it.**
 
 <!--
 Category-level, not tool-level: the level a hiring manager thinks in before they care which specific
-tool you used. "Systems design," not "Figma." Keep this to what you'd actually say out loud if someone
+tool you used. "Financial modeling," not "Excel." Keep this to what you'd actually say out loud if someone
 asked "what are you good at?"
 -->
 

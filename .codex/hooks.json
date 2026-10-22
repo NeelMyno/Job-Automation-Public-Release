@@ -28,7 +28,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|apply_patch",
+        "matcher": "Bash|apply_patch|WebFetch|web_fetch|mcp__.*",
         "hooks": [
           {
             "type": "command",
@@ -37,19 +37,20 @@
             "statusMessage": "Checking repository safety policy"
           }
         ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/pace-gate.py\"",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "mcp__Claude_Browser__.*|mcp__claude-in-chrome__.*|mcp__chrome-devtools__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --post-tool",
+            "timeout": 15,
+            "statusMessage": "Checking browser tabs for logged-in accounts"
+          }
+        ]
+      },
       {
         "matcher": "apply_patch|Edit|Write",
         "hooks": [

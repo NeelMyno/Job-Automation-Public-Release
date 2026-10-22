@@ -1,5 +1,8 @@
-# Secrets & local machine config — NEVER commit
-.mcp.json
+# Secrets & local machine config: NEVER commit
+# .mcp.json is NOT ignored: the repo ships it with the one browser tool form filling needs
+# (chrome-devtools, no keys). Add personal MCP servers with `claude mcp add` (local scope, kept
+# outside the repo) or in a personal file loaded with `claude --mcp-config .mcp.local.json`.
+.mcp.local.json
 .env
 .env.*
 *.local
@@ -16,10 +19,15 @@ node_modules/
 __pycache__/
 *.pyc
 
-# Session scratch — never publish
+# Session scratch: never publish
 .claude/tmp/
 
 # Resume build fonts: if you keep per-application font copies, they're build inputs, not
-# deliverables (the PDF is) — uncomment if that gets noisy:
+# deliverables (the PDF is); uncomment if that gets noisy:
 # applications/*/resume/fonts/
 # applications/*/cover-letter/fonts/
+
+# Generated output, rebuilt on demand
+pipeline/job-crawler/cache/
+pipeline/outreach-bundle-*.md
+pipeline/job-feed.md

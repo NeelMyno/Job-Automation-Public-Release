@@ -45,6 +45,8 @@ except ImportError:
         OPERATOR_NAME = None
         SITE_CHECKOUT_PATH = None
         RECRUITER_PLATFORM_KEYWORDS = []
+        PASTE_KIT_ATS_HOSTS = ()
+        STALE_WORK_SOURCES = ()
 
 REPO = Path(__file__).resolve().parents[1]
 # The checkout of your published site/portfolio repo, the one a recruiter actually downloads your
@@ -109,7 +111,7 @@ DEAD = re.compile(r"\brejected\b|\bwithdrawn\b|\bclosed\b|\bpassed\b|\bdead\b", 
 # Such a dossier has a rendered résumé PDF but will never have an "applied" tracker row or a cover
 # PDF, so ready-but-never-sent and cover-missing both false-fire on it. A DATED "résumé sent" record
 # is the honest, hard-to-fabricate signal it was actually sent.
-_RESUME_SENT = re.compile(r"r[ée]sum[ée]\s+sent\b\s*[:\-—]?\s*(?:on\s+)?20\d\d-\d\d-\d\d", re.I)
+_RESUME_SENT = re.compile(r"r[ée]sum[ée]\s+sent\b\s*[:\-\u2014]?\s*(?:on\s+)?20\d\d-\d\d-\d\d", re.I)
 
 # EXAMPLE-*/TEMPLATE-* dossiers are scaffolding (verify_claims.py's own fixture, and the blank
 # starter copy-from), never a real application. Every check below that sweeps applications/* for
@@ -251,15 +253,15 @@ def _norm_ats_url(u: str) -> str:
 # companies and shouts "do NOT re-apply" at genuinely-new roles: lost applications, the exact harm
 # this file exists to prevent. In real use this produced false "already applied" HIGHs from three
 # shapes: a shared authentication/login page used identically by many otherwise-unrelated postings
-# on the same platform (Y Combinator's own applicant login page is one real, publicly known
-# example), a free-text recruiter placeholder written in place of a real apply URL, and a bare
+# on the same platform (a job board's own applicant login page is the common case),
+# a free-text recruiter placeholder written in place of a real apply URL, and a bare
 # generic /careers landing page shared by two different roles at two different companies. A
 # non-req value returns "" and makes no dedup claim.
 _LOGINISH = re.compile(r"(?:^|/)(?:authenticate|login|signin|sign-in|sso|account)(?:/|$)", re.I)
 _GENERIC_LANDING = re.compile(
     r"/(?:careers|jobs|about-us/careers|about/careers|company/careers|work-with-us|opportunities)/?$", re.I)
 _REQ_ID_SIGNAL = re.compile(
-    r"\d{5,}"                                                           # long numeric id (GH/Lever/Amazon)
+    r"\d{5,}"                                                           # long numeric id (Greenhouse/Lever/Workday)
     r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"    # Ashby/Lever uuid
     r"|\br-?\d{3,}\b|\bjr\d{3,}\b"                                      # e.g. R-100234 / JR55019 requisitions
     r"|gh_jid|/jobs?/[^/]|/postings?/[^/]|/job-detail"                 # a specific ATS posting path
@@ -404,7 +406,7 @@ def status_contradicts_itself() -> list[Finding]:
 # a tracker row that governs the §0 count, that false positive is unacceptable, so this requires
 # SUBMITTED (or "Applied on") to be immediately followed by an ISO date, and refuses a future lead-in.
 _SUB_DATED = re.compile(
-    r"\bSUBMITTED\b\s*(?:on\b\s*)?[:\-—]?\s*20\d\d-\d\d-\d\d"
+    r"\bSUBMITTED\b\s*(?:on\b\s*)?[:\-\u2014]?\s*20\d\d-\d\d-\d\d"
     r"|\bApplied on:?\**\s*20\d\d-\d\d-\d\d"
     r"|\bapplied_on\s*:\s*20\d\d-\d\d-\d\d", re.I)
 _FUTURE_LEADIN = re.compile(
@@ -428,8 +430,8 @@ def _own_status_line(blob: str, m) -> bool:
     prefix = blob[ls:m.start()]
     # strip leading markdown / list / quote / emoji decoration
     p = re.sub(r"^[\s>#*_`·•\-✅🟢🔴🟡🎯]+", "", prefix)
-    # an optional "Status:" / "Status —" label may precede the marker on its own status line
-    p = re.sub(r"^status\s*[:\-—]\s*[*_`✅🟢🔴🟡\s]*", "", p, flags=re.I)
+    # an optional "Status:" / "Status \u2014" label may precede the marker on its own status line
+    p = re.sub(r"^status\s*[:\-\u2014]\s*[*_`✅🟢🔴🟡\s]*", "", p, flags=re.I)
     return p == ""
 
 
@@ -525,10 +527,10 @@ def tracker_behind_dossier() -> list[Finding]:
 def tracker_renders() -> list[Finding]:
     """The tracker's embedded <script> must PARSE, or the page is blank in a browser.
 
-    2026-08-05: an unescaped double-quote in one NETWORK row (`name:"Janelle "Nell" Lawless"`,
-    introduced 2026-07-25) terminated the JS string, threw inside the <script>, and rendered the whole
-    tracker BLANK for ELEVEN days. hooks.py reads the arrays by regex and never executes the JS, so
-    every session's counts stayed correct and the break was invisible to all of them. The fix was one
+    A real defect this guards against: an unescaped double quote inside one NETWORK row's name (a
+    nickname written in quotes) terminates the JS string, throws inside the <script>, and renders
+    the whole tracker BLANK. hooks.py reads the arrays by regex and never executes the JS, so every
+    session's counts stay correct and the break is invisible to all of them. The fix is one
     character; the lesson is that a data file the browser RUNS needs a syntax gate, or it can lie
     silently for as long as no human happens to open it. Best-effort: where node is absent (cron/CI)
     the guard simply does not run, rather than blocking.
@@ -558,7 +560,7 @@ def tracker_renders() -> list[Finding]:
         "HIGH", "tracker-unparseable",
         f"pipeline/tracker.html <script> has a SYNTAX ERROR, the page renders BLANK: {first[:110]}",
         "hooks.py parses the arrays by regex and never runs the JS, so a broken string is invisible "
-        "to every session (the 2026-08-05 '\"Nell\"' quote blanked the tracker for 11 days). Fix the "
+        "to every session (one unescaped quote in a name is enough to blank the page). Fix the "
         "string; a data file the browser executes needs a syntax gate.")]
 
 
@@ -688,10 +690,24 @@ def unpushed() -> list[Finding]:
     """Commits sitting locally that a parallel or future session can't see.
 
     Whether you push automatically or hold for review is your own call (CLAUDE.md §10); this
-    check doesn't take a position on that. It just surfaces the count, since a pile of unpushed
-    work is easy to lose track of either way.
+    check doesn't take a position on that. The rule: it runs ONLY when scripts/config.py names
+    PUSH_REMOTE, the remote you push your own copy to, and compares the current branch against
+    <PUSH_REMOTE>/<branch>. Unset, or that ref missing (never pushed, no such remote), it is
+    skipped. "origin" is never assumed: on a fresh clone it is the public template you must not
+    push to, so a count against it could never clear.
     """
-    rc, out_s = sh(["git", "rev-list", "--count", "origin/main..HEAD"])
+    remote = getattr(config, "PUSH_REMOTE", None)
+    if not remote:
+        return []
+    rc, br = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    br = br.strip()
+    if rc != 0 or not br or br == "HEAD":
+        return []
+    ref = f"{remote}/{br}"
+    rc, _ = sh(["git", "rev-parse", "--verify", "--quiet", ref])
+    if rc != 0:
+        return []
+    rc, out_s = sh(["git", "rev-list", "--count", f"{ref}..HEAD"])
     if rc != 0:
         return []
     try:
@@ -700,7 +716,7 @@ def unpushed() -> list[Finding]:
         return []
     if n == 0:
         return []
-    return [Finding("MEDIUM", "unpushed-commits", f"{n} commit(s) not on origin/main",
+    return [Finding("MEDIUM", "unpushed-commits", f"{n} commit(s) not on {ref}",
                     "not necessarily a problem (see your own §10 preference), but worth knowing "
                     "about before it grows into a real gap.")]
 
@@ -713,7 +729,25 @@ _OPERATOR_FILLED = (re.escape(config.OPERATOR_NAME) + r" (?:filled|typed)") if c
 
 AGENT_FILL = re.compile(r"agent (?:filled|drove)|chrome-devtools|automation (?:chrome|browser)", re.I)
 NOT_AGENT_FILL = re.compile(
-    r"paste kit|no agent fill|not an agent fill|" + _OPERATOR_FILLED, re.I)
+    r"no agent fill|not an agent fill|" + _OPERATOR_FILLED, re.I)
+# A paste kit is a last resort for a NAMED reason (CLAUDE.md §14), and even then the agent fills
+# everything it can first. So the words "paste kit" alone no longer exempt a dossier from the
+# fill-evidence check: only a paste kit whose record also names one of the reasons does.
+PASTE_KIT = re.compile(r"paste[- ]kit", re.I)
+PASTE_KIT_REASON = re.compile(
+    r"\b(?:h|re)?captcha\b"
+    r"|\b(?:log ?in|sign[- ]?in)\b[^.\n]{0,60}\b(?:required|must|only (?:you|the user)|declin\w*|user'?s? hands?)"
+    r"|\b(?:terms|tos|terms of (?:service|use))\b[^.\n]{0,60}\b(?:ban|bans|prohibit\w*|forbid\w*|disallow\w*)\b[^.\n]{0,40}\bautomat\w*"
+    r"|\breject\w*\b[^.\n]{0,60}\b(?:automation|automated)\b[^.\n]{0,20}\b(?:browser|submit\w*)"
+    r"|error verifying your application"
+    r"|\beasy apply\b|\bemail(?:ed)? (?:apply|application)\b|\bapply by email\b", re.I)
+
+
+def not_agent_fill(text: str) -> bool:
+    """True when the record says the agent did NOT fill this form (so no agent DOM check applies)."""
+    if NOT_AGENT_FILL.search(text):
+        return True
+    return bool(PASTE_KIT.search(text) and PASTE_KIT_REASON.search(text))
 DOM_EVIDENCE = re.compile(
     r"_valueTracker|DOM[- ]verified|required[- ]empty|value[- ]tracker|react[- ]registered", re.I)
 
@@ -729,15 +763,17 @@ def agent_fill_without_dom_evidence() -> list[Finding]:
 
     A script cannot see a browser, so it cannot verify a fill. What it CAN do is refuse to let the
     record *claim* an agent-verified fill with no evidence behind the claim, which is the same
-    discipline CLAUDE.md §0.1 applies to a quotation. If you filled it in yourself or it went out
-    via a paste kit, no agent-side DOM check applies and this stays quiet.
+    discipline CLAUDE.md §0.1 applies to a quotation. If you filled it in yourself, or it went out
+    via a paste kit whose record names its reason (CAPTCHA, a login only you may do, terms that ban
+    automation, an ATS that rejects automation-browser submits), no agent-side DOM check applies and
+    this stays quiet. A bare "paste kit" with no reason does not silence it.
     """
     out: list[Finding] = []
     for app in sorted(REPO.glob("applications/*/application.md")):
         if is_scaffold_dossier(app.parent.name):
             continue
         text = app.read_text(encoding="utf-8", errors="replace")
-        if not AGENT_FILL.search(text) or NOT_AGENT_FILL.search(text):
+        if not AGENT_FILL.search(text) or not_agent_fill(text):
             continue
         if DOM_EVIDENCE.search(text):
             continue
@@ -836,8 +872,119 @@ def recruiter_availability_unsourced() -> list[Finding]:
     return out
 
 
+# --------------------------------------------------------------------------------------
+# A paste kit must be complete, and an ATS known to reject automation-browser submits needs one.
+#
+# Some ATS forms refuse a submit that comes from the automation browser (an "error verifying your
+# application" after the user clicks Submit there, or a CAPTCHA on submit), so the handover for such
+# a form is its direct link plus a paste kit the user copies into their own browser. List those
+# hosts in scripts/config.py `PASTE_KIT_ATS_HOSTS` (empty by default: this part is then off). Any
+# `## Paste kit` section, on any host, must carry the direct form URL and the dossier must name the
+# reason the kit exists (CLAUDE.md §14).
+_FILLED = re.compile(r"^## Exact form answers \(as filled", re.M)
+_KIT = re.compile(r"^## Paste kit\b(.*?)(?=^## |\Z)", re.M | re.S | re.I)
+_SENT_MARK = re.compile(r"✅\s*(?:APPLIED|SUBMITTED)|^## SUBMITTED\b|^\*\*Status: ✅", re.M)
+_URL = re.compile(r"https?://[^\s)>\]`'\"]+", re.I)
+
+
+def _paste_kit_problem(text: str, hosts: tuple[str, ...]) -> str | None:
+    """Why this record's paste-kit handover is incomplete, or None. A pure text function so the
+    selftest drives it directly."""
+    if _SENT_MARK.search(text) or SUBMITTED.search(text) or DEAD.search(text):
+        return None
+    kit = _KIT.search(text)
+    if kit:
+        if not _URL.search(kit.group(1)):
+            return "a '## Paste kit' section with no direct form URL in it"
+        if not PASTE_KIT_REASON.search(text):
+            return "a paste kit with no named reason (CAPTCHA, login, terms, an ATS that rejects automation submits)"
+        return None
+    if not _FILLED.search(text):
+        return None
+    for host in hosts:
+        h = re.escape(host.lower())
+        if re.search(r"https?://(?:[\w-]+\.)*" + h + r"\b", text, re.I):
+            return f"a filled, unsent form on {host} (listed in PASTE_KIT_ATS_HOSTS) with no '## Paste kit' section"
+    return None
+
+
+def paste_kit_incomplete() -> list[Finding]:
+    """A paste-kit handover missing its link or reason, or missing where the ATS needs one."""
+    hosts = tuple(getattr(config, "PASTE_KIT_ATS_HOSTS", ()) or ())
+    out: list[Finding] = []
+    for app in sorted(REPO.glob("applications/*/application.md")):
+        if is_scaffold_dossier(app.parent.name):
+            continue
+        why = _paste_kit_problem(app.read_text(encoding="utf-8", errors="replace"), hosts)
+        if why:
+            out.append(Finding(
+                "HIGH", "paste-kit-incomplete", f"{app.parent.name}: {why}",
+                "Fill and DOM-verify everything first, then add a '## Paste kit' section to "
+                "application.md: the direct form URL on its own line, every field label with its exact "
+                "value in form order, the résumé and cover file paths, and the reason the kit exists "
+                "(CLAUDE.md §14)."))
+    return out
+
+
+# --------------------------------------------------------------------------------------
+# A work image sent to a person must have a recorded source, and must not be an outdated one.
+#
+# An image of your work attached to an application or a message (a screenshot, a snippet) is a
+# claim about what your work looks like NOW. Every image in a dossier's snippets/ or attachments/
+# folder needs a SOURCES.md entry with a `source:` line. Sources you know to be outdated (for
+# example a live page that still shows an old version of the work) go in scripts/config.py
+# `STALE_WORK_SOURCES` as regex patterns; an image from one of them is flagged. Only the `source:`
+# line is read, so a `replaces:` line naming the old source is fine.
+_SAMPLE_DIRS = ("snippets", "attachments")
+_SAMPLE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def _stale_samples(files: list[str], sources_md: str | None,
+                   stale: tuple[str, ...]) -> list[tuple[str, str]]:
+    """(file, reason) for each image with no provenance or with an outdated source."""
+    out: list[tuple[str, str]] = []
+    for f in files:
+        if sources_md is None:
+            out.append((f, "no SOURCES.md in the folder"))
+            continue
+        m = re.search(r"^[-*]\s*`?" + re.escape(f) + r"`?\s*\n(.*?)(?=^[-*]\s|\Z)", sources_md, re.M | re.S)
+        sm = re.search(r"^\s*source:\s*(\S.*)$", m.group(1), re.M) if m else None
+        if not sm:
+            out.append((f, "no SOURCES.md entry with a source: line"))
+            continue
+        if any(re.search(p, sm.group(1), re.I) for p in stale):
+            out.append((f, "its source is on your STALE_WORK_SOURCES list (outdated work)"))
+    return out
+
+
+def stale_work_sample() -> list[Finding]:
+    """An image of your work, queued to send, with no provenance or an outdated source."""
+    stale = tuple(getattr(config, "STALE_WORK_SOURCES", ()) or ())
+    out: list[Finding] = []
+    for d in sorted(REPO.glob("applications/*")):
+        if not d.is_dir() or is_scaffold_dossier(d.name):
+            continue
+        for sub in _SAMPLE_DIRS:
+            folder = d / sub
+            if not folder.is_dir():
+                continue
+            files = sorted(p.name for p in folder.iterdir() if p.suffix.lower() in _SAMPLE_EXT)
+            if not files:
+                continue
+            src = folder / "SOURCES.md"
+            text = src.read_text(encoding="utf-8", errors="replace") if src.exists() else None
+            for f, why in _stale_samples(files, text, stale):
+                out.append(Finding(
+                    "HIGH", "stale-work-sample", f"{d.name}/{sub}/{f}: {why}",
+                    "Record each image's subject, source and capture date in that folder's "
+                    "SOURCES.md, and capture it from the current version of the work."))
+    return out
+
+
 CHECKS = [
     ("ready-but-never-sent", ready_but_never_sent),
+    ("paste-kit-incomplete", paste_kit_incomplete),
+    ("stale-work-sample", stale_work_sample),
     ("duplicate-application", duplicate_application),
     ("cover-missing", cover_missing),
     ("fill-claimed-not-evidenced", agent_fill_without_dom_evidence),
@@ -867,8 +1014,8 @@ def selftest() -> int:
 
     # SUBMITTED / NOT-APPLIED detection against the REAL strings found in this repo.
     real_submitted = [
-        "SUBMITTED 2026-07-21 by hand", "**Applied on:** 2026-07-22 (early AM PT) — SUBMITTED",
-        "SUBMITTED 2026-07-22 (Ashby — success c", "applied_on: 2026-07-23",
+        "SUBMITTED 2026-07-21 by hand", "**Applied on:** 2026-07-22 (early AM PT) \u2014 SUBMITTED",
+        "SUBMITTED 2026-07-22 (Ashby \u2014 success c", "applied_on: 2026-07-23",
     ]
     for s in real_submitted:
         check(f"reads as submitted: {s[:38]!r}", bool(SUBMITTED.search(s)))
@@ -886,19 +1033,19 @@ def selftest() -> int:
     # 🔴 the four real dossier lines this check WRONGLY flagged on its first live run.
     check("'Nothing was submitted' is not a submission",
           not SUBMITTED.search("Read-only in the browser. No field was filled. Nothing was submitted."))
-    check("'before this is submitted' is future tense, not a record (stripe)",
-          not SUBMITTED.search("Re-point into Web Presence & Platform before this is submitted"))
-    check("an em dash right before 'NOT SUBMITTED' after a date does not read as submitted (grafana)",
-          not SUBMITTED.search("form answers (as filled, 2026-07-21, REBUILD #2) — NOT SUBMITTED"))
+    check("'before this is submitted' is future tense, not a record",
+          not SUBMITTED.search("Re-point into the platform team req before this is submitted"))
+    check("an em dash right before 'NOT SUBMITTED' after a date does not read as submitted",
+          not SUBMITTED.search("form answers (as filled, 2026-07-21, REBUILD #2) \u2014 NOT SUBMITTED"))
     check("a real dated record still reads as submitted",
-          bool(SUBMITTED.search("✅ SUBMITTED 2026-07-22 by hand — success confirmation seen")))
+          bool(SUBMITTED.search("✅ SUBMITTED 2026-07-22 by hand \u2014 success confirmation seen")))
 
     # The self-contradiction shape, exactly as it appears in real dossiers.
     with tempfile.TemporaryDirectory() as td:
         d = Path(td) / "applications" / "probe"
         d.mkdir(parents=True)
         (d / "README.md").write_text(
-            "# Probe — Product Designer\nStatus: **NOT APPLIED**\n" + "\n" * 12 +
+            "# Probe \u2014 Operations Analyst\nStatus: **NOT APPLIED**\n" + "\n" * 12 +
             "✅ SUBMITTED 2026-07-22 by hand\n", encoding="utf-8")
         global REPO
         saved = REPO
@@ -931,10 +1078,60 @@ def selftest() -> int:
           and not DOM_EVIDENCE.search("The agent filled this form in the automation Chrome."))
     check("an agent-driven fill WITH evidence is not flagged",
           bool(DOM_EVIDENCE.search("agent filled and DOM-verified, 0 required-empty")))
-    check("a paste-kit fill is exempt (the operator's own browser, no agent DOM to check)",
-          bool(NOT_AGENT_FILL.search("PASTE KIT — the operator applies via their own browser")))
+    check("a paste kit WITH a named reason is exempt (hCaptcha on submit)",
+          not_agent_fill("The agent filled it in the automation Chrome, then hit an hCaptcha on submit. "
+                         "## Paste kit\nhttps://jobs.example.com/acme/123/apply"))
+    check("a paste kit whose ATS rejects automation-browser submits is exempt",
+          not_agent_fill("Paste kit: this ATS rejects a submit from the automation browser "
+                         "(\"There was an error verifying your application\")."))
+    check("a BARE paste-kit mention with no reason is NOT exempt (the fill law changed)",
+          not not_agent_fill("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
+    check("...so that bare paste-kit record with no DOM evidence is still flagged",
+          bool(AGENT_FILL.search("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
+          and not DOM_EVIDENCE.search("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
     check("'no agent filled this form' is exempt, not a claim",
-          bool(NOT_AGENT_FILL.search("No agent filled this form, so there is no agent-side fill to verify")))
+          not_agent_fill("No agent filled this form, so there is no agent-side fill to verify"))
+
+    # Paste kit completeness, and the configured ATS hosts that need one.
+    _filled = ("- Apply URL: https://jobs.example-ats.com/globex/149b3408-3334/apply\n"
+               "## Exact form answers (as filled 2026-01-02; NOT submitted, the user submits)\n"
+               "- Full name: Jordan Rivera\n")
+    _hosts = ("example-ats.com",)
+    check("paste-kit: a filled, unsent form on a configured host with no kit is flagged",
+          _paste_kit_problem(_filled, _hosts) is not None)
+    check("paste-kit: the same host is quiet when PASTE_KIT_ATS_HOSTS is empty (off by default)",
+          _paste_kit_problem(_filled, ()) is None)
+    check("paste-kit: a kit with the direct link and a named reason passes",
+          _paste_kit_problem(_filled + "\n## Paste kit\nReason: this ATS rejects submits from the automation "
+                             "browser.\nhttps://jobs.example-ats.com/globex/149b3408-3334/apply\n", _hosts) is None)
+    check("paste-kit: a kit heading with no URL in it is flagged",
+          _paste_kit_problem(_filled + "\n## Paste kit\nReason: CAPTCHA.\n- Full name: Jordan Rivera\n", _hosts)
+          is not None)
+    check("paste-kit: a kit with a URL but no named reason is flagged",
+          _paste_kit_problem(_filled + "\n## Paste kit\nhttps://jobs.example-ats.com/globex/1/apply\n", ())
+          is not None)
+    check("paste-kit: a submitted record is quiet",
+          _paste_kit_problem("**Status: ✅ APPLIED 2026-01-03**\n" + _filled, _hosts) is None)
+    check("paste-kit: an unfilled record on a configured host is quiet",
+          _paste_kit_problem("https://jobs.example-ats.com/globex/abc/apply\n"
+                             "## Exact form answers: NOT captured yet\n", _hosts) is None)
+
+    # Work samples: provenance required, configured outdated sources flagged.
+    _stale_pats = (r"example\.com/old-case/",)
+    _old = "- `2-dashboard.png`\n  source: https://example.com/old-case/dashboard.png (live page)\n"
+    _new = ("- `2-dashboard-new.png`\n  source: local build v2, captured 2026-01-02\n"
+            "  replaces: https://example.com/old-case/dashboard.png\n"
+            "- `1-report.png`\n  source: https://example.com/case/report.webp\n")
+    check("samples: an image from a configured outdated source is flagged",
+          _stale_samples(["2-dashboard.png"], _old, _stale_pats) != [])
+    check("samples: a current capture (old URL only on its replaces: line) passes",
+          _stale_samples(["2-dashboard-new.png"], _new, _stale_pats) == [])
+    check("samples: an image from a source not on the list passes",
+          _stale_samples(["1-report.png"], _new, _stale_pats) == [])
+    check("samples: an image with no SOURCES.md is flagged",
+          _stale_samples(["3-other.png"], None, ()) != [])
+    check("samples: an image missing from SOURCES.md is flagged",
+          _stale_samples(["3-other.png"], _new, ()) != [])
 
     # The cover-missing rule (CLAUDE.md §13.3): a résumé PDF must travel with a cover PDF.
     with tempfile.TemporaryDirectory() as td:
@@ -954,7 +1151,7 @@ def selftest() -> int:
             check("a DEAD dossier needs no cover (exempt)", len(cover_missing()) == 0)
             # A recruiter résumé-send (no form, so no cover, and it WAS sent) is exempt from both.
             (d / "README.md").write_text(
-                "# Probe\n> ✅ RÉSUMÉ SENT 2026-08-01 — recruiter résumé-send, not a portal application\n",
+                "# Probe\n> ✅ RÉSUMÉ SENT 2026-08-01 \u2014 recruiter résumé-send, not a portal application\n",
                 encoding="utf-8")
             check("a recruiter RÉSUMÉ-SEND needs no cover (exempt)", len(cover_missing()) == 0)
             check("a recruiter RÉSUMÉ-SEND is not flagged 'never sent' (it was sent)",
@@ -978,15 +1175,15 @@ def selftest() -> int:
         careers = "https://www.example-health.com/about-us/careers"
         placeholder = "via a recruiter, do not cold-apply"
         rows = [
-            '{co:"Acme", role:"Product Designer", status:"applied", apply:"' + applied + '", jd:"", folder:"applications/acme-old"}',
-            '{co:"Acme", role:"Product Designer, Growth", status:"active", apply:"' + dup + '", jd:"", folder:"applications/acme-dup"}',
-            '{co:"Beta", role:"Designer", status:"active", apply:"' + newurl + '", jd:"", folder:"applications/beta-new"}',
-            '{co:"Gamma", role:"Founding Designer", status:"applied", apply:"' + loginwall + '", jd:"", folder:"applications/gamma-co"}',
-            '{co:"Delta", role:"Design Engineer", status:"active", apply:"' + loginwall + '", jd:"", folder:"applications/delta-co"}',
-            '{co:"Epsilon", role:"Staff Product Designer", status:"applied", apply:"' + careers + '", jd:"", folder:"applications/epsilon-co"}',
-            '{co:"Zeta", role:"Design Technologist", status:"active", apply:"' + careers + '", jd:"", folder:"applications/zeta-co"}',
-            '{co:"Eta", role:"Founding PD", status:"applied", apply:"' + placeholder + '", jd:"", folder:"applications/eta-co"}',
-            '{co:"Theta", role:"Product Designer", status:"active", apply:"' + placeholder + '", jd:"", folder:"applications/theta-co"}',
+            '{co:"Acme", role:"Data Analyst", status:"applied", apply:"' + applied + '", jd:"", folder:"applications/acme-old"}',
+            '{co:"Acme", role:"Data Analyst, Growth", status:"active", apply:"' + dup + '", jd:"", folder:"applications/acme-dup"}',
+            '{co:"Beta", role:"Analyst", status:"active", apply:"' + newurl + '", jd:"", folder:"applications/beta-new"}',
+            '{co:"Globex", role:"Founding Engineer", status:"applied", apply:"' + loginwall + '", jd:"", folder:"applications/globex-co"}',
+            '{co:"Delta", role:"Support Engineer", status:"active", apply:"' + loginwall + '", jd:"", folder:"applications/delta-co"}',
+            '{co:"Initech", role:"Staff Accountant", status:"applied", apply:"' + careers + '", jd:"", folder:"applications/initech-co"}',
+            '{co:"Northwind", role:"Nurse Educator", status:"active", apply:"' + careers + '", jd:"", folder:"applications/northwind-co"}',
+            '{co:"Umbrella", role:"Founding Analyst", status:"applied", apply:"' + placeholder + '", jd:"", folder:"applications/umbrella-co"}',
+            '{co:"Hooli", role:"Data Analyst", status:"active", apply:"' + placeholder + '", jd:"", folder:"applications/hooli-co"}',
         ]
         (pl / "tracker.html").write_text("APPLICATIONS=[\n  " + ",\n  ".join(rows) + "\n]\n", encoding="utf-8")
         saved = REPO
@@ -1000,9 +1197,9 @@ def selftest() -> int:
             check("two companies sharing a login/auth wall URL do NOT collide into a HIGH duplicate",
                   not any(h.severity == "HIGH" and "delta-co" in h.what for h in hits))
             check("two roles sharing a generic /about-us/careers page do NOT collide into a HIGH duplicate",
-                  not any(h.severity == "HIGH" and "zeta-co" in h.what for h in hits))
+                  not any(h.severity == "HIGH" and "northwind-co" in h.what for h in hits))
             check("a free-text recruiter placeholder is not a req URL, no HIGH duplicate",
-                  not any(h.severity == "HIGH" and "theta-co" in h.what for h in hits))
+                  not any(h.severity == "HIGH" and "hooli-co" in h.what for h in hits))
         finally:
             REPO = saved
 
@@ -1013,7 +1210,7 @@ def selftest() -> int:
               "AVAILABLE 2026-08-20 on the curated list; in the recruiter's next-round set. Optional second submission alongside Beta Co."))
     check("a corrected row (the operator's own live check, NOT FOUND) is clean",
           not _availability_claim_unsourced(src_para,
-              "NOT FOUND on the list per the operator's live check (2026-08-26) — could not find this role on the list."))
+              "NOT FOUND on the list per the operator's live check (2026-08-26) \u2014 could not find this role on the list."))
     check("a 'NOT ON THE LIST (operator screenshot)' row is clean",
           not _availability_claim_unsourced(src_para,
               "NOT ON THE CURRENT LIST (operator's 2026-08-20 screenshot shows three other companies). Replaced by Beta Co."))
@@ -1036,14 +1233,14 @@ def selftest() -> int:
     check("'will be submitted 2026-09-01' (future tense + a date) does NOT read as submitted",
           not _dated_submission("The form will be submitted 2026-09-01 once the operator reviews it."))
     check("'NOT SUBMITTED: dossier building' does NOT read as submitted",
-          not _dated_submission("**Status: NOT SUBMITTED — dossier building.**"))
+          not _dated_submission("**Status: NOT SUBMITTED \u2014 dossier building.**"))
     # A SIBLING role's dated submission mentioned in this dossier's PROSE is not THIS dossier's
     # submission. The real false positives all had the marker buried MID-LINE inside a cross-
     # reference to a different role; a real submission record BEGINS its own line.
     check("a sibling '(a related role, submitted 2026-08-27)' mid-line is NOT this dossier's submission",
           not _dated_submission("This role is distinct from `sibling-role` (a related role, submitted 2026-08-27)."))
-    check("a sibling '(Design Systems,\" SUBMITTED 2026-08-19)' mid-line is NOT a submission",
-          not _dated_submission('Different from `applications/x-growth` (Design Systems," SUBMITTED 2026-08-19).'))
+    check("a sibling '(Growth Analytics,\" SUBMITTED 2026-08-19)' mid-line is NOT a submission",
+          not _dated_submission('Different from `applications/x-growth` (Growth Analytics," SUBMITTED 2026-08-19).'))
     check("'$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets ...' is NOT a submission",
           not _dated_submission("$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets a different posting."))
     check("'Submitted 2026-07-21, rejected 2026-07-23. Dead,' mid-prose is NOT a submission",
@@ -1058,28 +1255,28 @@ def selftest() -> int:
         for name, body in (
             # the folder:null-decoy shape: a lead row whose object carries a folder:null key BEFORE
             # the real folder key: the exact structure a naive "has a folder key" check would miss.
-            ("acme-designer", "**Status: SUBMITTED 2026-08-27 by hand (DOM-confirmed).**\n"),
-            ("beta-designer", "**Status: NOT SUBMITTED.**\n- To be submitted by hand once ready.\n"),
-            ("gamma-designer", "✅ SUBMITTED 2026-08-01 by hand — success page seen\n"),
+            ("acme-analyst", "**Status: SUBMITTED 2026-08-27 by hand (DOM-confirmed).**\n"),
+            ("beta-analyst", "**Status: NOT SUBMITTED.**\n- To be submitted by hand once ready.\n"),
+            ("globex-analyst", "✅ SUBMITTED 2026-08-01 by hand \u2014 success page seen\n"),
             # Guard 1: this dossier's own status is NOT submitted; the only dated marker is a
             # SIBLING role's submission in prose. Must NOT be flagged.
-            ("delta-designer",
+            ("delta-analyst",
              "**Status: DOSSIER BUILT ONLY, NOT submitted.**\n"
-             "Distinct from `applications/delta-growth` (Design Systems, SUBMITTED 2026-08-19).\n"),
+             "Distinct from `applications/delta-growth` (Growth Analytics, SUBMITTED 2026-08-19).\n"),
             # Guard 2: this dossier DID submit (own status line) but its folder ALSO carries an
             # `applied` row: a stale duplicate lead row, not an undercount.
-            ("zeta-designer", "## ✅ SUBMITTED 2026-08-20 by hand (Ashby)\n"),
+            ("northwind-analyst", "## ✅ SUBMITTED 2026-08-20 by hand (Ashby)\n"),
         ):
             dd = Path(td) / "applications" / name
             dd.mkdir(parents=True)
             (dd / "application.md").write_text(body, encoding="utf-8")
         rows = [
-            '{co:"Acme", role:"Designer", status:"lead", folder:null, folder:"applications/acme-designer"}',
-            '{co:"Beta", role:"Designer", status:"active", folder:"applications/beta-designer"}',
-            '{co:"Gamma", role:"Designer", status:"applied", folder:"applications/gamma-designer"}',
-            '{co:"Delta", role:"Designer", status:"lead", folder:"applications/delta-designer"}',
-            '{co:"Zeta", role:"Designer", status:"applied", folder:"applications/zeta-designer"}',
-            '{co:"Zeta", role:"Designer", status:"lead", folder:"applications/zeta-designer"}',
+            '{co:"Acme", role:"Analyst", status:"lead", folder:null, folder:"applications/acme-analyst"}',
+            '{co:"Beta", role:"Analyst", status:"active", folder:"applications/beta-analyst"}',
+            '{co:"Globex", role:"Analyst", status:"applied", folder:"applications/globex-analyst"}',
+            '{co:"Delta", role:"Analyst", status:"lead", folder:"applications/delta-analyst"}',
+            '{co:"Northwind", role:"Analyst", status:"applied", folder:"applications/northwind-analyst"}',
+            '{co:"Northwind", role:"Analyst", status:"lead", folder:"applications/northwind-analyst"}',
         ]
         (pl / "tracker.html").write_text("APPLICATIONS=[\n  " + ",\n  ".join(rows) + "\n]\n", encoding="utf-8")
         saved = REPO
@@ -1087,18 +1284,28 @@ def selftest() -> int:
         try:
             hits = tracker_behind_dossier()
             check("a submitted dossier whose row still says lead (folder:null decoy) IS caught",
-                  any("acme-designer" in h.what for h in hits))
+                  any("acme-analyst" in h.what for h in hits))
             check("the not-yet-submitted shape (active row + 'to be submitted') is NOT flagged",
-                  not any("beta-designer" in h.what for h in hits))
+                  not any("beta-analyst" in h.what for h in hits))
             check("Guard 1: a sibling role's submission in prose does NOT flag this lead dossier",
-                  not any("delta-designer" in h.what for h in hits))
+                  not any("delta-analyst" in h.what for h in hits))
             check("Guard 2: a lead row whose folder ALSO has an applied row is NOT flagged (dup row)",
-                  not any("zeta-designer" in h.what for h in hits))
-            check("a correctly-applied row is NOT flagged", not any("gamma-designer" in h.what for h in hits))
+                  not any("northwind-analyst" in h.what for h in hits))
+            check("a correctly-applied row is NOT flagged", not any("globex-analyst" in h.what for h in hits))
         finally:
             REPO = saved
 
-    # tracker-unparseable (2026-08-05, the "Nell" quote that blanked the page for 11 days).
+    # unpushed-commits: off unless PUSH_REMOTE is set; never counts against an assumed "origin".
+    _saved_pr = getattr(config, "PUSH_REMOTE", None)
+    try:
+        config.PUSH_REMOTE = None
+        check("unpushed-commits is skipped when PUSH_REMOTE is unset (a fresh clone)", unpushed() == [])
+        config.PUSH_REMOTE = "no-such-remote-xyz"
+        check("unpushed-commits is skipped when <PUSH_REMOTE>/<branch> does not exist", unpushed() == [])
+    finally:
+        config.PUSH_REMOTE = _saved_pr
+
+    # tracker-unparseable: an unescaped quote inside a name blanks the whole page.
     if shutil.which("node"):
         with tempfile.TemporaryDirectory() as td:
             pl = Path(td) / "pipeline"
@@ -1107,11 +1314,11 @@ def selftest() -> int:
             REPO = Path(td)
             try:
                 (pl / "tracker.html").write_text(
-                    '<script>const NETWORK=[{name:"Janelle "Nell" Lawless"}];</script>', encoding="utf-8")
-                check("a broken tracker <script> (the 'Nell' unescaped quote) is caught",
+                    '<script>const NETWORK=[{name:"Ann "Annie" Alpha"}];</script>', encoding="utf-8")
+                check("a broken tracker <script> (an unescaped quote inside a name) is caught",
                       len(tracker_renders()) == 1)
                 (pl / "tracker.html").write_text(
-                    '<script>const NETWORK=[{name:"Janelle Lawless"}];</script>', encoding="utf-8")
+                    '<script>const NETWORK=[{name:"Ann Alpha"}];</script>', encoding="utf-8")
                 check("a clean tracker <script> is not flagged", len(tracker_renders()) == 0)
             finally:
                 REPO = saved
@@ -1142,7 +1349,8 @@ def selftest() -> int:
           _fetch_live_resume("http://127.0.0.1:9/none.pdf", timeout=0.5) is None)
 
     # Coverage: every registered check must be exercised above.
-    exercised = {"ready-but-never-sent", "status-contradiction", "live-site-drift",
+    exercised = {"ready-but-never-sent", "paste-kit-incomplete", "stale-work-sample",
+                 "status-contradiction", "live-site-drift",
                  "unpushed-commits", "fill-claimed-not-evidenced", "cover-missing",
                  "duplicate-application", "recruiter-availability-unsourced",
                  "tracker-behind-dossier", "tracker-unparseable"}

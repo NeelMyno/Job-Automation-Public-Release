@@ -54,7 +54,7 @@ from pathlib import Path
 # a pending line is not counted as one, e.g. a later ADR saying "ADR-0007's Consequences-pending
 # line stays valid" is a reference, not a declaration; an unanchored match would double-count it.
 PENDING = re.compile(r"^[\s>*_#\-]*Consequences-pending\b", re.I)
-CLEARED = re.compile(r"Consequences-cleared\s*:\s*ADR-(\d{4})\s*(?:—|--|-)?\s*(.*)", re.I)
+CLEARED = re.compile(r"Consequences-cleared\s*:\s*ADR-(\d{4})\s*(?:\u2014|--|-)?\s*(.*)", re.I)
 
 
 def scan(sources: dict[str, str]) -> tuple[list[tuple[str, str, int, str]],
@@ -86,7 +86,7 @@ def scan(sources: dict[str, str]) -> tuple[list[tuple[str, str, int, str]],
                 # past the pending block and risks masking a genuinely open item elsewhere. A tail
                 # that BEGINS with "cleared" is treated as cleared; a real pending line never opens
                 # with it.
-                tail = PENDING.sub("", line).lstrip(" :*_-—")
+                tail = PENDING.sub("", line).lstrip(" :*_-\u2014")
                 if re.match(r"^(none|n/?a|nil|cleared|already\s+cleared)\b", tail, re.I):
                     continue
                 pending.append((num, name, lineno, line.strip()))

@@ -1,32 +1,11 @@
-# Target list: your ranked shortlist (optional, hand-maintained)
+# OUTDATED: superseded by `pipeline/tracker.html`
 
-<!--
-This is a companion to pipeline/tracker.html: a narrative, human-readable ranked shortlist for
-when you want more context than a table row carries. The tracker is the source of truth for
-status; this file is for your own reasoning about WHY something is ranked where it is. It's
-optional, so delete it if you're happy working straight off the tracker.
--->
+The ranked shortlist that used to live here is retired. A hand-maintained list beside the tracker drifts
+the day nothing keeps it in sync, and a stale list looks just as authoritative as a current one. The
+tracker carries the whole picture: every role as an APPLICATIONS row (status, fit, `next`, `@OWED`),
+every person as a NETWORK row. Reasoning about why a role ranks where it does goes in that row's `fit`
+and `notes`, or in the dossier under `applications/<company>-<role>/`.
 
-## Hard filters
+Row shapes: `.claude/rules/records-format.md`. What has gone cold: `python3 scripts/cold.py`.
 
-[Anything that rules a role out before you even rank it: pointer to
-`knowledge-base/02-work-authorization.md` for work-authorization walls, plus any others of your
-own.]
-
-## Legend
-
-🟢 strong fit · 🟡 worth a look · ⚪ long shot / exploratory
-
-## Next actions
-
-1. [ ]
-
-## Ranked shortlist
-
-### 1. 🟢 [Company: Role]
-
-[why it's ranked here, referral path if any, one-line status]
-
-## Caveats
-
-[anything you want future-you to know about how this list was built]
+This file is kept only so old links land somewhere. Do not add to it.

@@ -53,6 +53,8 @@ LAW_GLOBS = [
     #                                restatement drift and §/ADR pointers were never machine-checked.
     #                                A glob cannot drift out of date; a hand-typed file list can.
     ".claude/commands/*.md",
+    ".claude/rules/*.md",         # path-scoped law files: the application protocol (CLAUDE.md §13
+    #                                and §14 text) lives in `.claude/rules/application-protocol.md`
     ".claude/workflows/*.js",
     ".agents/skills/*/SKILL.md",
 ]
@@ -73,7 +75,7 @@ NOT_CHECKED = [
     ("pipeline/**", "employer-authored JD text, never graded against how YOU must write"),
     ("resume/**, scripts/**", "not instruction surfaces"),
     ("§ / ADR pointer integrity inside any path listed in NO_POINTER_CHECK",
-     "portfolio narrative about work done in ANOTHER codebase; those pointers resolve against "
+     "a write-up about work done in ANOTHER codebase; those pointers resolve against "
      "that repo's own numbering, not this one's. The restatement rules DO still run there."),
     ("the CONTENT of any rule", "this gate proves a rule lives in ONE place and that its pointers "
                                 "resolve. It cannot tell you the rule is right; that is a job for "
@@ -131,7 +133,77 @@ def law_files() -> list[str]:
 #     "instead": "link to knowledge-base/12-application-answers.md and read the answer there",
 # }
 
-OWNED: list[dict] = []
+# The work-authorization question stems a form prints, and a verdict printed right after one.
+# Together they catch a HARDCODED answer ("authorized to work now = YES") outside the answer bank.
+_WORKAUTH_Q = (
+    r"(?:legally\s+authoriz\w*"
+    r"|authoriz\w*[\s-]+to[\s-]+work"
+    r"|authoriz\w*[\s-]*now"
+    r"|requires?[\s-]+sponsorship\w*"
+    r"|needs?\s+sponsorship"
+    r"|sponsorship\s+(?:to\s+begin|now|at\s+(?:the\s+time\s+of\s+)?hire|for\s+this\s+position)"
+    r"|now\s+or\s+in\s+the\s+future"
+    r"|at\s+the\s+time\s+of\s+hire)"
+)
+_VERDICT = r"(?:[=:?|]|->|\u2192|\u2014)\s*[*_`\s]{0,4}(?:YES|NO)\b"
+
+# The files this template itself ships as rule OWNERS. Your own rules go below them. Each owner
+# must exist on disk: `run()` reports an owner path that resolves to nothing (`owner-missing`),
+# because a rule whose owner moved or was renamed points every reader at nowhere.
+OWNED: list[dict] = [
+    {
+        "id": "work-auth-answers",
+        "owner": "knowledge-base/12-application-answers.md",
+        # CLAUDE.md and the application protocol POINT at the answer bank and carry the hard-stop
+        # framing. They may never PRINT an answer (see hard_restatement).
+        "also_ok": ["CLAUDE.md", ".claude/rules/application-protocol.md"],
+        "restatement": re.compile(
+            r"(?:the\s+)?(?:form\s+)?answers?\s+are\s+\*{0,2}(?:yes|no)\b"
+            r"|require\s+sponsorship\s*[,)]?\s*\*{0,2}yes\*{0,2}\s*(?:\)|,|\.|$)",
+            re.I),
+        # NOT exempted by `also_ok`: only the owner may print an answer. An exemption for the
+        # most-read file in the repo is the worst place for a frozen answer to hide, because it
+        # gets copied into commands and dossiers before anyone notices the answer bank changed.
+        "hard_restatement": re.compile(_WORKAUTH_Q + r"[^\n]{0,120}?" + _VERDICT, re.I),
+        "hard_why": "This line does not point at the work-authorization answers, it PRINTS one. "
+                    "The honest answer depends on the exact question a form prints (authorized now, "
+                    "sponsorship to begin, sponsorship now or in the future), and the answer bank "
+                    "maps each wording. A frozen Yes/No elsewhere goes wrong the day the bank changes, "
+                    "and a wrong work-authorization answer is a hard-stop category.",
+        "why": "Work-authorization answers live in exactly one file, mapped per question wording. "
+               "A copy anywhere else drifts the next time the mapping changes.",
+        "instead": "link to `knowledge-base/12-application-answers.md` §3 and let the agent read it there",
+    },
+    {
+        "id": "voice-rules",
+        "owner": "knowledge-base/17-writing.md",
+        "also_ok": [],
+        # A restated voice RULEBOOK (a banned-word list, a list of forbidden openers), not a
+        # mention of the voice owner. "Write per knowledge-base/17-writing.md" is a pointer.
+        "restatement": re.compile(
+            r"\b(?:banned|forbidden|never[- ]use)\s+(?:ai[- ]?tell\s+)?(?:words?|phrases?|openers?|closers?)"
+            r"\s*(?:list\s*)?[:=]", re.I),
+        "why": "How outbound copy and chat replies sound is owned by the writing file. A second "
+               "copy of its banned list rots the first time the list changes, and then two files "
+               "teach two voices.",
+        "instead": "point at `knowledge-base/17-writing.md`",
+    },
+    {
+        "id": "application-protocol",
+        "owner": ".claude/rules/application-protocol.md",
+        # CLAUDE.md keeps the §13/§14 HEADINGS as an index so every §13.x pointer still lands.
+        "also_ok": ["CLAUDE.md"],
+        "restatement": re.compile(
+            r"never\s+ship\s+a\s+r(?:e|\u00e9)sum(?:e|\u00e9)\s+or\s+cover\s+letter\s+without\s+\w+\s+"
+            r"independent\s+review\s+passes"
+            r"|the\s+deliverable\s+is\s+the\s+filled\s+form\s*[:.]\s*\w", re.I),
+        "why": "The application protocol (the review passes, the dossier, the form-fill law) has "
+               "one text. A command that restates it keeps the old version the day the protocol "
+               "changes.",
+        "instead": "point at `.claude/rules/application-protocol.md` (CLAUDE.md §13/§14 index it)",
+    },
+    # Your own rules go here. See the schema and worked example above.
+]
 
 # `§` is not exclusively ours, and neither is `ADR-NNNN`. Both integrity checks resolve against
 # THIS repo: `§N` against a CLAUDE.md heading, `ADR-NNNN` against a file in `ops/decisions/`. Three
@@ -155,7 +227,7 @@ OWN_DOC_NEAR = re.compile(r"CLAUDE\.md`?[\s`*_,;:)\]'\"]{0,4}$", re.I)
 ADR_REF = re.compile(r"\bADR-(\d{4})\b")
 
 # A subtree of instruction-adjacent files whose §/ADR references point at ANOTHER codebase's
-# numbering, not this repo's, e.g. a portfolio note describing work done in a different repo,
+# numbering, not this repo's, e.g. a project write-up describing work done in a different repo,
 # quoting THAT repo's own section numbers or decision-record ids. Running pointer-integrity there
 # produces false positives: the number either fails to resolve (correctly, but noisily) against
 # the wrong document, or (worse) happens to collide with an unrelated real heading in THIS
@@ -322,13 +394,36 @@ def run() -> list[Finding]:
         found.extend(check_file(rel, p.read_text(encoding="utf-8", errors="replace"),
                                 sections, adrs, only_rules=rules))
     found.extend(check_ops_numbering())
+    found.extend(check_owners())
     return found
 
 
+def check_owners() -> list[Finding]:
+    """Every OWNED rule's owner (and every `also_ok` file) must exist on disk.
+
+    A rule whose owner was renamed or never created points every reader at nowhere, and the
+    restatement check then has no file it treats as the source of truth.
+    """
+    out: list[Finding] = []
+    for rule in OWNED:
+        if not (REPO / rule["owner"]).is_file():
+            out.append(Finding("HIGH", rule["owner"], 0, "owner-missing", rule["owner"],
+                               f"Rule '{rule['id']}' names this file as its owner, and it does "
+                               f"not exist.",
+                               "create the owner file, or point the rule at the file that now "
+                               "owns it"))
+        for ok in rule.get("also_ok", []):
+            if not (REPO / ok).is_file():
+                out.append(Finding("MEDIUM", ok, 0, "also-ok-missing", ok,
+                                   f"Rule '{rule['id']}' lists this file in also_ok, and it does "
+                                   f"not exist.", "drop it from also_ok or fix the path"))
+    return out
+
+
 # --------------------------------------------------------------------------------------
-# Self-test: the MECHANICAL checks only (§ cross-reference integrity, ADR-file-existence
-# integrity, ops-numbering collision detection). OWNED starts empty above, so there is no
-# restatement rule to test against yet; add cases here the day you register your first one.
+# Self-test: the mechanical checks (§ cross-reference integrity, ADR-file-existence integrity,
+# ops-numbering collision detection, owner existence) and the template's three OWNED rules.
+# Add cases here the day you register a rule of your own.
 # --------------------------------------------------------------------------------------
 
 CASES: list[tuple[str, str, str, bool]] = [
@@ -361,6 +456,51 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("but CLAUDE.md naming ITSELF must stay checked: '.md' is not a blanket escape",
      "knowledge-base/11-preferences-and-conventions.md",
      "Amends `CLAUDE.md` §99.4.", True),
+
+    # --- work-auth-answers: only the answer bank may PRINT an answer ---
+    ("a command that hardcodes an answer pair fires",
+     ".claude/commands/apply.md",
+     "The form answers are **YES** (authorized now) / **NO** (will require sponsorship).", True),
+    ("a pointer to the answer bank must not fire",
+     ".claude/commands/apply.md",
+     "The answers belong in the form; `knowledge-base/12-application-answers.md` §3 owns them.", False),
+    ("CLAUDE.md printing an answer fires even though it is in also_ok",
+     "CLAUDE.md",
+     "- Authorized to work in the US? **Yes** \u00b7 Require sponsorship now or in the future? **No**", True),
+    ("the application protocol printing an answer fires even though it is in also_ok",
+     ".claude/rules/application-protocol.md",
+     "`authorized to work now = YES` and `sponsorship to begin = NO`.", True),
+    ("pointer AND printed answers on one line still fires (a citation is not a lookup)",
+     ".claude/commands/apply.md",
+     "`knowledge-base/12-application-answers.md` §3 owns these: authorized-now -> **Yes**.", True),
+    ("the answer bank itself may print the answers",
+     "knowledge-base/12-application-answers.md",
+     '| "Are you legally authorized to work in the United States?" | **YES** |', False),
+    ("prose with a bare 'no' near a stem is not an answer pair",
+     ".claude/commands/apply.md",
+     "> Read the exact question; no sponsorship answer is ever inferred from another one.", False),
+
+    # --- voice-rules: the writing file owns the voice rulebook ---
+    ("a command restating a banned-word list fires",
+     ".claude/commands/outreach.md",
+     "Banned words: leverage, synergy, passionate.", True),
+    ("a pointer to the writing file must not fire",
+     ".claude/commands/outreach.md",
+     "Write the note per `knowledge-base/17-writing.md`, then read it out loud.", False),
+    ("the writing file itself may hold the list",
+     "knowledge-base/17-writing.md",
+     "Banned words: leverage, synergy, passionate.", False),
+
+    # --- application-protocol: the rules file owns §13/§14 text ---
+    ("a command restating the review-pass rule fires",
+     ".claude/commands/wave.md",
+     "Never ship a resume or cover letter without 5 independent review passes.", True),
+    ("CLAUDE.md keeping the §13 heading must not fire",
+     "CLAUDE.md",
+     "### 13.1 Never ship a r\u00e9sum\u00e9 or cover letter without 5 independent review passes", False),
+    ("a pointer to the protocol must not fire",
+     ".claude/commands/wave.md",
+     "Follow `.claude/rules/application-protocol.md` for the review passes.", False),
 ]
 
 
@@ -415,6 +555,28 @@ def selftest() -> int:
     passed, failed = (passed + 1, failed) if covered else (passed, failed + 1)
     print(f"  {'✓ covered' if covered else '✗ UN-GATED'}   .claude/ root instruction files are on "
           f"the check_law law surface")
+    rules_on = ".claude/rules/*.md" in LAW_GLOBS
+    passed, failed = (passed + 1, failed) if rules_on else (passed, failed + 1)
+    print(f"  {'✓ covered' if rules_on else '✗ UN-GATED'}   .claude/rules/ law files are on the "
+          f"check_law law surface")
+
+    # owner-missing: a fixture tree with one owner present and one absent.
+    global OWNED
+    saved_owned = OWNED
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        (tmp_path / "present.md").write_text("owner", encoding="utf-8")
+        OWNED = [{"id": "fixture-ok", "owner": "present.md", "restatement": re.compile("x")},
+                 {"id": "fixture-gone", "owner": "renamed-away.md", "restatement": re.compile("x")}]
+        REPO = tmp_path
+        try:
+            owners = check_owners()
+        finally:
+            REPO, OWNED = saved_repo, saved_owned
+    own_ok = [f.path for f in owners] == ["renamed-away.md"] and owners[0].kind == "owner-missing"
+    passed, failed = (passed + 1, failed) if own_ok else (passed, failed + 1)
+    print(f"  {'✓ CAUGHT ' if own_ok else '✗ WRONG   '}  owner-missing: a rule whose owner file is "
+          f"gone is reported, and only that one")
 
     print()
     if failed:

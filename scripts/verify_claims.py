@@ -37,7 +37,8 @@ cover-letter body, the form answers):
   R3  REGRESSION     A claim you have already corrected once may never reappear, anywhere,
                      in any wording. Populate `RETRACTED` below the first time you catch one.
   R4  LENGTH         LinkedIn connection notes stay under 300 characters.
-  R5  VOICE          No em-dashes, no performed emotion (see your own voice rules).
+  R5  VOICE          No em-dashes, plus voice_check.py's register (over-confidence, an unasked
+                     work-authorization mention, your never-say list in 17-writing.md).
   R6  NUMBERS        A metric you have already proven fabricated and purged may never
                      reappear. Populate `RETRACTED_NUMBERS` below the first time.
   R7  DEFAULT DENY   Any person's section carrying messages must have EITHER a sourced
@@ -48,6 +49,9 @@ cover-letter body, the form answers):
                      FULL-TEXT · MEDIA · NO-ANSWERED-QUESTIONS · PERSON · COMPANY ·
                      ABSENCE-CLAIMS. Born from a real miss where the answer to a question
                      the copy asked was sitting in the posting's own attached image.
+                     FULL-TEXT marked [x] also needs the stored posting on disk: the
+                     dossier's `jd-*.md` (CLAUDE.md §13.3), or a jd/posting-named file
+                     under `sources/`. One copy is enough; never store it twice.
   R9  RESUME RETIRED `resume/resume.html` must not contain a string you have explicitly
                      retired from your résumé (a former employer you decided not to list,
                      a title correction). Populate `RESUME_RETIRED` below. This rule also
@@ -399,12 +403,11 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
                         scope[:120] + ("…" if len(scope) > 120 else "")))
 
 
-# ── Rule 5: anti-slop voice check. ──────────────────────────────────────────────────
-BANNED_WORDS = [
-    "passionate", "passion for", "excited to", "thrilled", "delighted",
-    "obsessed with", "seamless", "pixel-perfect", "geek out",
-    "stuck with me", "the right kind of weird",
-]
+# ── Rule 5: voice. ─────────────────────────────────────────────────────────────────
+# Kept as an EMPTY list so importers do not break. A hardcoded style word list here was a second
+# copy of the voice rules; the voice owner is knowledge-base/17-writing.md, and the phrases you ban
+# go on ITS never-say list, which voice_check.py reads. R5 calls voice_check (below), never a copy.
+BANNED_WORDS: list[str] = []
 
 # ── Rule 2: phrases that put words, beliefs, or authorship onto the recipient. ─────
 # If any of these appear in a message, the message must quote them from a stored source,
@@ -456,6 +459,7 @@ INTERNAL_RECORD_MARKS = ("SENT LOG", "RETRACTED", "DO NOT SEND", "NOT SENT")
 # inside an operator note that no human will ever receive. A gate that cries wolf gets
 # disabled.
 _RECORD = frozenset({"R1", "R2", "R7", "R4", "R5"})   # a note to you, not copy
+_SENT_COPY = frozenset({"R4", "R5"})                  # a message that already left: length + voice only
 ANNOTATION_EXEMPTIONS: dict[str, frozenset[str]] = {
     # A record of copy ALREADY SENT. It legitimately quotes what you saw on a profile,
     # and its length and voice are history. R3/R6 stay live: see above.
@@ -492,7 +496,7 @@ _SUPPRESSED: list[tuple[str, str, tuple[str, ...]]] = []
 # item below marked [x]. A dossier whose outbound was sent before this rule existed
 # carries SENT-BEFORE-RULE with the send date instead.
 PRESEND_ITEMS = [
-    ("FULL-TEXT", "the primary posting's full text is stored under sources/ and was read"),
+    ("FULL-TEXT", "the primary posting's full text is stored in the dossier as jd-<slug>.md (or, if it is kept with the other sources, under sources/ with jd/posting in its name) and was read"),
     ("MEDIA", "every image/video attached to the posting was VIEWED WITH EYES and stored (or 'none attached' stated after checking)"),
     ("NO-ANSWERED-QUESTIONS", "every question in the outbound copy was checked against the full posting INCLUDING its media; none asks what the posting already answers"),
     ("PERSON", "the recipient's profile AND their public WORK (portfolio, posts, writing) were hunted, fetched, and stored under sources/, or a per-person NOTHING-FOUND is recorded; messages may reference only fetched work"),
@@ -506,7 +510,7 @@ def norm(s: str) -> str:
     """Fold the typography that makes verbatim matching fail for cosmetic reasons."""
     s = unicodedata.normalize("NFKC", s)
     for a, b in [("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
-                 ("—", " "), ("–", "-"), (" ", " ")]:
+                 ("\u2014", " "), ("\u2013", "-"), (" ", " ")]:
         s = s.replace(a, b)
     return re.sub(r"\s+", " ", s).strip().lower()
 
@@ -552,7 +556,18 @@ class Finding:
 # `sources/<company>-jd-<role>.md` or `sources/posting-<role>.md`. Deliberately NOT
 # matching bare "post": `<person>-linkedin-post.md` is a person's own writing and is
 # exactly the file that SHOULD source their speech.
+_EM_DASH = "\u2014"  # written as an escape so no dash character sits in this file
 JD_FILENAME_RE = re.compile(r"(?:^|[-_])(jd|job|jobs|jobdesc|posting|postings|req|requisition)(?:[-_]|$)")
+
+def stored_posting(folder: Path) -> list[Path]:
+    """Where a dossier keeps its job posting: `jd-*.md` at the dossier root (the template's place),
+    or a jd/posting-named file under sources/. Either one satisfies R8 FULL-TEXT."""
+    found = sorted(folder.glob("jd-*.md"))
+    src = folder / "sources"
+    if src.is_dir():
+        found += [p for p in sorted(src.glob("*.md")) if JD_FILENAME_RE.search(p.stem.lower())]
+    return found
+
 
 # How much of a file counts as its "header" for the does-this-belong-to-them test: the
 # `url:` / `fetched:` block plus the page title and opening content.
@@ -739,11 +754,11 @@ def person_name_tokens(heading: str) -> list[str] | None:
         ### None drafted yet · ### Ruled out / honest gaps · ### Unified pack (pointer)
         ### 4 · DJ, the warm lane      (a nickname; no file could ever match it)
     """
-    h = re.sub(r"^\s*[#\s]*\d+\s*[.)·\-–—]\s*", "", heading.strip())
+    h = re.sub(r"^\s*[#\s]*\d+\s*[.)·\-\u2013\u2014]\s*", "", heading.strip())
     # Drop multi-word parentheticals ("(recruiter who owns the req)"); KEEP a
     # single-token one, which is how a second given name is written: "A (Middle) Person".
     h = re.sub(r"\(([^)]*)\)", lambda m: m.group(1) if len(m.group(1).split()) == 1 else " ", h)
-    h = re.split(r"[—–·|]|\s-\s|https?:|[\"“”]|:|,", h)[0]
+    h = re.split(r"[\u2014\u2013·|]|\s-\s|https?:|[\"“”]|:|,", h)[0]
     h = re.sub(r"[^\w\s'.\-]", " ", h)
     toks: list[str] = []
     for raw in h.split():
@@ -777,6 +792,45 @@ def source_belongs_to(sf: SourceFile, tokens: list[str], quote: str) -> bool:
     return False
 
 
+_DM_WORDS = re.compile(r"\bdm\b|direct message|\binmail\b|\bemail\b", re.I)
+_INMAIL_NEGATED = re.compile(r"inmail\s*:?\s*no\b[^;,)]*|\bno inmail\b[^;,)]*|inmail\s+not\b[^;,)]*", re.I)
+
+
+def _sent_kinds_from_text(s: str) -> set[str]:
+    s = _INMAIL_NEGATED.sub(" ", s)          # "(InMail: NO)" names the channel NOT used
+    has_note = "connection note" in s.lower() or re.search(r"\bnote\b", s, re.I) is not None
+    has_dm = _DM_WORDS.search(s) is not None
+    if has_note and not has_dm:
+        return {"note"}
+    if has_dm and not has_note:
+        return {"dm"}
+    return {"note", "dm"}
+
+
+def sent_kinds(section: str) -> set[str]:
+    """Which of this person's messages already LEFT: {'note'}, {'dm'}, both, or none.
+
+    Read from a dated SENT marker inside the person's section (outreach_format's ALREADY_SENT
+    grammar). Only the SENTENCE carrying the marker says what left: "SENT 2024-01-02 (connection
+    note). DM: send after accept." names the DM in a different sentence, as still to go, and
+    reading the whole line would hide the unsent DM from every gate. An explicit not-yet-sent
+    declaration in the section outranks the marker. Fails toward "nothing sent" (gate stays on).
+    """
+    try:
+        from outreach_format import ALREADY_SENT, UNSENT_TAIL
+    except Exception:
+        return set()
+    m = ALREADY_SENT.search(section)
+    if not m or UNSENT_TAIL.search(section):
+        return set()
+    ls = section.rfind("\n", 0, m.start()) + 1
+    le = section.find("\n", m.end())
+    line = section[ls:(le if le != -1 else len(section))]
+    stop_ = re.search(r"[.!?](?:\s|$)", line[m.end() - ls:])
+    clause = line[: (m.end() - ls) + stop_.start()] if stop_ else line
+    return _sent_kinds_from_text(clause)
+
+
 def sendable_blocks(folder: Path) -> list[tuple[str, str, frozenset[str]]]:
     """(where, text, exempt_rules) for EVERY string a real human will actually read.
 
@@ -791,9 +845,18 @@ def sendable_blocks(folder: Path) -> list[tuple[str, str, frozenset[str]]]:
     ref = folder / "referrals.md"
     if ref.exists():
         for person, section in extract_referral_sections(ref.read_text(encoding="utf-8")):
+            # A message that already LEFT is history. Its copy-QUALITY rules (R4 length, R5 voice)
+            # cannot be acted on, and leaving them red walls off the dossier, so the unsent DMs in
+            # it cannot be rewritten. Sent-ness is per message KIND (sent_kinds above). The HONESTY
+            # rules (R1/R2/R3/R6/R7/R10/R12) still run on sent copy: a fabrication that reached a
+            # real person is the single most important thing this gate can find.
+            left = sent_kinds(section)
             for kind, msg, exempt in message_blocks(section):
                 where = f"referrals.md · {person} · {kind}"
                 _record_suppression(where, annotation_exemption(msg)[0], exempt)
+                if ("note" if "note" in kind.lower() else "dm") in left:
+                    exempt = exempt | _SENT_COPY
+                    _record_suppression(where, "already SENT (history): copy-quality rules only", _SENT_COPY)
                 out.append((where, msg, exempt))
 
     cover = folder / "cover-letter" / "cover-note.md"
@@ -802,7 +865,10 @@ def sendable_blocks(folder: Path) -> list[tuple[str, str, frozenset[str]]]:
     if cover.exists():
         parts = cover.read_text(encoding="utf-8").split("\n---\n")
         if len(parts) >= 3:  # the sendable letter lives between the first pair of fences
-            out.append(("cover-note.md · the sendable letter", parts[1], frozenset()))
+            # The label names the subfolder path, so a Stop hook that treats an untouched
+            # cover-letter/ file as frozen history (the employer already has it) can read it.
+            rel = cover.relative_to(folder).as_posix()
+            out.append((f"{rel} · the sendable letter", parts[1], frozenset()))
 
     app = folder / "application.md"
     if app.exists():
@@ -939,7 +1005,7 @@ def _record_suppression(where: str, mark: str, rules: frozenset[str]) -> None:
 #     grounding note, or operator line, so it collects the message, not the prose after.
 
 # An optional ordinal prefix inside the bold: "#1 ", "2. ", "3 · ".
-_LABEL_ORD = r"(?:#?\s*\d+\s*[.):·\-–—]*\s*)?"
+_LABEL_ORD = r"(?:#?\s*\d+\s*[.):·\-\u2013\u2014]*\s*)?"
 # A DM label wins over a note label: a DM label routinely names its InMail alternative,
 # e.g. "**First DM (Use InMail: NO, free connection note is available)**", so a loose
 # note pattern would otherwise claim the DM's body and R4 would cap a long DM at 300.
@@ -1049,7 +1115,7 @@ def _inline_body(label_line: str) -> str:
     while rest != prev:                        # peel one or more leading parentheticals
         prev = rest
         rest = re.sub(r"^\s*\([^)]*\)", "", rest)
-    return rest.lstrip(" :·–—-\t").strip()
+    return rest.lstrip(" :·\u2013\u2014-\t").strip()
 
 
 def _flush_left_body(lines: list[str], i: int, single_para: bool = False) -> tuple[str, int]:
@@ -1364,7 +1430,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                     if all(o.is_jd for o in owners):
                         findings.append(Finding(
                             "R1", where,
-                            f"RED: this quotation is attributed to {person.split('—')[0].strip()} "
+                            f"RED: this quotation is attributed to {person.split(_EM_DASH)[0].strip()} "
                             f"by the copy itself, but the ONLY file carrying it is a JOB "
                             f"POSTING ({owner_names}). A posting is the COMPANY's words, never a "
                             f"person's: this is exactly how a fabricated quote gets built out of "
@@ -1379,7 +1445,7 @@ def check_dossier(folder: Path) -> list[Finding]:
                             "R1", where,
                             f"Sourced, but to a DIFFERENT file than this person's: the words are "
                             f"stored in {owner_names}, and nothing ties that file to "
-                            f"{person.split('—')[0].strip()} (their name is not in its filename, "
+                            f"{person.split(_EM_DASH)[0].strip()} (their name is not in its filename, "
                             f"not in its header, and not near the quotation inside it). The copy "
                             f"says THEY said it. Confirm the words are theirs and store the source "
                             f"under a name that says whose it is (sources/person-<name>-<what>.md), "
@@ -1448,11 +1514,28 @@ def check_dossier(folder: Path) -> list[Finding]:
             pt = psc.read_text(encoding="utf-8")
             if GRANDFATHER_MARK not in pt:
                 for key, meaning in PRESEND_ITEMS:
-                    if not re.search(r"\[x\]\s*" + key, pt, re.I):
+                    if not re.search(r"\[x\]\s*(?:\*\*)?" + key, pt, re.I):
                         findings.append(Finding(
                             "R8", "pre-send-check.md",
                             f"Mandatory item '{key}' is not checked [x]. It means: {meaning}. "
                             "Do the check for real, then mark it. Never mark without doing."))
+                if re.search(r"\[x\]\s*(?:\*\*)?FULL-TEXT", pt, re.I) and not stored_posting(folder):
+                    findings.append(Finding(
+                        "R8", "pre-send-check.md",
+                        "FULL-TEXT is marked [x] but no stored posting was found: no jd-*.md in the "
+                        "dossier and no jd/posting-named file under sources/. Store the posting's "
+                        "full text as jd-<slug>.md, then mark it."))
+
+    # The voice REGISTER does not grade a DEAD dossier's copy. Its messages are a read-only record
+    # of what was sent, exactly as R9 treats a dead dossier's résumé below. The exemption reads
+    # pipeline/tracker.html, which only your real outcomes update, and it is NAMED in the
+    # NOT-checked line, never silent. A live dossier never reaches it.
+    _dead_voice = _dossier_status_if_dead(folder)
+    if _dead_voice:
+        _HISTORY_SKIPPED.append(
+            f"the voice register (R5) on {folder.name}/referrals.md: that dossier is "
+            f"'{_dead_voice}' per pipeline/tracker.html, so its messages are a read-only record of "
+            f"what was sent, not copy to grade")
 
     # R3/R5/R6/R10/R12: sweep ONLY what a real human will read. Documentation about a
     # correction is how the repo remembers; it must not trip the gate that prevents it.
@@ -1485,11 +1568,27 @@ def check_dossier(folder: Path) -> list[Finding]:
                             m.group(0)))
                         break  # one hit per fact is enough; don't stack near-duplicates
         if "R5" not in exempt:
-            if "—" in block:
+            if "\u2014" in block:
                 findings.append(Finding("R5", where, "Em-dash in sendable copy."))
             for w in BANNED_WORDS:
                 if w in nb:
                     findings.append(Finding("R5", where, f"Banned phrase '{w}'."))
+            # voice_check's register on every sendable block: over-confidence, an unasked
+            # work-authorization mention, your never-say list. voice_check.py is the OWNER; this
+            # is a call, never a copy. Dashes are checked above, so that category is skipped here.
+            # Fails CLOSED: a gate that cannot run must not pass silently. Skipped, visibly, on a
+            # dead dossier (its messages are a read-only record of what was sent).
+            if not _dead_voice:
+                try:
+                    import voice_check as _vc
+                    for cat, frag, _why in _vc.check(block):
+                        if cat == getattr(_vc, "DASH_CAT", "em/en-dash"):
+                            continue
+                        findings.append(Finding("R5", where, f"[{cat}] '{frag[:70]}': fix the fact "
+                                                             f"or cut the line (17-writing.md)."))
+                except Exception as e:  # noqa: BLE001
+                    findings.append(Finding("R5", where, f"voice_check register could not run ({e!r}); "
+                                                         f"a gate that cannot run must not pass."))
 
     # R9: THE RÉSUMÉ ENTERS THE GATE.
     #
@@ -1695,8 +1794,8 @@ SELFTEST_CASES = [
      '> Hi Jordan, you told them "velocity is the only moat that compounds" and I agree.'),
     ("R2", "attribution with no quote and no operator flag",
      '> Hi Sam, you lead the whole design org and I admire how you run it.'),
-    ("R5", "performed emotion",
-     '> Hi Jordan, I am so excited to apply and passionate about design systems.'),
+    ("R5", "over-confidence (voice_check's register, called from R5)",
+     '> Hi Jordan, your team plans the launch before the build starts. That\'s exactly how I work.'),
     # Guards the hole the internal-record exemption could open: a SENT LOG in the same
     # section must NOT make the real outbound copy invisible.
     ("R1", "poison hiding BEHIND a SENT LOG block in the same section",
@@ -1879,7 +1978,7 @@ def _seed_fixture_registries() -> None:
         },
     ])
     CARD_SIGNATURES.update({
-        "mentor-program": (r"mentored\s+\d+\s+junior\s+designers", r"mentor"),
+        "mentor-program": (r"mentored\s+\d+\s+junior\s+analysts", r"mentor"),
         "platform-migration": (r"migrated\s+the\s+platform\s+to\s+a\s+new\s+stack",
                                r"platform[-\s]migration|migrated the platform"),
     })
@@ -1930,7 +2029,7 @@ def _selftest_r11(h: _Harness) -> None:
             # Set BOTH segments, so each case tests exactly one direction unambiguously.
             if out_line is not None:
                 s = re.sub(r"\*\*Cards IN:\*\*.*?(?=\n\*\*|\n## |\Z)",
-                           "**Cards IN:** the design-system-and-code card\n\n", s, flags=re.S)
+                           "**Cards IN:** the internal-tooling card\n\n", s, flags=re.S)
                 s = re.sub(r"\*\*Cards OUT:\*\*.*?(?=\n\*\*|\n## |\Z)", out_line, s, flags=re.S)
             else:
                 s = re.sub(r"\*\*Cards IN:\*\*.*?(?=\n\*\*|\n## |\Z)",
@@ -2048,6 +2147,50 @@ def selftest() -> int:
         h.expect("R8", "outbound copy with no pre-send research audit",
                  check_dossier(tmp))
 
+    # R8 FULL-TEXT (S8): the posting may live in jd-*.md OR under sources/, never needs both; with
+    # neither on disk, a FULL-TEXT [x] is a claim with nothing behind it.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "dossier"
+        shutil.copytree(real, tmp)
+        jds = sorted(tmp.glob("jd-*.md"))
+        h.refuse("R8", "FULL-TEXT backed by the dossier's jd-*.md alone (no copy under sources/)",
+                 check_dossier(tmp))
+        moved = (tmp / "sources" / "acme-jd-role.md")
+        moved.write_text(jds[0].read_text(encoding="utf-8") if jds else "url: x\n", encoding="utf-8")
+        for j in jds:
+            j.unlink()
+        h.refuse("R8", "FULL-TEXT backed by a jd-named file under sources/ alone", check_dossier(tmp))
+        moved.unlink()
+        h.expect("R8", "FULL-TEXT marked [x] with no stored posting anywhere", check_dossier(tmp))
+
+    # R8 marking (S8): the template writes each item in bold (`- [x] **FULL-TEXT**`); a fully
+    # marked template checklist must read as marked.
+    tpl_psc = root / "applications" / "TEMPLATE-company-role" / "pre-send-check.md"
+    if tpl_psc.is_file():
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td) / "dossier"
+            shutil.copytree(real, tmp)
+            (tmp / "pre-send-check.md").write_text(
+                tpl_psc.read_text(encoding="utf-8").replace("- [ ]", "- [x]"), encoding="utf-8")
+            h.refuse("R8", "the TEMPLATE checklist with every bold item marked [x] reads as marked",
+                     check_dossier(tmp))
+
+    # R11 labels (S7): the template's tailoring.md uses the exact labels R11 reads, and the bare
+    # **IN:** / **OUT:** labels it once used are not mistaken for a declaration.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "dossier"
+        shutil.copytree(real, tmp)
+        tf = tmp / "resume" / "tailoring.md"
+        tf.write_text("## Cards played\n\n**IN:** the platform card\n**OUT:** nothing\n", encoding="utf-8")
+        _bare = [f for f in check_dossier(tmp) if f.rule == "R11" and "declaration found" in f.detail]
+        h.assert_true("[R11] bare **IN:**/**OUT:** labels are reported as no declaration", bool(_bare))
+        tpl = root / "applications" / "TEMPLATE-company-role" / "resume" / "tailoring.md"
+        if tpl.is_file():
+            tf.write_text(tpl.read_text(encoding="utf-8"), encoding="utf-8")
+            _tpl = [f for f in check_dossier(tmp) if f.rule == "R11" and "declaration found" in f.detail]
+            h.assert_true("[R11] the shipped TEMPLATE tailoring.md carries the labels R11 reads",
+                          not _tpl, "Template and gate disagree on the Cards IN/OUT labels again.")
+
     # R9: the résumé enters the gate. Inject a retired employer string into a copy of
     # the fixture's resume.html and assert R9 fires. This is the guard that would catch
     # a retired employer name shipping logged-but-unexecuted.
@@ -2124,17 +2267,54 @@ def selftest() -> int:
         #    This proves source_belongs_to actually resolves an owner rather than the
         #    ownership check being vacuously strict.
         ("R1", "a verbatim quote from the person's OWN stored source is NOT flagged",
-         '> Hi Jordan, you said "Loved your talk on design systems" and that means a lot '
+         '> Hi Jordan, you said "Loved your talk on internal tooling" and that means a lot '
          'coming from you.'),
         # 3. An em-dash inside a SENT LOG record. A record is a note to you, not copy
         #    for a recipient, so the voice rules do not apply to it. Collapsing that
         #    distinction puts real dossiers red during a build for no honesty reason.
         ("R5", "an em-dash inside a SENT LOG record is NOT flagged as sendable copy",
-         '> **SENT LOG (2024-01-02):** Sent the note — invite pending, no InMail spent.'),
+         '> **SENT LOG (2024-01-02):** Sent the note \u2014 invite pending, no InMail spent.'),
     ]
     for rule, name, good in ownership_negatives:
         with tempfile.TemporaryDirectory() as td:
             h.refuse(rule, name, check_dossier(_poisoned(real, Path(td) / "dossier", good)))
+
+    # ── A MESSAGE THAT ALREADY LEFT IS HISTORY FOR THE COPY-QUALITY RULES. ──
+    # Both sides, on the same person: an unsent over-confident note AND DM must fire the voice
+    # register; with a dated, kind-scoped SENT line ("(connection note). DM: send after accept.")
+    # the NOTE goes quiet and the DM, which has not gone out, is still graded.
+    def _two_messages(tmp: Path, marker: str) -> list:
+        ref = tmp / "referrals.md"
+        t2 = ref.read_text(encoding="utf-8")
+        head = "### 2. Sam Okafor, Engineering Manager at Acme Corp"
+        i = t2.index(head)
+        j = t2.index("\n", i) + 1
+        block = ("**Connection note**\n> Hi Sam, just applied. That's exactly how I work.\n\n"
+                 "**Direct message (Use InMail: NO)**\n> Hi Sam, thanks for connecting.\n>\n"
+                 "> Your team plans the launch first. That's exactly how I work, and I applied.\n\n")
+        t2 = t2[:j] + (marker + "\n\n" if marker else "") + block + t2[j:]
+        ref.write_text(t2, encoding="utf-8")
+        return [f for f in check_dossier(tmp)
+                if f.rule == "R5" and "Sam" in f.where and "over-confidence" in f.detail]
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "dossier"
+        shutil.copytree(real, tmp)
+        hits = _two_messages(tmp, "")
+        h.assert_true("[R5] the voice register FIRES on an unsent over-confident note AND DM",
+                      any("note" in f.where.lower() for f in hits)
+                      and any("note" not in f.where.lower() for f in hits),
+                      f"got: {[f.where for f in hits]}")
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "dossier"
+        shutil.copytree(real, tmp)
+        hits = _two_messages(tmp, "SENT 2024-01-02 (connection note, by you). DM: send after accept.")
+        note_hits = [f for f in hits if "connection note" in f.where.lower()]
+        dm_hits = [f for f in hits if "connection note" not in f.where.lower()]
+        h.assert_true("[R5-neg] a connection note that already LEFT is not graded for voice (history)",
+                      not note_hits, f"still graded: {[f.where for f in note_hits]}")
+        h.assert_true("[R5] ...and the DM on the same person, which has NOT gone out, still is",
+                      bool(dm_hits), "the SENT line's 'DM: send after accept' must not read as a sent DM")
 
     # ── R12 NEGATIVES: the anchor is the whole point, so it is tested from both sides. ──
     # A blanket ban on "developer tools" would red every honest dossier applying to an
@@ -2477,8 +2657,8 @@ def main() -> int:
             if len(parts) < 3:
                 return w[:70]
             who = " · ".join(parts[1:-1])
-            who = re.sub(r"^\s*\d+\s*[.)·\-–—]\s*", "", who)     # drop the ordinal
-            who = re.split(r"[—–(;\"]", who)[0].strip()[:34]      # drop the title tail
+            who = re.sub(r"^\s*\d+\s*[.)·\-\u2013\u2014]\s*", "", who)     # drop the ordinal
+            who = re.split(r"[\u2014\u2013(;\"]", who)[0].strip()[:34]      # drop the title tail
             return f"{parts[0]} · {who or parts[1]} · {parts[-1]}"
         detail = " ; ".join(f"{_short(w)} [{m} silences {'+'.join(r)}]"
                             for w, m, r in suppressed[:6])

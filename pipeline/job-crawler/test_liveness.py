@@ -12,7 +12,7 @@ import liveness as L
 
 # A realistic single-line tracker row (single-quotes only inside values, like the real file).
 SAMPLE_ROW = (
-    '  {co:"Northwind", role:"Staff Brand Designer", loc:"SF, CA, US", comp:"—", compK:null, '
+    '  {co:"Northwind", role:"Staff Brand Designer", loc:"SF, CA, US", comp:"\u2014", compK:null, '
     'status:"lead", fit:"watch", spon:"ask", posted:"2026-06-29", source:"crawl-jobs", '
     'jd:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", '
     'apply:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", folder:null, refs:0, '
@@ -40,7 +40,7 @@ MINI_TRACKER = (
     'apply:"https://jobs.ashbyhq.com/alpha/1", link:"https://jobs.ashbyhq.com/alpha/1", notes:"x"},\n'
     '  {co:"Beta", role:"PD", loc:"NY", status:"applied", jd:null, apply:null, '
     'link:"https://x.com/b", notes:"y"},\n'
-    '  {co:"Gamma", role:"Brand", loc:"—", status:"lead", jd:null, apply:null, notes:"z"}\n'
+    '  {co:"Delta", role:"Brand", loc:"\u2014", status:"lead", jd:null, apply:null, notes:"z"}\n'
     "];\n"
     "\n"
     "const NETWORK = [\n"
@@ -130,53 +130,53 @@ class TestClassify(unittest.TestCase):
 
 class TestResolution(unittest.TestCase):
     def test_detect_ats(self):
-        self.assertEqual(L.detect_ats("https://boards.greenhouse.io/figma/jobs/1"), "greenhouse")
-        self.assertEqual(L.detect_ats("https://jobs.ashbyhq.com/ramp/uuid"), "ashby")
+        self.assertEqual(L.detect_ats("https://boards.greenhouse.io/globex/jobs/1"), "greenhouse")
+        self.assertEqual(L.detect_ats("https://jobs.ashbyhq.com/initech/uuid"), "ashby")
         self.assertEqual(L.detect_ats("https://jobs.lever.co/foo/uuid"), "lever")
-        self.assertEqual(L.detect_ats("https://stripe.com/jobs/search?gh_jid=7144975"), "greenhouse")
+        self.assertEqual(L.detect_ats("https://acme.example.com/jobs/search?gh_jid=1234567"), "greenhouse")
         self.assertIsNone(L.detect_ats("https://careers.example.com/founding-engineer"))
 
     def test_job_id_from_url(self):
         self.assertEqual(
-            L.job_id_from_url("https://job-boards.greenhouse.io/northwind/jobs/5986638004", "greenhouse"),
-            "5986638004")
+            L.job_id_from_url("https://job-boards.greenhouse.io/northwind/jobs/1000000001", "greenhouse"),
+            "1000000001")
         self.assertEqual(
-            L.job_id_from_url("https://stripe.com/jobs/search?gh_jid=7144975", "greenhouse"), "7144975")
+            L.job_id_from_url("https://acme.example.com/jobs/search?gh_jid=1234567", "greenhouse"), "1234567")
         self.assertEqual(
-            L.job_id_from_url("https://jobs.ashbyhq.com/supabase/4A85C92B-1D0D-43EE-8DBC-0E45A58BE208",
+            L.job_id_from_url("https://jobs.ashbyhq.com/northwind/0A0B0C0D-1111-4222-8333-444455556666",
                               "ashby"),
-            "4a85c92b-1d0d-43ee-8dbc-0e45a58be208")
+            "0a0b0c0d-1111-4222-8333-444455556666")
 
     def test_slug_from_url(self):
         self.assertEqual(
             L.slug_from_url("https://job-boards.greenhouse.io/northwind/jobs/1", "greenhouse"), "northwind")
         self.assertEqual(
-            L.slug_from_url("https://jobs.ashbyhq.com/supabase/uuid", "ashby"), "supabase")
+            L.slug_from_url("https://jobs.ashbyhq.com/northwind/uuid", "ashby"), "northwind")
         self.assertEqual(L.slug_from_url("https://jobs.lever.co/foo/uuid", "lever"), "foo")
-        self.assertIsNone(L.slug_from_url("https://stripe.com/jobs/search?gh_jid=7144975", "greenhouse"))
+        self.assertIsNone(L.slug_from_url("https://acme.example.com/jobs/search?gh_jid=1234567", "greenhouse"))
 
     def test_resolve_target_slug_in_path(self):
         self.assertEqual(
-            L.resolve_target("https://job-boards.greenhouse.io/northwind/jobs/5986638004"),
-            ("greenhouse", "northwind", "5986638004"))
+            L.resolve_target("https://job-boards.greenhouse.io/northwind/jobs/1000000001"),
+            ("greenhouse", "northwind", "1000000001"))
 
     def test_resolve_target_company_hosted_needs_boards_map(self):
-        url = "https://stripe.com/jobs/search?gh_jid=7144975"
+        url = "https://acme.example.com/jobs/search?gh_jid=1234567"
         # without a boards map, the slug is unknowable -> None -> HTTP fallback
         self.assertIsNone(L.resolve_target(url))
-        # with the company + boards map, it resolves to the stripe board
-        bmap = {"stripe": ("greenhouse", "stripe")}
-        self.assertEqual(L.resolve_target(url, company="Stripe", boards_map=bmap),
-                         ("greenhouse", "stripe", "7144975"))
+        # with the company + boards map, it resolves to the acme board
+        bmap = {"acme": ("greenhouse", "acme")}
+        self.assertEqual(L.resolve_target(url, company="Acme", boards_map=bmap),
+                         ("greenhouse", "acme", "1234567"))
 
     def test_board_lookup_ignores_noise_company(self):
-        bmap = {"stripe": ("greenhouse", "stripe"), "ramp": ("ashby", "ramp")}
-        self.assertEqual(L._board_lookup("Stripe", bmap), ("greenhouse", "stripe"))
-        self.assertIsNone(L._board_lookup("Physical-AGI (via Impax)", bmap))
+        bmap = {"acme": ("greenhouse", "acme"), "initech": ("ashby", "initech")}
+        self.assertEqual(L._board_lookup("Acme", bmap), ("greenhouse", "acme"))
+        self.assertIsNone(L._board_lookup("Hooli (via Umbrella Staffing)", bmap))
 
     def test_has_job_id_and_index(self):
         self.assertTrue(L._has_job_id("https://x.com/jobs/12345"))
-        self.assertTrue(L._has_job_id("https://jobs.ashbyhq.com/a/4a85c92b-1d0d-43ee-8dbc-0e45a58be208"))
+        self.assertTrue(L._has_job_id("https://jobs.ashbyhq.com/a/0a0b0c0d-1111-4222-8333-444455556666"))
         self.assertFalse(L._has_job_id("https://x.com/careers"))
         self.assertTrue(L._looks_like_index("https://x.com/careers"))
         self.assertTrue(L._looks_like_index("https://x.com/"))
@@ -217,7 +217,7 @@ class TestTrackerWriter(unittest.TestCase):
     def test_parse_applications(self):
         rows = L.parse_applications(MINI_TRACKER)
         self.assertEqual(len(rows), 3)
-        self.assertEqual([r["co"] for r in rows], ["Alpha", "Beta", "Gamma"])
+        self.assertEqual([r["co"] for r in rows], ["Alpha", "Beta", "Delta"])
         self.assertEqual(rows[0]["url"], "https://jobs.ashbyhq.com/alpha/1")
         self.assertEqual(rows[1]["url"], "https://x.com/b")          # apply/jd null -> link
         self.assertIsNone(rows[2]["url"])                            # no apply/jd/link at all

@@ -15,14 +15,13 @@ diary if you ever need to see what changed and when.
 
 ## Current status
 
-- **My status:** [Pick the one that's actually true, and be specific: "U.S. Citizen" /
-  "Permanent Resident (Green Card)" / "H-1B, valid through <date>, employer-sponsored" /
-  "F-1 student, on OPT through <date>" / "F-1 student, on STEM-OPT extension through <date>" /
-  "TN visa" / "Other work-authorized status: <describe>" / anything else that's actually true.]
+- **My status:** [In your own words, and be specific: for example "U.S. Citizen", "Permanent
+  Resident (Green Card)", or the name of your visa or work permit with its end date
+  ("<status name>, valid through <date>"). Whatever is actually true.]
 - **Do I need an employer to sponsor a visa, ever, for this to work?** [Yes / No / Not right now but
   will eventually / Unsure (if unsure, that's worth resolving before you apply anywhere, not after).]
-- **Any runway or deadline that matters?** [e.g. "OPT expires <date>, would need a visa transfer or
-  extension after that", or "No expiration, no constraint" if that's your situation.]
+- **Any runway or deadline that matters?** [e.g. "My work permit ends <date>, I would need an
+  extension or a new status after that", or "No expiration, no constraint" if that's your situation.]
 
 ## What this means for the engine (hard filters)
 

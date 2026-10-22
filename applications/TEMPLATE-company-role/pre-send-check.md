@@ -4,7 +4,8 @@ Six items. Each must be genuinely done, not just checked, before anything in thi
 `scripts/verify_claims.py` (rule R8) enforces that this file exists and every item is marked.
 
 - [ ] **FULL-TEXT**: the primary posting was read in full from its real source, not a summary or
-  an aggregator's paraphrase.
+  an aggregator's paraphrase, and its full text is stored in this dossier's `jd-<slug>.md` (one
+  copy; it does not also need to sit under `sources/`).
 - [ ] **MEDIA**: every attached image/diagram was actually looked at, because a requirement can
   live only in an image.
 - [ ] **NO-ANSWERED-QUESTIONS**: outbound messages don't ask a contact anything their own public

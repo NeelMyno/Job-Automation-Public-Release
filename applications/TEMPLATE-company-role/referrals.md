@@ -23,7 +23,7 @@ Hi [Name],
 
 [paragraph 1: an observation about THEIR own work, first, sourced in sources/]
 
-[paragraph 2: your matching real work; the give = your portfolio home]
+[paragraph 2: your matching real work; the give = a link to your own work (site, repo, profile, or portfolio)]
 
 [the ask: always present, reshaped for a decision-node if they directly own this hire]
 

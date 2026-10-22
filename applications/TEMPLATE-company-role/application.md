@@ -33,5 +33,6 @@ assumed. Anything sensitive (especially work-authorization) quoted CHARACTER-FOR
 
 ## The single next action
 
-[mirrors README, or once actually sent: "✅ SUBMITTED YYYY-MM-DD HH:MM: <the on-screen
-confirmation evidence>"]
+[mirrors README. Once you have actually submitted, the agent adds a heading
+`## SUBMITTED YYYY-MM-DD` (a local time with its zone may follow) with the on-screen confirmation
+evidence under it; shape owned by `.claude/rules/records-format.md`]

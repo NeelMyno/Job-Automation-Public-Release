@@ -23,6 +23,7 @@ by taking the loaded filters `F` as an argument (include_titles, us_markers, loc
 so all title/geography knowledge stays in the one place, filters.yaml.
 """
 import json, re, html, urllib.request, urllib.error
+from http_util import read_url  # sibling module: gzip + retry on a cut-off read
 from datetime import datetime, timezone
 
 ALGOLIA = "https://hn.algolia.com/api/v1"
@@ -32,7 +33,7 @@ UA = "Mozilla/5.0 (personal job-search crawler; see pipeline/job-crawler/README.
 # Header delimiters seen in real Who's-Hiring posts: pipes, bullets, and SPACED dashes
 # (em/en/hyphen). Spaced-only for the hyphen so intra-word hyphens survive ("Full-Stack",
 # "on-site", "Top-of-Funnel", "150-250k").
-_DELIM = re.compile(r"\s*[|•·]\s*|\s+[—–]\s+|\s+-\s+")
+_DELIM = re.compile(r"\s*[|•·]\s*|\s+[\u2014\u2013]\s+|\s+-\s+")
 _HREF = re.compile(r'href="([^"]+)"')
 _REMOTE = re.compile(r"\bremote\b", re.I)
 _ONSITE = re.compile(r"\b(on-?site|in-?person)\b", re.I)
@@ -44,8 +45,7 @@ _CO_SUFFIX = {"inc", "inc.", "llc", "ltd", "co", "co.", "corp", "corp.",
 
 def _get(url, timeout=45):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8", "replace"))
+    return json.loads(read_url(req, timeout))
 
 
 def _clean(s):
@@ -128,16 +128,42 @@ def _title_re(term):
     return re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"s?(?![a-z0-9])", re.I)
 
 
+# A role token is a short noun phrase ("Senior Data Analyst", "Data Analyst at Acme"). A header
+# token that reads as a sentence ("we are looking for candidates that are excited ...") is prose
+# that happens to contain a title word, never a job title.
+_SENTENCE_START = re.compile(r"^(we|we're|were|our|i|i'm|you|you'll|your|if|join|looking|come|"
+                             r"are|is|this|that|they|it's|there|help|want|do)\b", re.I)
+_SENTENCE_WORD = re.compile(r"\b(we|we're|our|you|your|are|is|looking for|that|who|which|excited|"
+                            r"passionate|want|will)\b", re.I)
+TITLE_MAX_WORDS = 10
+TITLE_MAX_CHARS = 80
+
+
+def sentence_like(token):
+    """True when a header token reads as a sentence rather than a job title."""
+    t = (token or "").strip()
+    words = t.split()
+    if len(words) > TITLE_MAX_WORDS or len(t) > TITLE_MAX_CHARS:
+        return True
+    if t.endswith(("...", "\u2026", "!", "?")) or re.search(r"[.!?]\s+\S", t):
+        return True
+    if _SENTENCE_START.search(t):
+        return True
+    return len(_SENTENCE_WORD.findall(t)) >= 2
+
+
 def _match_title(header, tokens, F):
     """Does the header announce a role you want? Returns (matched_term, role_token) or (None,None).
-    Matches against the header (where the role lives), word-boundary, so a company whose name
-    happens to contain one of your title terms, or a body that merely mentions the word once,
-    does NOT trigger a match."""
+    Matches against the header tokens (where the role lives), word-boundary, so a company whose
+    name happens to contain one of your title terms, or a body that merely mentions the word once,
+    does NOT trigger a match. A token that reads as a sentence is never taken as the role, and a
+    header whose only match is inside a sentence is dropped (conservative: no clean title, no row)."""
     for it in F.get("include_titles", []):
         rx = _title_re(it)
         if rx.search(header):
-            role_token = next((t for t in tokens if rx.search(t)), None)
-            return it, role_token
+            role_token = next((t for t in tokens if rx.search(t) and not sentence_like(t)), None)
+            if role_token:
+                return it, role_token
     return None, None
 
 
@@ -223,7 +249,7 @@ def parse_comment(c, F):
     url = _first_apply_url(raw) or HN_ITEM.format(cid)
     remote = True if _REMOTE.search(header) else (False if _ONSITE.search(header) else None)
     return dict(
-        company=company,                                   # "" -> crawl.py shows "—"
+        company=company,                                   # "" -> crawl.py shows "n/a"
         title=role_token or matched,                       # the role line, for display + the gate
         location=location,                                 # "" -> unknown -> location gate keeps it
         url=url,

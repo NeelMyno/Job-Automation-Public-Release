@@ -17,7 +17,9 @@ rendered and content-clean.
 What it checks, per dossier:
   1. A cover-letter PDF is PRESENT.                              else -> BLOCK
   2. The cover SOURCE note passes the content linter              else -> BLOCK
-     (voice_check.py, pluggable; swap in your own).
+     (voice_check.py exit 0: dashes, over-confidence, an unasked work-authorization mention, your
+     never-say list. Pluggable; swap in your own. How the letter SOUNDS is
+     knowledge-base/17-writing.md's read-aloud, not this gate).
   3. The cover PDF is not STALE vs the note (PDF mtime >= note).  else -> BLOCK
 
 Exit codes:  0 = ready to fill · 2 = BLOCKED (one or more failures) · 3 = usage error.
@@ -56,13 +58,13 @@ def find_cover_note(cover_dir: Path):
 
 
 def sendable_body(text: str) -> str:
-    """The cover note's SENDABLE body is the text between the first pair of `---`
-    fences (repo convention). The meta tables and JD-to-line map after them are
-    internal doc, not shipped copy, so they are not voice-checked (em-dashes and
-    `⌘K` legitimately appear there). If there are no fences, the whole text is the
-    body (e.g. the synthetic selftest notes)."""
-    parts = text.split("\n---\n")
-    return parts[1].strip() if len(parts) >= 3 else text.strip()
+    """The cover note's SENDABLE body, read by voice_check.sendable_prose() itself, so this gate
+    and `voice_check.py --sendable` always agree on what the letter is: the text after the first
+    `---` fence, minus notes sections that open with a heading, tables and metadata lines. No
+    fences means the whole text is the body (e.g. the synthetic selftest notes)."""
+    sys.path.insert(0, str(VOICE_CHECK.parent))
+    import voice_check
+    return voice_check.sendable_prose(text).strip()
 
 
 def voice_clean(path: Path) -> bool:
@@ -149,9 +151,23 @@ def selftest() -> int:
     # Content designed to trip the content linter (an em-dash, here) rather than model
     # every possible failure: the point is exercising the "linter says no" path.
     stale_note = (
-        "At my last company I owned the onboarding flow end to end — research, design, "
-        "and the shipped implementation — and measured a drop in first-week support "
+        "At my last company I owned the onboarding flow end to end \u2014 research, build, "
+        "and the shipped implementation \u2014 and measured a drop in first-week support "
         "tickets after it launched."
+    )
+    # A second stale note that fails a different kept family: over-confidence plus a work-authorization
+    # mention nobody asked for. A fixture that only ever trips the dash rule would not notice the
+    # linter losing every other family.
+    stale_note_2 = (
+        "Your team ships the report before the quarter closes. That's exactly how I work. "
+        "I'm authorized to work in the US and can start right away."
+    )
+    # A template-shaped note (S6): a clean letter between the fences, then notes sections with a
+    # markdown table whose `|---|---|` separator must never read as a double dash.
+    fenced_note = (
+        "# Cover note: Acme\n\nBuilt from jd-acme.md.\n\n---\nHi,\n\n" + clean_note +
+        "\n\nJordan\n---\n\n## Why these specifics\n\n| Line | JD pillar | Source |\n"
+        "|---|---|---|\n| a | b | c |\n"
     )
     ok = True
     with tempfile.TemporaryDirectory() as td:
@@ -179,7 +195,11 @@ def selftest() -> int:
             ("clean bundle",             mk("clean", pdf=True, note=clean_note),   True),
             ("absent cover",             mk("absent", pdf=False, note=None),       False),
             ("stale / off-voice cover",  mk("stale", pdf=True, note=stale_note),   False),
+            ("over-confident cover with an unasked work-auth line",
+                                         mk("stale2", pdf=True, note=stale_note_2), False),
             ("PDF older than note",      mk("older", pdf=True, note=clean_note, pdf_older=True), False),
+            ("template-shaped note with a notes table (S6)",
+                                         mk("fenced", pdf=True, note=fenced_note), True),
         ]
         for label, dossier, want_ready in cases:
             fails = check_dossier(dossier)
@@ -191,6 +211,15 @@ def selftest() -> int:
             mark = "ok " if good else "FAIL"
             print(f"  [{mark}] got {got}, want {verdict}: {label}"
                   + ("" if good else f"  <-- fails={fails}"))
+        # Agreement (S6): this gate and `voice_check.py --sendable` read the same note the same way.
+        import subprocess as _sp
+        for name in ("fenced", "stale", "clean"):
+            note = root / name / "cover-letter" / "cover-note.md"
+            vc = _sp.run([sys.executable, str(VOICE_CHECK), "--sendable", str(note)],
+                         capture_output=True, text=True).returncode == 0
+            agree = vc == voice_clean(note)
+            ok = ok and agree
+            print(f"  [{'ok ' if agree else 'FAIL'}] fill_ready and voice_check --sendable agree on {name}")
     print("fill_ready selftest", "OK" if ok else "FAILED")
     return 0 if ok else 1
 

@@ -1,10 +1,10 @@
 <!--
 This file isn't one of the four required (★) files in INDEX.md, but skip it and every cover letter,
 outreach note, and interview answer this engine writes will come out competent and generic instead of
-like you. It feeds voice and tone, not facts: the facts live in 04-experience-detail.md and
-07-master-resume.md. CLAUDE.md §11 says it plainly: human voice comes from specific true detail only
-you have, and when it's missing, that's a reason to write it down here, never to invent it. Delete
-each comment block below as you fill in the section above it.
+like you. It feeds the story and the raw material, not facts: the facts live in 04-experience-detail.md and
+07-master-resume.md. How the writing sounds is owned by knowledge-base/17-writing.md; this file is
+the true story it draws on. When a specific true detail is missing, that's a reason to write it down
+here, never to invent it. Delete each comment block below as you fill in the section above it.
 -->
 
 # Career Narrative
@@ -45,27 +45,17 @@ one line short enough to stand alone as a pull-quote.
 One reusable anecdote, specific enough that nobody else could tell it: the real moment that explains
 why you do this work. This has to come from you. An agent must never invent a memory, a mentor, or a
 turning-point detail to make copy sound more human: a fabricated anecdote on a real profile is a lie,
-not a writing technique (CLAUDE.md §11: floating abstraction gets fixed with a real detail, never a
+not a writing technique (CLAUDE.md §0.1: a vague line gets fixed with a real detail, never a
 manufactured one). If you don't have one ready, leave this blank rather than let an agent draft a
 placeholder and hope you don't notice it's fiction.
 -->
 
 [Write your own here, or leave blank until you do.]
 
-## Your own raw voice: real specifics
+## Your own raw voice
 
-<!--
-CLAUDE.md §11 asks for this directly: 5-10 real, specific, quotable memories or opinions, written by
-you. A phrase you actually use. An opinion you've argued for out loud. A pet peeve about your own
-field. None of it needs to be impressive; it needs to be true and specific enough that no generic
-brief could have produced it. This is the single highest-leverage section in this file: writing that
-could describe anyone is the main tell that a machine wrote it, and the fix isn't better adjectives,
-it's a real detail only you have. Keep adding to this over time; it's never "finished."
--->
-
-- [A real, specific detail, opinion, or phrase]
-- [Another one]
-- [Another one]
+Moved. Your voice samples and the real phrases, opinions and pet peeves only you have now live in
+`knowledge-base/17-writing.md` ("Your own voice samples"), the one owner of how your writing sounds.
 
 ## Identity: how do you think of yourself
 
@@ -106,5 +96,6 @@ index into that reservoir instead of a second copy that quietly drifts out of sy
 ## Related
 
 - `knowledge-base/01-profile-and-identity.md`: the positioning identity this file's self-concept section deepens
-- `knowledge-base/08-application-playbook.md`: the methodology that pulls this voice into cover letters
+- `knowledge-base/17-writing.md`: the one owner of how your writing sounds, including your voice samples
+- `knowledge-base/08-application-playbook.md`: the methodology that pulls this material into cover letters
 - `knowledge-base/15-interview-story-bank.md`: the full STAR-format stories this file only points to

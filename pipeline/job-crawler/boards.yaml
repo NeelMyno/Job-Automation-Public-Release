@@ -1,30 +1,39 @@
-# Target companies. THIS is the file you edit to point the crawler at your own target list:
-# add one line per company, in any industry. A wrong slug is harmless: the crawler skips it and
-# lists it under `errors` in its JSON output, so you'll see the fix to make.
+# Company job boards the crawler reads, one line per company, any industry.
 #
-# How to find a company's slug: open its careers page and read the URL.
-#   boards.greenhouse.io/<slug>              -> ats: greenhouse
+# This list starts EMPTY on purpose, and you don't have to fill it by hand. The crawler also reads
+# free job APIs (sources.yaml) and Hacker News, so it finds real jobs even while this is empty.
+# To add company boards, let discovery do it (each board is checked live before it is added):
+#
+#   python3 pipeline/job-crawler/discover.py --sweep              # harvest thousands of public boards
+#                                                                 # from the Common Crawl index and keep
+#                                                                 # those hiring for your filters.yaml titles
+#   python3 pipeline/job-crawler/discover.py --company "Acme" "Globex"   # guess + check named companies
+#   python3 pipeline/job-crawler/discover.py --urls -  < urls.txt        # any job/careers URLs, e.g. from
+#                                                                        # a web search (see --queries)
+#
+# Rows discovery adds carry `source: discover:<mode>` and an `added:` date. Rows you write yourself
+# need only company, ats and slug, and discovery never edits or removes them. Keep `boards:` as the
+# LAST key in this file so discovery can append below it.
+#
+# Adding a board by hand: open the company's careers page and read the URL.
+#   boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>  -> ats: greenhouse
 #   jobs.lever.co/<slug>                     -> ats: lever
 #   jobs.ashbyhq.com/<slug>                  -> ats: ashby
 #   jobs.smartrecruiters.com/<slug>          -> ats: smartrecruiters   (slug is case-sensitive)
 #   apply.workable.com/<slug>                -> ats: workable
 #   <tenant>.<host>.myworkdayjobs.com/<site> -> ats: workday, slug = "tenant/host/site"
 #     e.g. acme.wd5.myworkdayjobs.com/External_Careers -> slug: "acme/wd5/External_Careers"
+#   e.g.  - {company: "Acme", ats: greenhouse, slug: "acme"}
+# Or paste the URL into `discover.py --urls -`, which works the slug out and checks it for you.
+# A wrong slug is harmless: the crawler skips it and lists it under `errors` in its JSON output.
 #
-# Each Greenhouse/Lever/Ashby/SmartRecruiters/Workable endpoint returns a company's ENTIRE job
-# board; filters.yaml decides which of those postings actually match what you're looking for, so
-# you can list any company here regardless of what role you're hunting. Workday is the one
-# exception: its API has no "list everything" mode, so it's queried with your own filters.yaml
-# `include_titles` directly (see crawl.py's from_workday) -- list it here the same way, you just
-# won't see non-matching titles reported under `errors` the way a bad slug would be.
+# Each Greenhouse/Lever/Ashby/SmartRecruiters/Workable board returns a company's ENTIRE job board;
+# filters.yaml decides which postings match what you're looking for. Workday is the exception: its
+# API has no "list everything" mode, so it's queried with your filters.yaml `include_titles`
+# directly (see crawl.py's from_workday).
 #
 # Note: Workday/iCIMS-style enterprise ATSes commonly put the APPLICATION form behind a login for
-# that specific company's careers site, separate from this crawler, which only reads their public
-# job list. Discovering a posting here never requires an account; applying to it might.
+# that company's careers site. This crawler only reads the public job list; finding a posting
+# never requires an account, applying to it might.
 
 boards:
-  - {company: "Example Co", ats: greenhouse, slug: "example-slug"}
-  - {company: "Example Co (SmartRecruiters)", ats: smartrecruiters, slug: "ExampleCo"}
-  - {company: "Example Co (Workable)", ats: workable, slug: "example-co"}
-  - {company: "Example Co (Workday)", ats: workday, slug: "examplecoinc/wd1/External_Careers"}
-  # Add your own companies below, then delete the example lines above.

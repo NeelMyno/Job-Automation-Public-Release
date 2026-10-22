@@ -231,6 +231,10 @@
 <script>
 const UPDATED = "2026-01-01";  // bump this whenever you edit the rows below (CLAUDE.md §9)
 
+// Every row has one shape: .claude/rules/records-format.md (sections 1, 2 and 4).
+// A submitted row carries applied:"YYYY-MM-DD" | "on or before YYYY-MM-DD" | "unknown" | "none on record".
+// A NETWORK row for anyone the sent-ledger shows a message to carries fu:"<me, them, rest or closed>|<YYYY-MM-DD or ?>|<what>".
+// Check after every edit: python3 scripts/records_check.py && python3 scripts/tracker_check.py
 const APPLICATIONS = [
 ];
 
@@ -259,17 +263,17 @@ const el=s=>document.querySelector(s);
 const esc=s=>(s==null?"":String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const dot=(c,live)=>`<span class="dot${live?' live':''}" style="background:${c}"></span>`;
 const pill=(m,k)=>{const s=m[k]||{label:k,c:"var(--status-neutral)"}; return `<span class="pill">${dot(s.c,s.live)}${esc(s.label)}</span>`;};
-const dash='<span class="none">&mdash;</span>';
-// A missing value renders as a no-data glyph, never a fake zero, never a blank that reads as data.
-// Legacy rows carry a literal em-dash string; treat it as missing too.
-const val=v=>(v===null||v===undefined||v===""||v==="—")?dash:esc(v);
+const dash='<span class="none">n/a</span>';
+// A missing value renders as "n/a", never a fake zero, never a blank that reads as data.
+// Legacy rows carry a literal dash glyph as the value; treat it as missing too.
+const val=v=>(v===null||v===undefined||v===""||v==="\u2014")?dash:esc(v);
 // A column shows the FACT; annotations are provenance and live in the drawer.
-// comp/posted carry rich strings ("Search found $238K-$265K printed ...",
-// "live 2026-07-23"), so pull the money band and the date for the columns.
+// comp/posted carry rich strings (e.g. "$90K-$110K per the posting, via search",
+// "live 2099-01-31"), so pull the money band and the date for the columns.
 function compBand(v){
   if(v==null) return "";
   const s=String(v).trim();
-  const m=s.match(/~?\$?\s*[\d.,]+\s*[KkMm]?(?:\s*[-–—]\s*\$?\s*[\d.,]+\s*[KkMm]?)?(?:\s*\+\s*[A-Za-z]+)?/);
+  const m=s.match(/~?\$?\s*[\d.,]+\s*[KkMm]?(?:\s*[-\u2013\u2014]\s*\$?\s*[\d.,]+\s*[KkMm]?)?(?:\s*\+\s*[A-Za-z]+)?/);
   if(m && /\d/.test(m[0])) return m[0].replace(/\s+/g,"");
   return s.split(/\s*[(,]/)[0].split(/\s+/).slice(0,2).join(" ");
 }
@@ -358,7 +362,7 @@ function appRow(r,i){
     (!r.jd&&!r.apply&&r.link)?`<a href="${esc(r.link)}" target="_blank" rel="noopener">Open</a>`:"",
   ].filter(Boolean).join("");
   const spon = r.spon==="no"?"Posting says it will not sponsor"
-             : r.spon==="yes"?"Files H-1Bs"
+             : r.spon==="yes"?"Posting says it sponsors"
              : (r.spon&&r.spon!=="unknown")?esc(r.spon)
              : "Not stated in the posting";
   return `
@@ -398,7 +402,7 @@ function netRow(r,i){
   const company = r.company || "";
   const howMet  = r.howMet || r.event || "";
   const link    = r.link ? (r.link.startsWith("http")?r.link:"https://"+r.link) : "";
-  const c=(r.contact&&r.contact!=="—")?String(r.contact):"";
+  const c=(r.contact&&r.contact!=="\u2014")?String(r.contact):"";
   const contactHtml = c
     ? c.split(/\s*·\s*/).map(p=>{
         const t=p.trim();

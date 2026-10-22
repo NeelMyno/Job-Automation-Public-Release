@@ -1,6 +1,6 @@
 # Tailoring record: EXAMPLE-fixture-selftest (SELFTEST FIXTURE)
 
-**Cards IN:** the design-system-and-code card (documented in the cover note)
+**Cards IN:** the internal-tooling card (documented in the cover note)
 
 **Cards OUT:** nothing declared out for this fixture
 

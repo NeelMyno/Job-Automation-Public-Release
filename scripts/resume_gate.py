@@ -12,9 +12,10 @@ WHAT THIS CHECKS
 ----------------
   1. PAGES == 1.  A second page is a hard fail.
   2. FILL >= 88%. The last line of text must reach at least 88% of the page height. A near-miss
-     (within a few points of the floor) is reported as an ADVISORY rather than a hard failure;
-     the résumé is honestly complete and one page, and closing the last bit of space is a content
-     decision, not something this gate should force. Well below the floor still hard-fails.
+     (within a few points of the floor) is an ADVISORY. Further below the floor is an OPEN ITEM,
+     not a failure: a short résumé is often simply true, and the fix is never padding. The user
+     decides (add real material, adjust the layout, or record the short page as accepted in the
+     canonical-facts block with an `accept: short-page` line). See resume/README.md, the owner.
   3. EVERY EMPLOYMENT ENTRY IS PRESENT. Every employer listed under WORK EXPERIENCE in
      knowledge-base/07-master-resume.md must appear on the page, and the CURRENT one must sit
      beside a still-open date range ("Present") rather than only as a project credit.
@@ -31,6 +32,13 @@ or whether it is tailored to the target. It measures shape and one structural om
     python3 scripts/resume_gate.py                      # every résumé PDF in the repo
     python3 scripts/resume_gate.py <path-or-dossier>    # one file or one dossier
     python3 scripts/resume_gate.py --selftest            # self-contained, no real résumé required
+
+EXIT CODES
+----------
+  0  every résumé passes (advisories may be printed; they are not failures)
+  1  a hard failure: two pages, a missing employer, a retired claim, a wrong canonical fact
+  2  no résumé found to check
+  3  no hard failure, but at least one OPEN ITEM (a page well short of full) waits on the user
 """
 from __future__ import annotations
 
@@ -46,15 +54,19 @@ MIN_FILL = 88.0          # percent of page height the last line of text must rea
 # rather than a hard failure: the résumé is honestly complete and one page, and closing the last
 # bit of blank space is a content decision (a genuine extra bullet, or a layout tweak), not
 # something a mechanical gate should force by itself. A gate that hard-fails a one-line near-miss
-# trains people to stop reading it. A SEVERE under-fill (well below the floor) still hard-fails,
-# since that much empty space usually means real content went missing, not just a short last line.
-FILL_ADVISORY_MARGIN = 6.0   # within this many points of the floor is advisory; more is a hard fail
+# trains people to stop reading it. Further below the floor is an OPEN ITEM (exit 3): the page may
+# be short because the real history is short, and the only honest fixes are real material, a
+# layout change, or the user's recorded acceptance. A dropped job is caught by the employment
+# rule directly, so under-fill no longer has to stand in for it as a hard failure.
+FILL_ADVISORY_MARGIN = 6.0   # within this many points of the floor is advisory; more is an open item
 MAX_PAGES = 1
 
 # "Listed as employment" is detected by PROXIMITY TO A CURRENT DATE RANGE, not by section order:
 # a cut-at-the-next-heading approach false-positives whenever Education happens to sit above
 # Experience in a given layout. A date range's position doesn't move with the layout.
 PRESENT = re.compile(r"\bPresent\b", re.I)
+# A hyphen, an en dash or an em dash, written as escapes so no dash character sits in this file.
+_DASHES = "[-\u2013\u2014]"
 
 
 @dataclass
@@ -62,6 +74,7 @@ class Finding:
     path: str
     problems: list[str]                                   # hard: the gate fails (exit 1)
     advisories: list[str] = field(default_factory=list)   # soft: reported, but the gate passes
+    open_items: list[str] = field(default_factory=list)   # the user decides (exit 3 if no hard fail)
 
     def is_fail(self) -> bool:
         return bool(self.problems)
@@ -70,39 +83,51 @@ class Finding:
 def _parse_required_employment(text: str) -> list[tuple[str, str, bool]]:
     """Parse [(employer, start_date, is_current), ...] out of a WORK EXPERIENCE section's text.
 
-    Only top-level `**Employer - Title** - dates` lines count; a blockquote or bullet line
-    doesn't, which is what keeps a footnote about a *retired* employer claim from being read back
-    in as a live requirement.
+    Two line shapes are accepted, because the KB-07 template writes one and older files the other:
+      `**Employer, Title** (Mon YYYY - Present)`     the shape knowledge-base/07 ships with
+      `**Employer - Title** - Mon YYYY - Present`    the older shape, still read
+    In the comma shape the employer is the text before the first comma; in the dash shape it is
+    the text before the first spaced dash. Only top-level bold lines count; a blockquote or bullet
+    line doesn't, which is what keeps a footnote about a *retired* employer claim from being read
+    back in as a live requirement.
     """
     m = re.search(r"^###\s+WORK EXPERIENCE\s*$(.*?)(?=^###\s|\Z)", text, re.M | re.S)
     if not m:
         return []
     out: list[tuple[str, str, bool]] = []
     for line in m.group(1).splitlines():
-        e = re.match(r"^\*\*([^*]+?)\*\*\s*[—-]\s*(.+)$", line.strip())
+        e = re.match(r"^\*\*([^*]+?)\*\*\s*(?:" + _DASHES + r"\s*(.+)|\((.+)\)\s*)$", line.strip())
         if not e:
             continue
-        employer = re.split(r"\s+[—-]\s+", e.group(1))[0]
+        head, dates = e.group(1), (e.group(2) or e.group(3) or "")
+        parts = re.split(r"\s+" + _DASHES + r"\s+", head)
+        employer = parts[0] if len(parts) > 1 else head.split(",")[0]
         employer = re.sub(r"\s*\([^)]*\)\s*$", "", employer).strip().rstrip(".")
-        start = re.match(r"\s*([A-Z][a-z]{2}\s+\d{4})", e.group(2))
+        start = re.match(r"\s*([A-Z][a-z]{2})[a-z]*\.?\s+(\d{4})", dates)
         if employer and start:
-            out.append((employer, start.group(1), bool(PRESENT.search(e.group(2)))))
+            out.append((employer, f"{start.group(1)} {start.group(2)}", bool(PRESENT.search(dates))))
     return out
 
 
-def _parse_canonical_facts(text: str) -> dict[str, list[tuple[str, str]]]:
-    """Parse {"never": [...], "number": [...], "exact": [...]} out of a ```canonical-facts``` block."""
-    out: dict[str, list[tuple[str, str]]] = {"never": [], "number": [], "exact": []}
-    m = re.search(r"```canonical-facts\n(.*?)```", text, re.S)
+def _parse_canonical_facts(text: str) -> dict:
+    """Parse {"never": [...], "number": [...], "exact": [...], "accept": [...]} out of a
+    ```canonical-facts``` block, plus "found": whether the block exists at all. An existing block
+    with no never:/number: lines is a valid fresh state (setup leaves both empty on purpose)."""
+    out: dict = {"never": [], "number": [], "exact": [], "accept": [], "found": False}
+    # The REAL block: its opening fence starts a line, and so does its closing fence. A prose or
+    # comment line that merely MENTIONS "```canonical-facts" (the template's own header explains the
+    # block that way) must never be read as the block, or every rule below it parses to nothing.
+    m = re.search(r"(?m)^[ \t]*```canonical-facts[ \t]*\n(.*?)^[ \t]*```", text, re.S)
     if not m:
         return out
+    out["found"] = True
     for line in m.group(1).splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         kind, _, rest = line.partition(":")
         kind = kind.strip()
-        if kind not in out:
+        if kind not in ("never", "number", "exact", "accept"):
             continue
         # Lines carry up to three pipe-separated fields: key | value | human note. Splitting on
         # only the first pipe swallows the note into the value and fails every résumé, including
@@ -128,12 +153,26 @@ def required_employment() -> list[tuple[str, str, bool]]:
         return []
 
 
-def canonical_facts() -> dict[str, list[tuple[str, str]]]:
+def canonical_facts() -> dict:
     """The production entry point: always reads the real knowledge-base file."""
     try:
         return _parse_canonical_facts((REPO / "knowledge-base" / "07-master-resume.md").read_text())
     except OSError:
-        return {"never": [], "number": [], "exact": []}
+        return _parse_canonical_facts("")
+
+
+_PLACEHOLDER = re.compile(r"^\[.*\]$")
+
+
+def accepted_short_floor(facts: dict) -> float | None:
+    """The lowest page fill the user has recorded as acceptable, from a canonical-facts line
+    `accept: short-page | <percent> | <why>`. None when no such decision is recorded."""
+    for key, val in facts.get("accept", []):
+        if key.lower() == "short-page":
+            m = re.match(r"\s*(\d+(?:\.\d+)?)\s*%?\s*$", val or "")
+            if m:
+                return float(m.group(1))
+    return None
 
 
 def _loose(token: str) -> str:
@@ -210,18 +249,36 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
     if pages > MAX_PAGES:
         problems.append(f"{pages} pages. A résumé is ONE page.")
 
+    open_items: list[str] = []
+    if facts is None:
+        facts = canonical_facts()
     if fill < MIN_FILL:
         blank = round((100 - fill) / 100 * 841.9)
         msg = (f"fills only {fill:.1f}% of the page, about {blank}pt left blank at the bottom "
                f"(floor is {MIN_FILL:.0f}%).")
+        accepted = accepted_short_floor(facts)
         if fill >= MIN_FILL - FILL_ADVISORY_MARGIN:
             # Basically a full page, about one line short: an advisory, not a gate failure.
             advisories.append(
                 msg + " ADVISORY (the résumé is complete and one page): closing this last bit "
                 "of space is a content decision, not something this gate should force."
             )
+        elif accepted is not None and fill >= accepted:
+            advisories.append(
+                msg + f" ACCEPTED: knowledge-base/07-master-resume.md records `accept: short-page "
+                f"| {accepted:g}`, so a page at or above {accepted:g}% is your decision, not a defect."
+            )
         else:
-            problems.append(msg + " Empty space is unused evidence; this is well below a full page.")
+            why = (f" That is below the {accepted:g}% you recorded as acceptable, so content may "
+                   f"have been cut from this copy." if accepted is not None else "")
+            open_items.append(
+                msg + why + " OPEN ITEM, your decision: never pad it with anything untrue. Options: "
+                "(1) add real material you left out (knowledge-base/04-experience-detail.md, "
+                "projects, coursework, certifications); (2) adjust the layout (type size, spacing) "
+                "within readable limits; (3) if the page is short because your history is short, "
+                "record that by adding `accept: short-page | <lowest fill % you accept> | <why>` to "
+                "the canonical-facts block. Rule owner: resume/README.md."
+            )
 
     # An empty required-employment list must fail LOUD, never read as "nothing wrong": a KB
     # heading rename or an unreadable file must never silently disable this whole check.
@@ -231,7 +288,8 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
         problems.append(
             "the required-employment list is EMPTY, so the employment check did not run. "
             "knowledge-base/07-master-resume.md must contain a line exactly `### WORK EXPERIENCE` "
-            "followed by `**Employer - Title** - Mon YYYY - …` entries. Fix the KB; do not trust "
+            "followed by `**Employer, Title** (Mon YYYY - Present)` entries (the older "
+            "`**Employer - Title** - Mon YYYY - Present` shape is read too). Fix the KB; do not trust "
             "this résumé until this line disappears."
         )
 
@@ -272,9 +330,9 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
 
     if text:
         _flat = re.sub(r"\s+", " ", text)
-        if facts is None:
-            facts = canonical_facts()
-        if not facts["never"] and not facts["number"]:
+        # A MISSING block fails; an existing block with no never:/number: lines is the honest
+        # fresh state (nothing retired or locked yet), so it is not a defect.
+        if not facts.get("found", True):
             problems.append(
                 "the canonical-facts block in knowledge-base/07-master-resume.md is missing or "
                 "unparseable, so none of your locked résumé decisions were checked. Restore the "
@@ -318,6 +376,13 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
         }
         for label, want in facts["exact"]:
             if not want:
+                continue
+            if _PLACEHOLDER.match(want):
+                problems.append(
+                    f"canonical-facts `exact: {label}` is still the template placeholder {want!r} "
+                    f"in knowledge-base/07-master-resume.md. Fill in the real value, or delete the "
+                    f"line if it does not apply to you."
+                )
                 continue
             if label == "title":
                 if not re.search(re.escape(want).replace(r"\ ", r"\s+"), _flat, re.I):
@@ -380,7 +445,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
                 )
 
     rel = str(pdf.relative_to(REPO)) if pdf.is_relative_to(REPO) else str(pdf)
-    return Finding(rel, problems, advisories) if (problems or advisories) else None
+    return Finding(rel, problems, advisories, open_items) if (problems or advisories or open_items) else None
 
 
 def _html_employment_problems(src: Path, required: list | None = None) -> list[str]:
@@ -447,7 +512,7 @@ def check_html(src: Path, required: list | None = None, facts: dict | None = Non
             pf = check_pdf(rendered, required=required, facts=facts)
         finally:
             rendered.unlink(missing_ok=True)
-        return Finding(rel, list(pf.problems), list(pf.advisories)) if pf else None
+        return Finding(rel, list(pf.problems), list(pf.advisories), list(pf.open_items)) if pf else None
     problems = _html_employment_problems(src, required=required)
     problems.append(
         "page-fill and page-count NOT verified: no HTML renderer (weasyprint) is available, so "
@@ -455,6 +520,34 @@ def check_html(src: Path, required: list | None = None, facts: dict | None = Non
         "PDF (resume/*.pdf), which measures the truth."
     )
     return Finding(rel, problems)
+
+
+_NOT_RESUME_DIRS = {"cover-letter", "cover", "correspondence", "sources", "calls", "fonts"}
+
+
+def is_resume_artifact(p: Path) -> bool:
+    """True for a résumé file, False for a cover letter or any other document in a dossier.
+
+    A dossier holds several PDFs; grading a cover letter as a résumé reports a missing employer on
+    a document that was never meant to list one. A file counts when it sits in a `resume/` folder
+    or carries "resume"/"cv" in its name, and never when it lives under a cover-letter (or other
+    non-résumé) folder or carries "cover" in its name.
+    """
+    parts = [x.lower() for x in p.parts[:-1]]
+    name = p.name.lower()
+    if any(x in _NOT_RESUME_DIRS for x in parts) or "cover" in name:
+        return False
+    return "resume" in parts or "resume" in name or bool(re.search(r"(?:^|[^a-z])cv(?:[^a-z]|$)", name))
+
+
+def _dir_targets(d: Path) -> list[Path]:
+    """Résumé artifacts under a folder: every résumé PDF, plus a résumé HTML only where no PDF
+    sits beside it (the PDF is what gets sent; rendering its source again would double-report)."""
+    pdfs = [p for p in sorted(d.glob("**/*.pdf")) if is_resume_artifact(p)]
+    pdf_dirs = {p.parent for p in pdfs}
+    htmls = [h for h in sorted(d.glob("**/resume*.html"))
+             if is_resume_artifact(h) and h.parent not in pdf_dirs]
+    return pdfs + htmls
 
 
 def targets(args: list[str]) -> list[Path]:
@@ -466,14 +559,19 @@ def targets(args: list[str]) -> list[Path]:
             p for p in REPO.glob("applications/*/resume/*.pdf")
             if not p.relative_to(REPO).parts[1].startswith(("EXAMPLE-", "TEMPLATE-"))
         ]
-        return sorted(REPO.glob("resume/*.pdf")) + sorted(real_dossier_pdfs)
+        return [p for p in sorted(REPO.glob("resume/*.pdf")) + sorted(real_dossier_pdfs)
+                if is_resume_artifact(p)]
     out: list[Path] = []
     for a in args:
         p = Path(a) if Path(a).is_absolute() else REPO / a
         if p.is_dir():
-            out += sorted(p.glob("**/*.pdf")) + sorted(p.glob("**/resume*.html"))
+            out += _dir_targets(p)
         elif p.suffix.lower() in (".pdf", ".html"):
-            out.append(p)
+            if is_resume_artifact(p):
+                out.append(p)
+            else:
+                print(f"skipped {a}: not a résumé (a cover letter or other document). "
+                      f"This gate grades résumés only.")
     return out
 
 
@@ -484,10 +582,10 @@ def targets(args: list[str]) -> list[Path]:
 FIXTURE_KB = """
 ### WORK EXPERIENCE
 
-**Acme Robotics - Staff Product Designer** - Mar 2024 - Present
-- Led the redesign of the fleet-ops console end to end.
+**Acme Robotics - Staff Engineer** - Mar 2024 - Present
+- Led the rebuild of the fleet-ops console end to end.
 
-**Globex Analytics - Senior Product Designer** - Jun 2021 - Feb 2024
+**Globex Analytics - Senior Engineer** - Jun 2021 - Feb 2024
 - Shipped a self-serve dashboard used by every enterprise account.
 
 ## 🔴 CANONICAL FACTS
@@ -496,8 +594,8 @@ FIXTURE_KB = """
 exact: email | jordan.rivera@example.com
 exact: portfolio | jordanrivera.example
 exact: linkedin | linkedin.com/in/jordanrivera
-exact: title | Staff Product Designer
-number: DTCG tokens | 1,070 | the live design-token count
+exact: title | Staff Engineer
+number: alert rules | 1,070 | the live alert-rule count
 ```
 """
 FIXTURE_EDUCATION_DECOY = "State University"  # same name as an employer that must never exist here
@@ -506,11 +604,83 @@ FIXTURE_EDUCATION_DECOY = "State University"  # same name as an employer that mu
 def selftest() -> int:
     import tempfile
     ok = True
+
+    # Parsing, before anything that needs PyMuPDF: a header comment that MENTIONS the fence must
+    # not be taken for the block itself.
+    _mention_first = ("<!--\n  1. The fenced block that opens with the literal line ```canonical-facts\n"
+                      "     holds the facts below.\n-->\n\n# Master resume\n\n"
+                      "```canonical-facts\nexact: Jordan Rivera | name\nnumber: 1,070 | alert rules shipped\n```\n")
+    _pf = _parse_canonical_facts(_mention_first)
+    _good = _pf["exact"] == [("Jordan Rivera", "name")] and _pf["number"] == [("1,070", "alert rules shipped")]
+    ok &= _good
+    print(f"  {'✓' if _good else '✗✗'} a comment that mentions ```canonical-facts before the real block "
+          f"does not hide the real block")
+    _none = _parse_canonical_facts("Prose about the ```canonical-facts block, with no block at all.\n")
+    _good2 = (not _none["found"] and not _none["never"] and not _none["number"]
+              and not _none["exact"])
+    ok &= _good2
+    print(f"  {'✓' if _good2 else '✗✗'} a mention with no real block parses to nothing (never a crash)")
+
+    def _t0(label: str, cond: bool) -> bool:
+        print(f"  {'✓' if cond else '✗✗'} {label}")
+        return cond
+
+    # S1: a block that exists but has no never:/number: lines is the valid fresh state.
+    _exact_only = _parse_canonical_facts("```canonical-facts\nexact: email | a@example.com\n```\n")
+    ok &= _t0("[S1] a block with only exact: lines is FOUND (empty never/number is a valid state)",
+              _exact_only["found"] and not _exact_only["never"] and not _exact_only["number"])
+    # S2: the KB-07 template's employer shape and the older shape both parse, and agree.
+    _new = _parse_required_employment(
+        "### WORK EXPERIENCE\n\n**Initech, Security Engineer** (Mar 2024 - Present)\n- x\n\n"
+        "**Globex Corp, Analyst** (June 2021 - Feb 2024)\n### KEY PROJECTS\n")
+    _old = _parse_required_employment(
+        "### WORK EXPERIENCE\n\n**Initech - Security Engineer** - Mar 2024 - Present\n\n"
+        "**Globex Corp - Analyst** \u2014 Jun 2021 \u2013 Feb 2024\n")
+    _want = [("Initech", "Mar 2024", True), ("Globex Corp", "Jun 2021", False)]
+    ok &= _t0("[S2] the template shape `**Employer, Title** (Mon YYYY - Present)` parses", _new == _want)
+    ok &= _t0("[S2] the older shape `**Employer - Title** - Mon YYYY` still parses the same", _old == _want)
+    ok &= _t0("[S2] the unfilled template line parses to nothing (so the gate says EMPTY, loudly)",
+              _parse_required_employment("### WORK EXPERIENCE\n**[Employer Name], [Your Title]** "
+                                         "([Mon YYYY] - Present)\n") == [])
+    # S3: only résumé artifacts are graded; a cover letter never is.
+    _ra = [
+        (Path("applications/acme-x/resume/Jordan Rivera.pdf"), True),
+        (Path("applications/acme-x/cover-letter/Jordan Rivera.pdf"), False),
+        (Path("applications/acme-x/Jordan Rivera - Cover Letter.pdf"), False),
+        (Path("applications/acme-x/jordan-rivera-cv.pdf"), True),
+        (Path("resume/jordan_rivera_resume.pdf"), True),
+        (Path("applications/acme-x/sources/resume-tips.pdf"), False),
+    ]
+    ok &= _t0("[S3] résumé artifacts are told apart from cover letters and sources",
+              all(is_resume_artifact(pp) == want for pp, want in _ra))
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        _d = Path(_td) / "acme-x"
+        for _rel in ("resume/r.pdf", "resume/resume.html", "cover-letter/c.pdf", "cover-letter/resume-cover.html"):
+            (_d / _rel).parent.mkdir(parents=True, exist_ok=True)
+            (_d / _rel).write_text("x")
+        _got = [str(x.relative_to(_d)) for x in _dir_targets(_d)]
+        ok &= _t0("[S3] a dossier folder yields only its résumé PDF (no cover PDF, no duplicate HTML)",
+                  _got == ["resume/r.pdf"])
+    # S4: a recorded short-page decision is read; a malformed one is ignored, never guessed.
+    ok &= _t0("[S4] `accept: short-page | 60` is read as a 60% floor",
+              accepted_short_floor(_parse_canonical_facts(
+                  "```canonical-facts\naccept: short-page | 60 | two jobs, both listed\n```\n")) == 60.0)
+    ok &= _t0("[S4] `accept: short-page` with no number records nothing",
+              accepted_short_floor(_parse_canonical_facts(
+                  "```canonical-facts\naccept: short-page | yes\n```\n")) is None)
+    # S4b: the shipped résumé templates use the standard CSS property, so weasyprint renders them
+    # without a deprecation warning.
+    for _h in (REPO / "resume" / "resume.html",
+               REPO / "applications" / "TEMPLATE-company-role" / "resume" / "resume.html"):
+        if _h.is_file():
+            ok &= _t0(f"[S4b] {_h.relative_to(REPO)} carries no -weasy- vendor property",
+                      "-weasy-" not in _h.read_text(encoding="utf-8", errors="replace"))
     try:
         import fitz
     except ImportError:
-        print("SELFTEST SKIPPED: PyMuPDF not available")
-        return 0
+        print("SELFTEST SKIPPED (PDF cases): PyMuPDF not available")
+        return 0 if ok else 1
 
     required = _parse_required_employment(FIXTURE_KB)
     facts = _parse_canonical_facts(FIXTURE_KB)
@@ -540,14 +710,14 @@ def selftest() -> int:
                     if e not in emps:
                         continue
                     end = "Present" if cur else "Feb 2024"
-                    page.insert_text((50, y), f"{e} - Staff Product Designer  {start} - {end}", fontsize=8); y += 13
+                    page.insert_text((50, y), f"{e} - Staff Engineer  {start} - {end}", fontsize=8); y += 13
                 for i in range(lines):
                     page.insert_text((50, y), f"a line of resume content number {i}", fontsize=9); y += 14
                 page.insert_text((50, y), "SELECTED PROJECTS", fontsize=11); y += 18
-                page.insert_text((50, y), "Fleet console v2, solo design and build", fontsize=9); y += 16
+                page.insert_text((50, y), "Fleet console v2, solo build", fontsize=9); y += 16
                 if education_name:
                     page.insert_text((50, y), "EDUCATION", fontsize=11); y += 16
-                    page.insert_text((50, y), f"{education_name} - MS HCI  Aug 2019 - May 2021", fontsize=8)
+                    page.insert_text((50, y), f"{education_name} - MS Computer Science  Aug 2019 - May 2021", fontsize=8)
         f = Path(tempfile.mkstemp(suffix=".pdf")[1]); d.save(f); return f
 
     current = [e for e, _, c in required if c]
@@ -562,28 +732,80 @@ def selftest() -> int:
     def _check(path: Path) -> Finding | None:
         return check_pdf(path, required=required, facts=facts)
 
+    # want: "fail" (hard, exit 1), "open" (an open item, exit 3), "pass"
     cases = [
-        ("a 62%-fill page must FAIL", synth(8), True),
-        ("a page filled to the floor with every job listed must PASS", synth(42), False),
-        ("TWO pages must FAIL", synth(42, pages=2), True),
+        ("a page well short of full is an OPEN ITEM, not a hard fail (S4)", synth(8), "open"),
+        ("a page filled to the floor with every job listed must PASS", synth(42), "pass"),
+        ("TWO pages must FAIL", synth(42, pages=2), "fail"),
         ("current employer only under PROJECTS must FAIL",
-         synth(42, employers=past), True),
+         synth(42, employers=past), "fail"),
         ("a PAST employer deleted must FAIL",
-         synth(42, employers=current + past[1:]), True),
+         synth(42, employers=current + past[1:]), "fail"),
         ("job deleted while the same NAME survives under EDUCATION must still FAIL",
          synth(42, employers=[e for e in all_emps if e != past[0]],
-               education_name=past[0]), True),
+               education_name=past[0]), "fail"),
+        ("a SHORT page that also dropped a job is a hard FAIL, not just an open item",
+         synth(8, employers=current), "fail"),
     ]
-    for label, path, want_fail in cases:
+
+    def _kind(f: Finding | None) -> str:
+        if f is None:
+            return "pass"
+        return "fail" if f.is_fail() else ("open" if f.open_items else "pass")
+
+    for label, path, want in cases:
         f = _check(path)
-        got = f is not None and f.is_fail()          # a fill advisory is not a fail
-        mark = "✓" if got == want_fail else "✗✗"
-        if got != want_fail:
+        got = _kind(f)                                # a fill advisory is a pass
+        mark = "✓" if got == want else "✗✗"
+        if got != want:
             ok = False
-            print(f"  {mark} {label}  -> {(f.problems + f.advisories) if f else 'passed'}")
+            print(f"  {mark} {label}  -> {got}: {(f.problems + f.open_items + f.advisories) if f else 'passed'}")
         else:
             print(f"  {mark} {label}")
         path.unlink(missing_ok=True)
+
+    # S4: the user's recorded decision turns a short page into an advisory, but only down to the
+    # floor they recorded; a copy shorter than that is an open item again.
+    _short = synth(8)
+    _fill = measure(_short)[1]
+    _acc = lambda n: dict(facts, accept=[("short-page", f"{n:.0f}")])
+    ok &= _t("[S4] a short page at or above the recorded `accept: short-page` floor PASSES",
+             _kind(check_pdf(_short, required=required, facts=_acc(_fill - 5))) == "pass")
+    ok &= _t("[S4] a short page BELOW the recorded floor is an open item again",
+             _kind(check_pdf(_short, required=required, facts=_acc(_fill + 5))) == "open")
+    _f_open = _check(_short)
+    ok &= _t("[S4] the open item explains the choice and forbids padding",
+             bool(_f_open and _f_open.open_items and "never pad" in _f_open.open_items[0]
+                  and "accept: short-page" in _f_open.open_items[0]))
+    # S4: main() exits 3 on an open item alone, 1 on any hard failure.
+    _saved = (globals()["canonical_facts"], globals()["required_employment"])
+    _sp = _short.with_name("jordan-resume-short.pdf"); _short.rename(_sp)
+    _tp = synth(42, pages=2); _tp2 = _tp.with_name("jordan-resume-two.pdf"); _tp.rename(_tp2)
+    try:
+        globals()["canonical_facts"] = lambda: facts
+        globals()["required_employment"] = lambda: required
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            _rc_open = main([str(_sp)])
+            _rc_hard = main([str(_sp), str(_tp2)])
+        ok &= _t("[S4] exit code 3 when the only finding is an open item", _rc_open == 3)
+        ok &= _t("[S4] exit code 1 when any résumé hard-fails", _rc_hard == 1)
+    finally:
+        globals()["canonical_facts"], globals()["required_employment"] = _saved
+        _sp.unlink(missing_ok=True); _tp2.unlink(missing_ok=True)
+    # S1 end to end: a found block with no never:/number: lines raises no "missing block" problem;
+    # an absent block still does.
+    _full = synth(42)
+    _no_rules = dict(facts, never=[], number=[])
+    _absent = dict(_parse_canonical_facts(""))
+    ok &= _t("[S1] an existing canonical-facts block with no never:/number: lines is not a failure",
+             not any("canonical-facts block" in x for x in (check_pdf(_full, required=required, facts=_no_rules) or Finding("", [])).problems))
+    ok &= _t("[S1] a MISSING canonical-facts block still fails loud",
+             any("canonical-facts block" in x for x in (check_pdf(_full, required=required, facts=_absent) or Finding("", [])).problems))
+    _ph = dict(facts, exact=[("email", "[your real email]")])
+    ok &= _t("[S1] an unfilled `exact:` placeholder is named as unfilled, not as a wrong value",
+             any("template placeholder" in x for x in (check_pdf(_full, required=required, facts=_ph) or Finding("", [])).problems))
+    _full.unlink(missing_ok=True)
 
     ok &= _t("[facts] the fixture's canonical-facts block parses and is not empty",
              bool(facts["number"]) and bool(facts["exact"]),
@@ -597,34 +819,34 @@ def selftest() -> int:
 <h1>Jordan Rivera</h1>
 <p>jordan.rivera@example.com · linkedin.com/in/jordanrivera · jordanrivera.example</p>
 <h2>SKILLS</h2>
-<p>Design systems, prototyping, accessibility, user research, cross-functional collaboration,
-information architecture, interaction design, usability testing, stakeholder communication.</p>
+<p>Distributed systems, observability, incident response, cross-functional work,
+system architecture, load testing, stakeholder communication.</p>
 <h2>EXPERIENCE</h2>
-<div class="job"><b>{current[0]} - Staff Product Designer</b> - Mar 2024 - Present
-<p>Shipped the fleet-ops console redesign, moving 1,070 DTCG tokens into one system.
-Led the cross-functional discovery process, ran usability testing with 12 operators, and
-partnered with engineering to ship the redesign in three phases. Reduced the average
-time-to-complete a dispatch task by rebuilding the console's information architecture around
-real operator workflows rather than the underlying data model. Established a weekly design
-critique that raised the team's shipped-quality bar and cut rework by consolidating early
+<div class="job"><b>{current[0]} - Staff Engineer</b> - Mar 2024 - Present
+<p>Shipped the fleet-ops console rebuild, moving 1,070 alert rules into one system.
+Led the cross-functional discovery process, ran field testing with 12 operators, and
+partnered with engineering to ship the rebuild in three phases. Reduced the average
+time-to-complete a dispatch task by rebuilding the console's data flow around
+real operator workflows rather than the underlying data model. Established a weekly code
+review that raised the team's shipped-quality bar and cut rework by consolidating early
 feedback before engineering handoff.</p></div>
-<div class="job"><b>{past[0]} - Senior Product Designer</b> - Jun 2021 - Feb 2024
-<p>Shipped a self-serve dashboard used across every enterprise account. Owned the design system
-that kept the product consistent as the team scaled from 3 to 11 designers. Ran quarterly design
-reviews and mentored two junior designers through their first shipped features. Partnered
+<div class="job"><b>{past[0]} - Senior Engineer</b> - Jun 2021 - Feb 2024
+<p>Shipped a self-serve dashboard used across every enterprise account. Owned the shared toolkit
+that kept the product consistent as the team scaled from 3 to 11 engineers. Ran quarterly architecture
+reviews and mentored two junior engineers through their first shipped features. Partnered
 directly with sales engineering to turn recurring customer feedback into a prioritized,
-quarterly roadmap that closed the team's three largest usability gaps.</p></div>
+quarterly roadmap that closed the team's three largest reliability gaps.</p></div>
 <h2>SELECTED PROJECTS</h2>
-<p>Fleet console v2, solo design and build. A side project exploring real-time collaborative
+<p>Fleet console v2, solo build. A side project exploring real-time collaborative
 editing patterns for operational dashboards, built end to end over six weekends, from initial
 research through a working prototype tested with five real operators.</p>
 <h2>EDUCATION</h2>
-<p>State University, B.A. Design, 2017-2021.</p>
+<p>State University, B.S. Economics, 2017-2021.</p>
 <h2>CERTIFICATIONS</h2>
-<p>Example Certification Body, Advanced Product Design, 2023. Second Certification Body,
+<p>Example Certification Body, Advanced Project Management, 2023. Second Certification Body,
 Accessibility Fundamentals, 2022.</p>
 <h2>ADDITIONAL</h2>
-<p>Conference speaker, regional design meetup (2023, 2024). Volunteer design mentor, community
+<p>Conference speaker, regional engineering meetup (2023, 2024). Volunteer coding mentor, community
 bootcamp program (2022-present).</p>
 </body></html>"""
     # A regex-bounded removal of the WHOLE current-employer <div class="job">...</div> block, so
@@ -634,12 +856,12 @@ bootcamp program (2022-present).</p>
     project_credit_html = re.sub(
         rf'<div class="job"><b>{re.escape(current[0])}.*?</div>\s*', "", FIXTURE_HTML, count=1, flags=re.S
     ).replace(
-        "<p>Fleet console v2, solo design and build.",
+        "<p>Fleet console v2, solo build.",
         f'<p>Fleet console v2 · {current[0]} · Mar 2024 &ndash; Present · solo build.',
     )
     e2e = [
         ("[e2e] a WRONG canonical number is CAUGHT",
-         FIXTURE_HTML.replace("1,070 DTCG tokens", "900 DTCG tokens", 1)),
+         FIXTURE_HTML.replace("1,070 alert rules", "900 alert rules", 1)),
         ("[e2e] a WRONG exact value (email) is CAUGHT",
          FIXTURE_HTML.replace("jordan.rivera@example.com", "someone.else@example.org", 1)),
         ("[e2e] current job only as a dated PROJECT credit is CAUGHT",
@@ -685,7 +907,7 @@ bootcamp program (2022-present).</p>
                 def _synth(w, h, emps, pad_to=0.93):
                     d2 = _fz.open(); pg2 = d2.new_page(width=w, height=h); yy = 50
                     for _e, _s2, _c in emps:
-                        pg2.insert_text((40, yy), f"{_e} - Designer  {_s2} - "
+                        pg2.insert_text((40, yy), f"{_e} - Engineer  {_s2} - "
                                         f"{'Present' if _c else 'Feb 2024'}", fontsize=8); yy += 12
                     while yy < h * pad_to:
                         pg2.insert_text((40, yy), "body content line", fontsize=8); yy += 12
@@ -701,7 +923,7 @@ bootcamp program (2022-present).</p>
                 def _footer_trick():
                     d4 = _fz.open(); pg4 = d4.new_page(width=595, height=842); yy = 50
                     for _e, _s4, _c in required:
-                        pg4.insert_text((40, yy), f"{_e} - Designer  {_s4} - "
+                        pg4.insert_text((40, yy), f"{_e} - Engineer  {_s4} - "
                                         f"{'Present' if _c else 'Feb 2024'}", fontsize=8); yy += 12
                     while yy < 842 * 0.65:
                         pg4.insert_text((40, yy), "body content line", fontsize=8); yy += 12
@@ -718,7 +940,7 @@ bootcamp program (2022-present).</p>
                     for _e, _s3, _c in required:
                         if _c:
                             continue
-                        pg3.insert_text((40, yy), f"{_e} - Designer  {_s3} - Feb 2024", fontsize=8); yy += 12
+                        pg3.insert_text((40, yy), f"{_e} - Engineer  {_s3} - Feb 2024", fontsize=8); yy += 12
                     while yy < 842 * 0.80:
                         pg3.insert_text((40, yy), "body content line", fontsize=8); yy += 12
                     pg3.insert_text((40, yy), "SELECTED PROJECTS", fontsize=10); yy += 14
@@ -778,6 +1000,16 @@ def main(argv: list[str]) -> int:
                             for p in paths) if f]
     hard = [f for f in findings if f.is_fail()]
     advisory = [f for f in findings if f.advisories and not f.is_fail()]
+    opened = [f for f in findings if f.open_items and not f.is_fail()]
+    if not hard and opened:
+        print(f"OPEN ITEM: {len(opened)} résumé(s) are one page with every employer listed, but run "
+              f"well short of a full page. Not a failure and not a pass: your decision.\n")
+        for f in opened:
+            print(f"  {f.path}")
+            for o in f.open_items:
+                print(f"      {o}")
+            print()
+        return 3
     if not hard:
         if advisory:
             print(f"{len(advisory)} résumé(s) carry a page-fill ADVISORY (a near-miss of the "
@@ -797,6 +1029,8 @@ def main(argv: list[str]) -> int:
             print(f"      {p}")
         for a in f.advisories:
             print(f"      (advisory) {a}")
+        for o in f.open_items:
+            print(f"      (open item) {o}")
         print()
     return 1
 

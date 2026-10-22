@@ -7,36 +7,46 @@ stays true instead of aspirational.
 
 ## The one rule that governs everything (account safety)
 
-Never let automation touch your personal LinkedIn login, or the login of any other personal account,
-directly. Concretely: no script or agent should ever type your password into a login form, hold your
-session cookie, or click "Connect" / "Send" / "Message" on your behalf through a browser session
-that's logged in as you.
+`CLAUDE.md` §0.2 (the Account Law) owns this rule; this is what it means for tools. No agent, script
+or tool in this repo touches LinkedIn by any route: no browser, no page read, no fetch, no proxy, no
+scraper, not even one "read-only" page. No agent drives your other logged-in major accounts (email,
+social, job-board accounts that ban automation) in any browser either. Logged-out public web search
+and the official command-line tools you set up yourself, at normal volume, are fine. If a tool's
+setup asks for your LinkedIn password or session, or offers to read LinkedIn for you, it doesn't
+belong in this file.
 
-Read-only research through a proxy or a public API is fine: looking up a public profile, a company
-page, a posting. **Sending, connecting, or posting through automation is not**, no matter how much
-time it would save. This is the same logic as the global safety gates the rest of this repo inherits:
-entering credentials and sending irreversible external messages are never things an agent does
-quietly on your behalf, only things it prepares for you to do, or asks you before doing. If a tool's
-setup instructions ask you to hand over your personal LinkedIn password, that tool doesn't belong in
-this file.
-
-The one carve-out the rest of this repo already scopes carefully: filling, never submitting, a real
-job application form, inside a dedicated browser profile that holds none of your personal logins. See
-`CLAUDE.md` §14 for exactly how that's bounded and why it's a different thing from the rule above.
+The one carve-out: filling, never submitting, a public job application form (Greenhouse, Lever,
+Ashby, Workable, SmartRecruiters, a Workday form you sign into yourself), in the browser tool's own
+separate window. `.claude/rules/application-protocol.md` §14 bounds it.
 
 ## What this repo already uses, no setup required
 
-The job crawler runs entirely on free, public, keyless JSON APIs, with zero keys, zero auth, and
-nothing to sign up for:
+The job crawler (`pipeline/job-crawler/`) is free and needs no login. It is **not a fixed list of
+boards or sources**: the agent adds company boards and switches sources on as your search needs
+them, and the latest crawl's own JSON `sources` list is the only true answer to "what did it
+search". It reads three kinds of source:
 
-- **Greenhouse, Ashby, and Lever's own public board endpoints.** Most companies using these Applicant
-  Tracking Systems expose their open roles as a plain JSON feed, built to be read by software. No key,
-  no login.
-- **The Hacker News "who's hiring" thread**, pulled through the free public Algolia search API that
-  already indexes Hacker News.
+1. **Company job boards on six applicant tracking systems (ATSes)**: Greenhouse, Lever, Ashby,
+   SmartRecruiters, Workable and Workday, each through its own public JSON endpoint. The boards live
+   in `boards.yaml`, and `discover.py` fills it:
+   - `--sweep` finds companies on the first five ATSes in the free Common Crawl URL index and keeps
+     only those with open postings matching your titles;
+   - `--company "Name"` guesses and checks a named company's board on those five;
+   - `--urls -` takes any job or careers links (all six ATSes, Workday included) and adds the live
+     boards;
+   - `--queries` prints web-search queries for your titles; the agent runs them and pipes the
+     result links into `--urls -`.
+2. **Free job APIs** in `sources.yaml`. On by default: Himalayas, Jobicy, Remotive, Remote OK
+   (remote jobs). On once you set a free key in your environment: USAJOBS (US federal jobs).
+   Off by default: The Muse (its docs ask for registration beyond testing) and We Work Remotely
+   (its terms haven't been read). Each source keeps the minimum interval its own terms ask for.
+3. **The monthly Hacker News "Who is hiring?" thread**, through the free public Algolia API.
 
-That's the whole crawler, out of the box, before you add anything below. See
-`pipeline/job-crawler/README.md` for exactly which boards it checks and how to add a new company.
+**Coverage, plainly.** Workday boards can't be guessed, so they come in only through `--urls`
+links. iCIMS, Taleo, Oracle, SuccessFactors and other systems are not read directly. For an employer
+on one of those, the agent finds the posting by web search, and it still fills that employer's
+application form for you. `pipeline/job-crawler/README.md` has the full detail and how to add a new
+ATS or source.
 
 ## Optional: deepens research if you add it
 

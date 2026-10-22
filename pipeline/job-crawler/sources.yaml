@@ -1,0 +1,86 @@
+# Free job APIs the crawler reads next to your company boards (boards.yaml) and Hacker News.
+#
+# One block per source. `enabled: true` turns it on. Every job from these sources is filtered by
+# the SAME filters.yaml rules as everything else (titles, hard walls, location, freshness), keeps
+# its ORIGINAL link, and shows the source's name in the feed's Source column, because most of
+# these sources require that credit.
+#
+# Limits are enforced in code, not on trust: each source is fetched at most once per
+# `min_interval_minutes` (and never more often than the floor in sources.py, which comes from the
+# source's own terms). A run inside that window reuses the last results and says so in the crawl
+# report. Results stay in your own local feed; several of these terms forbid passing the jobs on
+# to another job board or aggregator, so don't publish the feed.
+#
+# Keys: none of the default sources needs one. USAJOBS needs a free key, read ONLY from your
+# environment (USAJOBS_API_KEY, USAJOBS_EMAIL). Never put a key in this file.
+#
+# Add a source: write a fetch_<name>() in sources.py that returns normalized jobs (see the others),
+# register it in FETCHERS, LABELS, HOMEPAGES and FLOOR_MINUTES, and add a block here.
+
+sources:
+  himalayas:
+    enabled: true
+    # Remote jobs, searchable by title. https://himalayas.app/api
+    # Terms (summary): no key needed (a free key raises limits); use each job's applicationLink
+    # unchanged; credit Himalayas with a visible link; show the jobs only on a site you run (not
+    # passed to other boards); drop expired jobs. No keyless rate limit is published.
+    country: US               # remote jobs open to this country; "" for any
+    max_queries: 5            # one search per title, up to this many titles per run
+    min_interval_minutes: 60
+
+  jobicy:
+    enabled: true
+    # Remote jobs by keyword tag. https://jobicy.com/jobs-rss-feed
+    # Terms (summary): one automated pass per hour at most; handle HTTP 429; credit Jobicy with a
+    # clickable link and keep the canonical Jobicy job URL.
+    geo: usa                  # "" for any region
+    count: 50                 # jobs per query, 1 to 200
+    max_queries: 5
+    min_interval_minutes: 60
+
+  remotive:
+    enabled: true
+    # Remote jobs. https://github.com/remotive-io/remote-jobs-api
+    # Terms (summary): poll about 4 times a day at most (more than 2 calls a minute is blocked);
+    # jobs appear 24 hours late; link back to the Remotive job URL and name Remotive; never
+    # resubmit the jobs to other job sites. The crawler makes one call per run here.
+    category: ""              # optional Remotive category slug, e.g. "data"
+    min_interval_minutes: 360
+
+  remoteok:
+    enabled: true
+    # Remote jobs, one feed of recent postings, no search (filtered locally). https://remoteok.com/api
+    # Terms (summary): link back to the Remote OK job URL (a followed link) and mention Remote OK
+    # as the source, or API access is suspended; don't use their logo. No rate number published.
+    min_interval_minutes: 60
+
+  themuse:
+    enabled: false
+    # US onsite and remote jobs by category, level and location (no title search).
+    # https://www.themuse.com/developers/api/v2
+    # OFF by default: its docs say registration is required for any use beyond testing, and its
+    # full terms were not read. To use it, register for a key, set THEMUSE_API_KEY in your
+    # environment, and only then turn this on. Limits: 500 calls an hour without a key.
+    category: []              # e.g. ["Data and Analytics"]
+    location: []              # e.g. ["New York, NY", "Flexible / Remote"]
+    level: []                 # e.g. ["Mid Level"]
+    pages: 2
+    min_interval_minutes: 60
+
+  weworkremotely:
+    enabled: false
+    # Remote jobs RSS. https://weworkremotely.com/remote-jobs.rss
+    # OFF by default: its terms of service have not been read, so automated use is not known to
+    # be allowed. Read their terms yourself before turning this on. The feed's ttl is 60 minutes.
+    min_interval_minutes: 60
+
+  usajobs:
+    enabled: true
+    # US federal jobs, any occupation. https://developer.usajobs.gov
+    # Needs a free key. It only runs when USAJOBS_API_KEY and USAJOBS_EMAIL (the email you
+    # registered, sent as the User-Agent their docs require) are set in your environment; until
+    # then the crawl report lists it as skipped and says why. No rate limit is stated on the docs
+    # pages read; the floor here is one fetch an hour.
+    location: ""              # optional, e.g. "Denver, Colorado"
+    max_queries: 5
+    min_interval_minutes: 60

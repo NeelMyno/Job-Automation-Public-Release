@@ -8,5 +8,9 @@ any known defect in the copy as it went out; this column is why the file exists.
 
 Schema: `date · recipient · company · channel · message-ref · copy-state-at-send · sent-by`
 
+Row shape (7 cells, recipient before company, `\|` for a pipe inside a cell, the application-submit row
+type): `.claude/rules/records-format.md` section 3. Everyone you message here also gets a NETWORK row
+with a `fu` state in `pipeline/tracker.html` the same turn. Check: `python3 scripts/records_check.py`.
+
 | date | recipient | company | channel | message-ref | copy-state-at-send | sent-by |
 |---|---|---|---|---|---|---|

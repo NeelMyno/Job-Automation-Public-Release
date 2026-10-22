@@ -40,7 +40,8 @@ WHAT THIS DOES NOT CHECK, said out loud
 It cannot read what an agent types into chat. It gates the FILE the chat is supposed to be read off.
 If an agent invents copy in chat that is not on disk, that is a grounding failure and
 `verify_claims.py`'s problem, not this one. It also does not judge whether the copy is any good;
-`verify_claims.py` owns length, voice and evidence.
+`verify_claims.py` owns length and evidence, and `knowledge-base/17-writing.md` (the one owner of
+voice) owns how it sounds, judged by a read-aloud and a fresh reviewer.
 
 A person with NO parts drafted is research-stage and is skipped, deliberately: a roster of people to
 research later is not outreach material. A person with SOME parts is the failure this catches.
@@ -245,8 +246,8 @@ OPENING_REF = re.compile(
 # minimum) keeps it off short hyphenated tokens that are not requisitions at all.
 JOB_ID = re.compile(
     r"\b([A-Za-z]{1,2}-\d{4,10})\b"                                # e.g. a prefixed req like R-100234
-    r"|\b(R\d{4,6})\b"                                             # e.g. Datadog-style R20051
-    r"|\b(\d{6,10})\b"                                              # e.g. Amazon, Greenhouse, Lever
+    r"|\b(R\d{4,6})\b"                                             # e.g. an R-prefixed req like R20051
+    r"|\b(\d{6,10})\b"                                              # e.g. Greenhouse, Lever, Workday
     r"|\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b"   # Ashby uuid
     r"|\b([0-9A-F]{10})\b",                                        # e.g. Workable 7D5CF84724
     re.I,
@@ -314,12 +315,9 @@ def specificity_gaps(block: str, known: set | None = None) -> list[str]:
 # gets buried in the middle of it. The recipient doesn't need to dislike the message to skip it,
 # they just need to not see where it goes.
 #
-# THE REFERENCE SHAPE, a well-paragraphed real message, roughly: greeting on its own line, a
-# one-line opener saying why you're writing, who you are and what you do, the specific req in its
-# own paragraph, the ask in its own paragraph, a graceful out, sign-off on its own line.
-#
 # The check is deliberately structural, not stylistic: a real blank-line break between blocks, and
-# no single block so long it becomes the wall again.
+# no single block so long it becomes the wall again. What goes in each paragraph, and how it sounds,
+# is owned by knowledge-base/17-writing.md, not by this script.
 MIN_PARAS = 4
 MAX_PARA_CHARS = 620
 WALL_THRESHOLD = 500   # below this a message is not a wall and needs no enforced breaks
@@ -499,8 +497,8 @@ CASES: list[tuple[str, str, bool]] = [
 Profile research pending; hooks not fetched yet.
 """, False),
     ("an explicit NOT DRAFTED marker is respected", """## The messages
-### 1 · Priya Nair: founding engineer, reports-to for this req
-**Profile: https://www.linkedin.com/in/priyanair**
+### 1 · Bo Beta: founding engineer, reports-to for this req
+**Profile: https://www.linkedin.com/in/bobeta-example**
 NOT DRAFTED: deliberately left for the outreach pass so it passes the gate.
 """, False),
     ("section furniture is not read as a person", """## The messages
@@ -508,15 +506,15 @@ NOT DRAFTED: deliberately left for the outreach pass so it passes the gate.
 **Cards for this audience**: IN = systems depth.
 """, False),
     ("a 1st-degree contact needs no connection REQUEST: must not be flagged", """## The messages
-### 3 · Chloe Marsh: "Visual Designer at Acme Studio" (1st°, viewed ~2w ago), DAY 3
+### 3 · Chloe Marsh: "Support Lead at Acme Studio" (1st°, viewed ~2w ago), DAY 3
 - Profile: https://www.linkedin.com/in/chloemarsh-example/
 - **Use InMail: NO** (1st-degree).
 **DM (607 chars):**
-> Hi Chloe, I am reaching out about the Interaction Designer opening, job 5735407004.
+> Hi Chloe, I am reaching out about the Support Engineer opening, job 5735407004.
 > My work is at example.com. Would you point me at the right person?
 """, False),
     ("a profile URL on the HEADING line counts", """## The messages
-### Noah Bergstrom: designer at Globex · https://www.linkedin.com/in/noahbergstrom-example
+### Noah Bergstrom: engineer at Globex · https://www.linkedin.com/in/noahbergstrom-example
 **Connection note (60 chars):**
 > Hi Noah, I applied to the Senior role.
 **Direct message · Use InMail: NO**
@@ -546,7 +544,7 @@ def selftest() -> int:
     # never come back even if the classification set changes.
     for text, want in (("point at req R-100234", {"R-100234"}),
                        ("a hyphenated req O-2233326965", {"O-2233326965"}),
-                       ("Datadog-style req R20051", {"R20051"}),
+                       ("an R-prefixed req R20051", {"R20051"}),
                        ("Greenhouse job 5735407004", {"5735407004"})):
         got_ids = _ids_in(text)
         ok = got_ids == want
@@ -595,7 +593,8 @@ def main(argv: list[str]) -> int:
 
     print(f"outreach_format.py: checked {checked} file(s) for the three-part handover (CLAUDE.md §13.6)")
     print("  every person: the LinkedIn profile URL · the connection note · the DM + its InMail verdict")
-    print("  NOT checked: whether the copy is good (verify_claims.py owns voice, length and evidence),")
+    print("  NOT checked: whether the copy is good (knowledge-base/17-writing.md owns voice;"
+          " verify_claims.py owns length and evidence),")
     print("               and what an agent types into chat; this gates the FILE the chat is read off.")
     if checked == 0:
         print("\n🔴 CHECKED NOTHING: this is a FAILURE, not a pass.", file=sys.stderr)

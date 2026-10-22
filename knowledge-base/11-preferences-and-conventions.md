@@ -1,7 +1,7 @@
 # Preferences & Conventions
 
 This file is where every preference you ever state gets logged, so an agent never has to be told
-the same thing twice. `CLAUDE.md` §7 rule 5 makes this a standing requirement: if you state a
+the same thing twice. `CLAUDE.md` §7 (the record reflex) makes this a standing requirement: if you state a
 preference, or make a taste call or a decision, it gets written here in the same session, not left
 to live only in that session's chat history. Session context disappears; this file doesn't.
 
@@ -12,7 +12,7 @@ actually form opinions, not all at once on day one.
 
 ## Communication
 
-How you like updates from an agent working in this repo: length, tone, format (chat prose versus a
+How you like updates from an agent working in this repo: length, format (chat prose versus a
 file it hands you), how much it checks in mid-task versus just finishing and reporting back.
 
 [Nothing logged yet. State a preference once, here, and it applies from then on.]
@@ -22,51 +22,36 @@ file it hands you), how much it checks in mid-task versus just finishing and rep
 The baseline is already set: every number must be real and sourced (`CLAUDE.md` §0.1 and §5), and
 every résumé and cover letter gets five independent review passes before you see it (§13.1). This
 section is only for anything you would add on top of that default: a personal formatting
-preference, a section you always want kept or dropped, a tone note specific to your field.
+preference, or a section you always want kept or dropped. How the lines sound is owned by
+`knowledge-base/17-writing.md`.
 
 [Nothing added yet.]
 
-## Cover letters & outreach voice
+## Writing voice
 
-The voice rules (plain, no em-dashes, no rule-of-three, the rest of the banned-tells list) live in
-`CLAUDE.md` §11 and apply to everything written on your behalf. This section is for what makes your
-own voice sound like you specifically: 2-3 real quirks, a phrase you actually use, a rhythm you
-naturally write in, something a friend would recognize as sounding like you.
+Not here. How anything you send sounds (cover letters, outreach, form answers, emails, the résumé's
+wording, chat replies to you) is owned by one file, `knowledge-base/17-writing.md`. Your voice
+samples, your own writing rules and your never-say list all go there, not in this file, so there is
+never a second copy to drift out of date.
 
-[Nothing logged yet.]
+## Look and feel of what the agent renders
 
-**Maintaining the gate (fix the synonym space, not the one string).** `scripts/voice_check.py` is a
-register detector, not a keyword denylist, and it should stay that way as you extend it. When you
-(or an agent) catch a new AI-voice tell in real output, the fix that belongs in the same change is
-the whole synonym neighborhood for that claim, not the one literal phrase that happened to get
-caught. Banning "exactly how I work" and leaving "already how I work," "comes naturally to me," and
-"second nature" untouched is not a fix, it is a delay: the same underlying claim ships again a week
-later wearing a different grammatical shell. Every new or widened pattern should land with two
-selftest strings, one proving it fires on the tell, one proving it stays quiet on a plain, honest
-statement of the same underlying fact (a real "the hardest part was X" should never be indistinguishable
-from a performed "the hardest and most Y part"). A pattern with no false-positive control is a
-pattern nobody has actually pressure-tested yet. See `scripts/voice_check.py`'s own selftest for the
-worked pattern, and `scripts/batch_voice_check.py` for the companion check that catches sameness a
-single-text gate cannot see by construction (the same opening line or sentence reused across many
-notes).
+If you have standing preferences for how rendered documents should look (your résumé, cover letters,
+anything visual), or a style guide you keep outside this repo, point to it here so an agent loads it
+before producing anything visual. If you don't have one, this section stays empty and an agent falls
+back to its own general judgment.
 
-## Design & UI
-
-If you keep a design-taste doc, a moodboard, or standing design instructions somewhere outside this
-repo, point to it here so an agent knows to load it before producing anything visual: a portfolio
-page, a rendered résumé, a dashboard. If you don't have one, this section stays empty and an agent
-falls back to its own general design judgment.
-
-[No external design reference recorded yet.]
+[No external style reference recorded yet.]
 
 ## Workflow
 
 `CLAUDE.md` §10 asks you to decide two things and record the answer here: whether the agent should
-commit automatically after each milestone, and whether it should push automatically or always ask
-first. Until you answer below, the safe default holds: commit locally, never push without asking.
+commit locally as it goes, and whether it should push automatically or always ask first. Until you
+answer below, the default holds: commit locally, never push without asking. Whatever you choose is
+written here word for word, with the date, and the agent follows it.
 
-- **Auto-commit:** [yes / no]
-- **Auto-push:** [always / ask me first / depends on: describe]
+- **Commits:** [commit locally as I go (recommended) / don't commit] (chosen on: [date])
+- **Push:** [ask me first (default) / always / depends on: describe]
 
 ## Ratified decisions & taste-call log
 
@@ -85,5 +70,6 @@ says so instead of rewriting history.
   to
 - `knowledge-base/01-profile-and-identity.md`: where facts about you live, as opposed to
   preferences about how those facts get used
+- `knowledge-base/17-writing.md`: the one owner of how your writing sounds
 - `knowledge-base/09-current-search.md`: the file whose update cadence and format your
   Communication preferences above actually govern

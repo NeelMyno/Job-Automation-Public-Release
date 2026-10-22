@@ -35,14 +35,20 @@ true and complete; let the deltas live in each application's resume/tailoring.md
 
 <!--
 This fenced block is parsed by scripts/resume_gate.py on every rendered résumé. It's the mechanism
-that stops a fabricated or stale claim from surviving a copy-paste into a new version. Three line
+that stops a fabricated or stale claim from surviving a copy-paste into a new version. Four line
 types, one per line, pipe-separated:
 
   never: <a string that must NEVER appear on your résumé> | <why>
   number: <a phrase that precedes a number> | <the exact correct number> | <note>
   exact: <one of: email | portfolio | linkedin | title> | <the exact required string>
+  accept: short-page | <the lowest page fill, in percent, you accept> | <why>
 
-Start this block genuinely empty (as below) and add a `never:` line the moment you catch yourself
+The `accept: short-page` line is optional and only yours to add: use it when your real history
+does not fill a page and you have decided a shorter page is right (resume/README.md explains the
+choice). Never pad a résumé to avoid it.
+
+Start this block with no `never:` or `number:` lines (as below; that is a valid state, not an
+error) and add a `never:` line the moment you catch yourself
 (or an agent) about to ship something untrue. That's the whole point of the mechanism: it turns a
 one-time correction into a permanent, mechanically-enforced guardrail. Fill in the four `exact:`
 lines now, since those are just your real contact facts.
@@ -67,7 +73,10 @@ exact: title | [your real current title, exactly as you want it to appear]
 - [Bullet 2]
 
 <!--
-Add one block per employer, most recent first. If an employer turned out to be something you can't
+Keep each employer line in the shape above: **Employer, Title** then the dates in parentheses,
+with "Present" on the current job. scripts/resume_gate.py reads the employer (the text before the
+first comma) and the start month, so a name that itself contains a comma should be written
+without it here. Add one block per employer, most recent first. If an employer turned out to be something you can't
 honestly claim (never existed, or you're not sure it should be listed), don't just delete the
 block silently. Note it here as a permanent record of what you decided and why, the same way you'd
 want a "never:" line in the block above to remember a correction. An engine that can quietly forget

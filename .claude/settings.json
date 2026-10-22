@@ -23,7 +23,30 @@
       }
     ],
 
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*|WebFetch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/account_guard.py\" --pre",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+
     "PostToolUse": [
+      {
+        "matcher": "mcp__Claude_Browser__.*|mcp__claude-in-chrome__.*|mcp__chrome-devtools__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/account_guard.py\" --post",
+            "timeout": 15
+          }
+        ]
+      },
       {
         "matcher": "Write|Edit",
         "hooks": [
@@ -42,7 +65,7 @@
           {
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks.py\" --stop",
-            "timeout": 40
+            "timeout": 45
           }
         ]
       }
@@ -58,6 +81,11 @@
       "Bash(python3 scripts/adr_debt.py:*)",
       "Bash(python3 scripts/presubmit_check.py:*)",
       "Bash(python3 scripts/hooks.py:*)",
+      "Bash(python3 scripts/doctor.py:*)",
+      "Bash(python3 scripts/records_check.py:*)",
+      "Bash(python3 scripts/cold.py:*)",
+      "Bash(python3 pipeline/job-crawler/crawl.py:*)",
+      "Bash(python3 pipeline/job-crawler/discover.py:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -68,7 +96,6 @@
       "Bash(git push -f:*)",
       "Bash(git push origin +:*)",
       "Bash(git push +:*)",
-      "Read(./.mcp.json)",
       "Read(./.env)",
       "Read(./.env.*)"
     ]

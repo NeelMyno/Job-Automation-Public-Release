@@ -13,7 +13,7 @@ go. Their only job is to tell you what belongs in the section below them.
 2-4 sentences, written the way you'd actually introduce yourself to a peer in your field, not a
 LinkedIn headline. What do you do, at what level, and what's the one thing that makes your version
 of that role distinct? This gets pulled into cover letters and outreach, so write it in your real
-voice (see CLAUDE.md §11: no "passionate," no rule-of-three, no em-dashes).
+voice (`knowledge-base/17-writing.md` owns how that sounds).
 
 Example shape (not to be copied verbatim): "I'm a [role] who [the specific thing you actually do,
 not the job-title version of it]. Most recently at [context], I [one concrete, real thing]."
@@ -38,7 +38,7 @@ agent should type into a "current title" field.]
 
 | Degree | Institution | Dates | GPA |
 |---|---|---|---|
-| [e.g. B.S. Computer Science] | [School] | [YYYY–YYYY] | [X.X or "not listed"] |
+| [e.g. B.S. Computer Science] | [School] | [YYYY to YYYY] | [X.X or "not listed"] |
 
 **Presentation convention:** [state your own rule here, e.g. "always list GPA if ≥3.5, omit
 otherwise," so an agent doesn't have to guess or ask you every time.]

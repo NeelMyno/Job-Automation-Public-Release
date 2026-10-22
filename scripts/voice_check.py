@@ -1,274 +1,208 @@
 #!/usr/bin/env python3
-"""voice_check.py: the plain-voice gate.
+"""voice_check.py: the hard-fact and banned-phrase check on copy written as you.
 
-Every piece of writing runs through this before it passes: outbound copy written as you (cover
-notes, outreach, form free-text, portfolio, LinkedIn) and every reply written to you in chat. See
-CLAUDE.md §11 (the plain-voice rule).
+How your writing SOUNDS is owned by knowledge-base/17-writing.md, and the real voice gate is the
+read-aloud plus the fresh-reviewer pass that file describes ("How a piece of writing gets made").
+This script is NOT a voice gate. Every writing-style detector it used to carry (hype, false modesty,
+story shapes, the "too-neat mirror" family and its blanket ban on "already" / "exactly", rule of
+three, antithesis, intensifiers and the rest) was retired: rounds of style detectors taught writers
+to write to the checker, and the output passed while still reading like a machine. Passing this
+says nothing about whether the voice is right.
 
-The target is PLAIN and NEUTRAL. AI-generated writing tends to fail from one of two directions:
-over-selling (hype, superlatives, too-neat mirrors between you and the company, story shapes,
-performed emotion, performed control) or, once corrected, over-apologizing (false modesty, naming
-limitations/gaps, undercutting your own competence). This check flags both, register by register,
-not just a list of banned words. It is MECHANICAL, so it is necessary-but-not-sufficient: after it
-exits 0, still read the piece plainly out loud and ask whether it just states your work, or whether
-it sells, narrates, or apologizes.
+What it still checks, and only this:
+  - Dashes: em-dash, en-dash, spaced double-dash in outbound prose (17-writing.md, punctuation).
+  - Over-confidence: a short built-in list of phrases that claim you have it all figured out
+    ("that's exactly how I work", "perfect fit", "I know exactly how", "the same problem I solved").
+  - A work-authorization or sponsorship mention nobody asked about. Your own answer bank
+    (knowledge-base/02-work-authorization.md, "Default: silence", and
+    knowledge-base/12-application-answers.md) says to answer it only where a form or a person asks.
+    Turn this family off with WORK_AUTH_MENTION_CHECK = False in scripts/config.py.
+  - YOUR never-say list: the facts and phrases YOU list in the "Never-say list" section of
+    knowledge-base/17-writing.md (a date you never put in prose, a wrong fact about your own work
+    that keeps creeping back, a phrase you hate). Ships empty; nothing personal is hardcoded here.
 
-A caught detector should always widen to the whole synonym neighborhood, not just the one string
-that got flagged: a fix that patches one literal phrase ships the same claim back a week later in a
-slightly different shell. See knowledge-base/11-preferences-and-conventions.md for that principle.
-
-Companion gate: scripts/batch_voice_check.py catches the sameness a single text can't see, the same
-opening skeleton or the same sentence reused across many notes. Run both.
-
-Give it the SENDABLE text, not a whole dossier file (process notes that quote the rules themselves
-will trip it), or pass --sendable to have it strip a note's markdown scaffolding for you. Usage:
+Give it the SENDABLE text, not a whole dossier file. Usage:
   python3 scripts/voice_check.py path/to/message.txt
+  python3 scripts/voice_check.py --sendable path/to/cover-note.md
   python3 scripts/voice_check.py --text "the message"
   echo "the message" | python3 scripts/voice_check.py -
-  python3 scripts/voice_check.py --sendable path/to/cover-note.md
   python3 scripts/voice_check.py --selftest
-Exit 0 = clean · 1 = findings · 2 = usage error.
+Exit 0 = clean, 1 = findings, 2 = usage error.
 """
 from __future__ import annotations
 import re
 import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+WRITING_KB = REPO / "knowledge-base" / "17-writing.md"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+try:  # every knob is optional; a missing config.py or a missing value falls back to the default
+    import config as _config  # type: ignore
+except Exception:  # pragma: no cover
+    _config = None
+
+DASH_CAT = "em/en-dash"          # hooks.py treats this category as advisory; keep the name stable
+OVER_CAT = "over-confidence"
+AUTH_CAT = "work-authorization mention (only when asked)"
+NEVER_CAT = "never-say (your list, 17-writing.md)"
 
 # (category, [patterns], why + the fix). Patterns are case-insensitive.
 RULES: list[tuple[str, list[str], str]] = [
-    ("hype / superlative", [
-        r"\bkiller\b", r"\bsuper[-\s]?powers?\b", r"\bexceptional\b", r"\bworld[-\s]?class\b",
-        r"\bbest[-\s]?in[-\s]?class\b", r"\bunmatched\b", r"\bunrivall?ed\b", r"\bbull'?s?[-\s]?eye\b",
-        r"\bgame[-\s]?changer\b", r"\bcutting[-\s]edge\b", r"\bseamless(ly)?\b", r"\belevate\b",
-        r"\bsupercharge\b", r"\brock[-\s]?star\b", r"\b10x\b", r"\bnext[-\s]level\b",
-        r"\btop[-\s]tier\b", r"\bstrongest\b", r"\bgod of \w+\b", r"\ba god\b",
-        r"\bdoubly (urgent|important)\b", r"\bthe (entire|whole) point\b",
-    ], "Selling or inflating. State the fact flat and stop; drop the superlative."),
+    (DASH_CAT, ["\u2014", "\u2013", r"(?<!\w)--(?!\w)"],
+        "Em-dash, en-dash, or double-dash (17-writing.md, punctuation). Use a period or a comma. "
+        "(Feed the SENDABLE prose, not a dossier file: markdown headers and date ranges use dashes "
+        "structurally.)"),
 
-    ("false modesty / naming a limitation", [
-        r"\bcan'?t say for sure\b", r"\bnot sure I'?d be a good fit\b",
-        r"\b(one )?gap I'?d flag\b", r"\bone gap\b", r"\bhonest gap\b",
-        r"\b(have|need) to ramp\b", r"\bramp on\b", r"\bwould have to ramp\b",
-        r"\bI'?m not (great|good) at\b", r"\bI struggle with\b",
-        r"\bmy (one )?(weakness|limitation)\b", r"\bthat'?s a (weakness|limitation)\b",
-    ], "Undercutting yourself or naming a limitation nobody asked about. State the work plainly "
-       "and let it stand; you know what you're good at."),
+    (OVER_CAT, [
+        r"\bthat'?s exactly\b",
+        r"\bexactly how I\b",
+        r"\b(?:is|was) already how I\b",
+        r"\bexactly (?:what|the kind of (?:thing|work|problem)) I(?:'ve| have)? "
+        r"(?:do|did|done|build|built|work on|worked on)\b",
+        r"\bthe (?:very |exact )?same problems? I(?:'ve| have)? "
+        r"(?:solved|solve|worked on|work on|faced|face|tackled)\b",
+        r"\bperfect fit\b",
+        r"\bI know exactly how\b",
+    ], "Over-confident: it sounds like you have it all figured out (17-writing.md, never "
+       "over-confident). Say what you did and what about their work it made you think of, and let "
+       "the reader make the link."),
 
-    ("performed emotion", [
-        r"\bcan'?t stop thinking about\b", r"\bkeeps me up at night\b", r"\bobsess(ed|ion)\b",
-        r"\b(deeply|really)\s+passionate\b", r"\blights?\s+(me|him|her|them)\s+up\b",
-    ], "Announced feeling. Show the specific thing plainly; do not name the emotion."),
-
-    ("story-arc", [
-        r"\bthe (hard|expensive) way\b", r"\band that'?s why\b", r"\bthat'?s when I\b",
-        r"\bhere'?s the thing\b", r"\bit turns out\b", r"\blittle did I\b", r"\bwhat I realized\b",
-    ], "Reads as a story (setup, lesson, turn). Skip the narrative arc; make it a plain statement."),
-
-    ("too-neat mirror", [
-        r"\balready\b", r"\bexactly\b",
-        r"\bthe same (thing|fight|problem) I (deal|fight|face|work|live)\b",
-        r"\breads like a description of my\b",
-    ], "A too-neat mirror between the company and you, the JD's language handed back as if you "
-       "already lived inside their exact framing. This is a BLANKET ban on the bare words "
-       "'already' and 'exactly', not a pattern over specific noun phrases: a pattern-matched rule "
-       "over specific shapes ('exactly how I work') missed the same claim wearing a different "
-       "grammatical shell every time it was tightened ('is already my default', 'is already the "
-       "world X operates in', 'I already work with the product': three distinct shells, same "
-       "underlying claim, in one sweep). When a banned pattern keeps resurfacing in a new shape, "
-       "the word itself is the tell, not the sentence shape around it. Any legitimate non-mirror "
-       "use ('exactly 5 years', 'I have already relocated') is cheap to reword and loses nothing "
-       "by dropping the word, and that trade beats missing a fourth variant."),
-
-    ("em/en-dash", [r"—", r"–", r"(?<!\w)--(?!\w)"],
-        "Em-dash, en-dash, or double-dash. Banned in shipped copy; use a period or a comma. "
-        "(Feed this the SENDABLE prose, not a whole dossier file: markdown headers and date "
-        "ranges use dashes structurally, and that is not what this rule is for.)"),
-
-    ("antithesis", [
-        r"\bit'?s not (just )?(about )?[^.,;]{1,30}[,;] it'?s\b",
-        r"\bnot a \w+[.,;] (it'?s|but)\b",
-    ], "'Not X, it's Y' antithesis. Symmetry is not insight; write the plain version."),
-
-    ("performed / trying to impress", [
-        r"\bno\s+[\w-]+,\s+no\s+[\w-]+,\s+no\s+[\w-]+",   # rhetorical negative list: "no feed, no streaks, no coach"
-        r"\b(it|that|which)\s+refuses\s+to\b",             # anthropomorphized bold claim
-        r"\bthe (overrated|obscure) one is\b",             # mic-drop framing of a hot take
-    ], "Performing / trying to sound impressive (a rhetorical negative-list, an anthropomorphized "
-       "bold claim, or a hot-take pronouncement). Keep a natural tone, no overconfident or bold "
-       "statements a real person wouldn't actually say out loud."),
-
-    # ── Register-level detectors. A keyword denylist keeps missing the CLAIM a person is actually
-    # making when it's dressed in a synonym: "selling yourself as a god," the mirror wearing a
-    # different word, the fit-sell, the performed setup, the reflexive triad. Each pattern below
-    # catches the register SHELL, never a plain statement of the work, and each one has a selftest
-    # proving both directions. Standing rule (knowledge-base/11): when a voice defect is caught, the
-    # SAME change adds the WHOLE synonym neighborhood, not just the one string that tripped it, plus
-    # a selftest that proves it fires. A one-string patch is not a fix.
-
-    ("mirror-in-disguise (the claim is banned in any wording, not the word)", [
-        r"\bthe (exact|same|very) (problem|thing|shape|muscle|challenge|tension|question|fight|work|kind of \w+)\b",
-        r"\bthat'?s (exactly |just |precisely )?(what|how) I (do|work|operate|design|build|approach)\b",
-        r"\bI (work|do|design|operate|build|ship) (that|this) way\b",
-        r"\bI (build|do|design|ship|bring|catch) (that|this) kind of \w+\b",
-        r"\bcomes? naturally to (me|him|her|them)\b",
-        r"\bsecond nature\b",
-        r"\b(this is|that'?s|it'?s) just how I (operate|work|do|think|design)\b",
-    ], "The too-neat mirror wearing a synonym: the company's own framing mapped onto you as if it "
-       "already described you before you ever read their posting. Banned in every wording, not "
-       "just the literal words 'already' or 'exactly': 'the exact problem', 'I work that way "
-       "already', 'comes naturally', 'second nature' all describe the same claim in a different "
-       "shell. State partial overlap plainly ('close to what I've built'); never claim their "
-       "framing was true of you before you read it."),
-
-    ("building to a point (performed setup)", [
-        r"\bhere'?s the (part|thing|bit)\b",
-        r"\bthe (other )?part (that|which) stood out\b",
-        r"\bwhat (really )?stood out\b",
-    ], "A person answering a question does not build to a point. Drop the setup and say the thing. "
-       "'Here's the part I care about most:' becomes stating it flat."),
-
-    ("performed superlative", [
-        # The tell is PERFORMED emphasis, not the plain factual "the hardest part was <fact>",
-        # which is a fine, honest register on its own. Flagging the bare form is a false positive
-        # on honest copy, so only the doubled / superlative-of-superlatives shapes are caught.
-        r"\bhardest and most \w+\b",
-        # "the single hardest/toughest" is performed; "the single biggest/best <cost/risk/line>" is
-        # a plain factual comparison, so biggest/best are excluded from this pattern. The "... ever"
-        # and "by far the ..." shapes stay performed for all four words.
-        r"\bthe single (?:hardest|toughest)\b",
-        # "the hardest thing I've ever built" is the performed tell; "the best turnout the event
-        # ever had" is a plain external fact, so the "ever" shape anchors to the writer's own work.
-        r"\b(?:hardest|toughest|biggest|best)\b[^.!?\n]{0,20}\bI'?ve ever\b",
-        r"\b(?:hardest|toughest|biggest|best)\b[^.!?\n]{0,25}\bever (?:built|shipped|designed|made|done|worked)\b",
-        r"\bby far the (?:hardest|toughest|best|most \w+)\b",
-    ], "Performed emphasis dressing a plain fact ('the hardest AND MOST interesting part', 'by far "
-       "the hardest', 'the single hardest'). State what it was, not how remarkable it was. A plain "
-       "'the hardest part was <concrete fact>' is fine; that's the honest register, not a tell."),
-
-    ("fit-sell / god-mode confidence", [
-        # anchored to a candidate subject: "I'm a great fit" fires, but "the typeface was a great
-        # fit for the tables" is a plain object description and must not.
-        r"\b(?:I|I'?m|me|myself|candidate)\b[^.!?\n]{0,24}\b(?:perfect|ideal|strong|great|natural|obvious)\s+fit\b",
-        r"\bideal candidate\b", r"\buniquely (positioned|qualified|suited)\b",
-        r"\brare (combination|blend|mix)\b", r"\bone of the (very )?few\b",
-        r"\bin my wheelhouse\b", r"\bmy sweet spot\b", r"\bright up my alley\b",
-        r"\bproven track record\b", r"\bdeep expertise\b", r"\bbattle[- ]tested\b",
-        r"\bI (thrive|excel)\b", r"\bhit the ground running\b",
-        r"\b(day[- ]one|immediate|instant) impact\b",
-        r"\bI'?ve figured (it|this|everything|it all) out\b",
-        r"\bI don'?t just \w+,? I \w+\b",
-    ], "Selling yourself as the perfect, rare, proven candidate who has it all figured out. State "
-       "the real work flat and let the fit be inferred; never assert it."),
-
-    ("announced passion / excitement", [
-        r"\b(i'?m|i am|so|really|genuinely)\s+(excited|thrilled|pumped|energized)\b",
-        r"\b(excited|thrilled|pumped|energized)\s+(to|about|for)\b",
-        r"\bpassionate about\b", r"\beager to\b",
-    ], "Announced feeling. Point 7 of §11 bans naming the emotion ('excited/passionate'). Show the "
-       "specific thing plainly; do not declare the feeling."),
-
-    ("forced-warmth idiom", [
-        r"\bI'?d owe you one\b", r"\bowe you (one|big|big time)\b",
-        r"\byou'?d be doing me a solid\b", r"\bforever grateful\b",
-    ], "A performed-warmth idiom most people do not actually use in writing. The honest plain "
-       "register: 'that would help a lot' / 'that would mean a lot' / 'I'd really appreciate it'."),
-
-    ("reflexive triad (rule of three)", [
-        r"\bI \w+,\s+I \w+,?\s+and I \w+\b",
-        r"\b(\w+) the \w+,\s+\1 the \w+,?\s+and \1 the \w+\b",
-    ], "A reflexive balanced triad ('I design, I build, and I ship' / 'draw the thing, build the "
-       "thing, judge the thing'), the loudest AI fingerprint (§11 point 1). Use one, two, or an "
-       "uneven list."),
-
-    ("rinse-and-repeat template opener", [
-        r"\bI saw the\b[^.]{0,60}\brole\b[^.]{0,15}\bthe line about\b",
-    ], "A stock opener that turns up across many cover notes. The same first move every time reads "
-       "as a template. Open on the one specific true thing about THIS role, in its own words. "
-       "(Cross-note sameness is caught by scripts/batch_voice_check.py.)"),
-
-    # §11 point 8 names these explicitly ("corporate connective tissue & intensifiers") but nothing
-    # detected them mechanically before this pass. Scoped to the tell shapes (sentence-initial
-    # connectives, the fixed phrases) so a legitimate mid-sentence "honestly" or a literal "at the
-    # end of the day" time reference does not over-fire.
-    ("corporate connective tissue / intensifier (§11 pt 8)", [
-        r"(?:^|[.!?]\s+|\n)(?:Genuinely|Truly|Honestly|Frankly),",
-        r"(?:^|[.!?]\s+|\n)That said,",
-        r"(?:^|[.!?]\s+|\n)It'?s worth noting\b",
-        r"\bneedless to say\b",
-        r"\bI care deeply\b", r"\bdeeply care\b",
-    ], "§11 point 8: corporate connective tissue and hollow intensifiers ('Genuinely,' 'Truly,' "
-       "'That said,' 'It's worth noting,' 'I care deeply'). Cut the connective and state the thing "
-       "plainly; the emphasis words add nothing a specific true detail would not."),
-
-    # The existing "antithesis" rule catches "it's not X, it's Y." This adds the "it was never
-    # about X, it's Y" mirror of the same move.
-    ("antithesis (never about X, it was Y)", [
-        r"\b(?:it|that)'?s?\s+(?:was\s+)?never\s+(?:been\s+)?(?:about|the point)\b[^.!?\n]{0,60}\bit'?s\b",
-        r"\bnever\s+about\s+the\s+\w+[^.!?\n]{0,40},?\s+it'?s\s+about\b",
-    ], "Antithesis porn: the 'it was never about X, it's Y' turn. Symmetry is not insight. Say the "
-       "one thing plainly, without the mirrored setup."),
-
-    # Overconfident-control tells that carry no hype word, so they slip past every other detector
-    # while still reading as a flex: "on top of it the whole time," "on a short leash." This is the
-    # same don't-inflate/no-performance register as the rest of §11, just without a superlative in
-    # sight, which is exactly why a plain hype-word gate missed it.
-    ("performed control / swagger", [
-        r"\b(?:I'?m|I am|staying|I stay|keeping it|keep it)\s+on top of (?:it|them|everything|all of it)\b",
-        r"\bon a short leash\b",
-        # the swagger is "not babysitting every screen," not the plain "babysitting the deploy"
-        # (require the every/each/the-<surface> object, or the "not ... babysit" shape).
-        r"\bbabysit(?:ting)?\s+(?:every|each|the)\s+(?:screen|output|line|change|thing|pixel|step)\b",
-        r"\bnot\s+(?:sitting there\s+)?babysit(?:ting)?\b",
-        # the possessive FLOURISH ("the judgment, that stays with me"), never the plain "I keep the
-        # design decisions," so it requires the "that/it ... stays/lives with me" shape.
-        r"\b(?:that|it|the (?:judgment|call|taste|decision|say))\s+(?:part\s+)?(?:stays|lives)\s+with me\b",
-    ], "Performed control or swagger: 'on top of it the whole time,' 'short leash,' 'not "
-       "babysitting every screen,' 'that stays with me.' State what you do plainly ('I review the "
-       "code and make the design calls'); drop the flex."),
-
-    ("performed repetition (a beat for emphasis)", [
-        # a word repeated after a full stop for a spoken flourish: "nobody used them. Like, nobody."
-        r"\b(\w{3,})\b[^.!?\n]{0,30}[.!?]\s+(?:Like|Just|Really|Honestly),?\s+\1\b",
-        # the bare doubled beat: "gone. Just gone." / "done. Actually done."
-        r"\b(\w{3,})[.!]\s+(?:Just|Really|Actually|Like)\s+\1\b",
-    ], "A word repeated for a performed beat ('nobody used them. Like, nobody.', 'gone. Just "
-       "gone.'). It's a spoken-word flourish, not information. Say it once, plainly."),
+    # First-person status claims only, so a note that documents the rule ("no work-authorization
+    # content in the body") never fires. Off when the copy answers the question (_AUTH_ALLOW).
+    (AUTH_CAT, [
+        r"\bI(?:'m| am)\s+(?:currently\s+)?(?:on\s+an?\s+(?:\w+\s+)?visa|authori[sz]ed\s+to\s+work)\b",
+        r"\bI\s+(?:do\s+not|don'?t|won'?t|will\s+not)\s+(?:need|require)\s+(?:any\s+)?(?:visa\s+)?sponsorship\b",
+        r"\bmy\s+(?:visa|work\s+authori[sz]ation|work\s+permit|immigration)\b",
+        r"\bno\s+sponsorship\s+(?:is\s+)?(?:needed|required)\b",
+        r"\b(?:I|I'm|I'd|I'll|I've|me|my)\b[^.!?\n]{0,80}?\b(?:sponsorship|sponsor\s+me)\b",
+        r"\bsponsorship\b[^.!?\n]{0,80}?\b(?:I|I'm|I'd|I'll|me|my)\b",
+        r"(?:^|[.!?]\s+)(?:(?:will|would|'ll)\s+)?(?:need|require)s?\s+(?:an?\s+)?(?:visa\s+)?sponsorship\b",
+    ], "A work-authorization or sponsorship claim nobody asked about (knowledge-base/02, 'Default: "
+       "silence'). Cut it. If the text answers that question, keep the question in the same "
+       "paragraph or mark the answer `voice:allow visa`."),
 ]
+
+# The work-authorization family is off when the copy is ANSWERING that question: the question itself
+# (with its "?") sits in the same paragraph, or the answer carries the visible marker.
+_AUTH_ALLOW = re.compile(r"voice:allow\s+visa\b"
+                         r"|\b(?:visa|sponsor\w*|authori[sz]ed\s+to\s+work|work[- ]authori[sz]ation|citizen\w*)"
+                         r"\b[^?\n]{0,120}\?", re.I)
+
+
+# Your never-say list
+# Format, inside the "## Never-say list" section of knowledge-base/17-writing.md (HTML comments are
+# ignored, so the shipped examples never fire):
+#   - `a literal phrase` : why it is banned
+#   - `re:a regular expression` : why
+_NEVER_ITEM = re.compile(r"^\s*[-*]\s+`(?P<pat>[^`]+)`\s*(?:[:,]\s*(?P<why>.*))?$")
+
+
+def parse_never_say(md: str) -> list[tuple[str, str]]:
+    """[(regex, why)] from the Never-say section of a 17-writing.md text."""
+    md = re.sub(r"<!--[\s\S]*?-->", "", md)
+    m = re.search(r"(?im)^##\s+Never-say list\b.*$", md)
+    if not m:
+        return []
+    rest = md[m.end():]
+    nxt = re.search(r"(?m)^##\s", rest)
+    section = rest[: nxt.start()] if nxt else rest
+    out = []
+    for ln in section.splitlines():
+        im = _NEVER_ITEM.match(ln)
+        if not im:
+            continue
+        raw = im.group("pat").strip()
+        why = (im.group("why") or "").strip() or "on your never-say list"
+        if raw.lower().startswith("re:"):
+            pat = raw[3:].strip()
+            try:
+                re.compile(pat)
+            except re.error:
+                continue  # a broken pattern is skipped, never a crash
+        else:
+            pat = r"(?<!\w)" + re.escape(raw) + r"(?!\w)"
+        if pat:
+            out.append((pat, why))
+    return out
+
+
+_NEVER_CACHE: list[tuple[str, str]] | None = None
+
+
+def never_say() -> list[tuple[str, str]]:
+    global _NEVER_CACHE
+    if _NEVER_CACHE is None:
+        try:
+            _NEVER_CACHE = parse_never_say(WRITING_KB.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            _NEVER_CACHE = []
+    return _NEVER_CACHE
+
+
+def _auth_check_on() -> bool:
+    return bool(getattr(_config, "WORK_AUTH_MENTION_CHECK", True)) if _config else True
 
 
 def sendable_prose(text: str) -> str:
-    """The copy a reader actually receives, lifted out of a note or answer FILE so the gate reads
-    the words and not the scaffolding around them.
+    """The copy a reader actually receives, lifted out of a note or answer FILE.
 
-    Without this, running the gate on a real file drowns in false positives: a markdown `---` fence
-    used as a section divider reads as an em-dash, a process note that quotes a banned phrase to
-    document its own removal trips the detector on the very sentence recording the fix, and a
-    metadata line can carry the job posting's own language verbatim. The convention this project
-    uses across files like cover-note.md (and any similar single- or multi-answer note): the
-    sendable copy sits between the first PAIR of `---` fences, or AFTER the first fence when there
-    is no closing one. No fence at all means the whole text is copy.
+    The text after the first `---` fence is copy: the segment right after it always, and each later
+    fence-separated segment too (multi-answer files), EXCEPT a later segment that opens with a
+    markdown heading, which is a notes section (a cover note's "## Why these specifics" and the
+    like), not something sent. Inside what is kept, markdown headings, `**Label:**` metadata lines,
+    table rows (`| a | b |`, including the `|---|---|` separator) and HTML comments are dropped.
+    No fence at all means the whole text is copy. fill_ready.py reads a cover note through this
+    same function, so the two gates can never disagree about what the letter is.
     """
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
     parts = re.split(r"(?m)^[ \t]*---[ \t]*$", text)
-    # ALL copy after the first fence, not just the first section: a multi-answer file (Q1 --- Q2 ---
-    # Q3) should have every answer checked, not just the first one, and joining the tail also keeps
-    # a single-answer file (two parts: metadata, answer) correct.
-    body = "\n".join(parts[1:]) if len(parts) >= 2 else text
+    if len(parts) >= 2:
+        kept = [parts[1]]
+        for seg in parts[2:]:
+            first = next((ln for ln in seg.splitlines() if ln.strip()), "")
+            if re.match(r"^\s*#", first):
+                continue
+            kept.append(seg)
+        body = "\n".join(kept)
+    else:
+        body = text
     out = []
     for ln in body.splitlines():
-        s = re.sub(r"^\s*>\s?", "", ln)               # drop a blockquote marker first, so a
-        if re.match(r"^\s*#", s):                     # metadata line written as "> **Source:** ..."
-            continue                                  # is dropped too (a quoted job-posting
-        if re.match(r"^\s*\*\*[^*]+:\*\*", s):         # excerpt should not be checked as your prose)
+        s = re.sub(r"^\s*>\s?", "", ln)
+        if re.match(r"^\s*#", s):
+            continue
+        if re.match(r"^\s*\*\*[^*]+:\*\*", s):
+            continue
+        if re.match(r"^\s*\|.*\|\s*$", s):
             continue
         out.append(s)
     return "\n".join(out)
 
 
-def check(text: str) -> list[tuple[str, str, str]]:
+def check(text: str, never: list[tuple[str, str]] | None = None,
+          auth_check: bool | None = None) -> list[tuple[str, str, str]]:
+    """[(category, matched fragment, why)]. `never` defaults to your 17-writing.md list and
+    `auth_check` to config.py; the selftest passes both explicitly."""
     findings: list[tuple[str, str, str]] = []
-    for cat, pats, why in RULES:
+    never = never_say() if never is None else never
+    auth_on = _auth_check_on() if auth_check is None else auth_check
+    allow_auth = bool(re.search(r"voice:allow\s+visa\b", text, re.I))
+    rules = list(RULES) + [(NEVER_CAT, [p], f"On your never-say list: {why}") for p, why in never]
+    for cat, pats, why in rules:
+        if cat == AUTH_CAT and (allow_auth or not auth_on):
+            continue
         seen = set()
         for p in pats:
             for m in re.finditer(p, text, re.I):
+                if cat == AUTH_CAT:
+                    # asked = the question (with its "?") in the SAME paragraph as the claim, so a
+                    # quoted form question in a notes section never switches the check off above it
+                    a = text.rfind("\n\n", 0, m.start())
+                    b = text.find("\n\n", m.end())
+                    if _AUTH_ALLOW.search(text[a + 1 if a >= 0 else 0: b if b >= 0 else len(text)]):
+                        continue
                 frag = m.group(0).strip()
                 key = (cat, frag.lower())
                 if key in seen:
@@ -280,15 +214,11 @@ def check(text: str) -> list[tuple[str, str, str]]:
 
 def render(findings: list[tuple[str, str, str]]) -> str:
     if not findings:
-        return ("voice_check: CLEAN of the mechanical tells (necessary, NOT sufficient: exit 0 is "
-                "not permission to ship).\n"
-                "  This gate cannot see: confidence-at-100% with no banned word, a mirror claim in "
-                "a phrasing it hasn't learned yet, or the SAME opener reused across many notes "
-                "(that is scripts/batch_voice_check.py's job).\n"
-                "  Still required: read it plainly out loud. Does it just state the work, or does "
-                "it sell, narrate, or apologize? Plain and neutral is the bar, neither pitch nor "
-                "hedge (CLAUDE.md §11).")
-    out = [f"voice_check: {len(findings)} finding(s). Rewrite before this passes.\n"]
+        return ("voice_check: CLEAN of the hard facts and banned phrases (dashes, over-confidence, an "
+                "unasked work-authorization mention, your never-say list).\n"
+                "  This says nothing about the voice. Read it out loud as yourself, to this one person, "
+                "and have a fresh reviewer read it against knowledge-base/17-writing.md.")
+    out = [f"voice_check: {len(findings)} finding(s), fix before this passes.\n"]
     for cat, frag, why in findings:
         out.append(f"  [{cat}] “{frag}”\n      {why}")
     return "\n".join(out)
@@ -303,186 +233,95 @@ def selftest() -> int:
         passed, failed = (passed + 1, failed) if cond else (passed, failed + 1)
         results.append((label, cond))
 
-    def cats(t):
-        return {c for c, _, _ in check(t)}
+    def cats(t, never=(), auth=True):
+        return {c for c, _, _ in check(t, never=list(never), auth_check=auth)}
 
-    # Over-SELLING: a hype-and-mirror-heavy draft, caught on multiple axes.
-    hype = ("Because the thing Mirror is actually solving is the thing I can't stop thinking about. "
-            "That's the same fight I'm in every day. Most software looks the same now, and that's "
-            "exactly how I work: I keep the judgment. Mirror is a bet that the specific human signal "
-            "is the entire point. That's the exact muscle Mirror needs. It's your strongest, killer fit.")
-    hf = cats(hype)
-    want("catches performed emotion (can't stop thinking about)", "performed emotion" in hf)
-    want("catches too-neat mirror (exactly how I / same fight)", "too-neat mirror" in hf)
-    want("catches hype (strongest / killer / the entire point)", "hype / superlative" in hf)
+    # dashes
+    want("dash: em-dash flagged", DASH_CAT in cats("I rebuilt the tracking page \u2014 all of it."))
+    want("dash: en-dash flagged", DASH_CAT in cats("I rebuilt the tracking page \u2013 all of it."))
+    want("dash: spaced double-dash flagged", DASH_CAT in cats("I rebuilt the tracking page -- all of it."))
+    want("dash: a hyphenated word is clean", DASH_CAT not in cats("It was a long-running, real-time dashboard."))
 
-    story = "I learned it the hard way, and that's why now I keep the judgment on what ships."
-    want("catches story-arc (the hard way / and that's why)", "story-arc" in cats(story))
+    # over-confidence
+    for txt in ["That's exactly how I work.", "that is exactly how I approach a dashboard.",
+                "Owning the system end to end is already how I work.",
+                "It's the same problem I solved at Globex.", "This is the same problem I worked on last year.",
+                "I think I'm a perfect fit for the role.", "I know exactly how to fix that page.",
+                "That is exactly what I built at Initech."]:
+        want(f"over-confidence flagged: {txt!r}", OVER_CAT in cats(txt))
+    for txt in ["Your tracking page reminded me of a problem we had at Globex.",
+                "It took exactly five years.", "I have already relocated to the city.",
+                "I'm not sure yet how your team splits that work, so I'd like to ask."]:
+        want(f"over-confidence clean: {txt!r}", OVER_CAT not in cats(txt))
 
-    # Three distinct grammatical shells for the same underlying claim, found in one real sweep:
-    # a pattern-matched rule over specific phrases missed the second and third shell entirely,
-    # which is exactly why this rule is now a blanket ban on the bare words, not a phrase list.
-    already_mirror = ("I'm applying for the Design Engineer role. The line about owning the design "
-                       "system across Figma and code is already how I work.")
-    want("catches 'is already how I work' (not just 'exactly')",
-         "too-neat mirror" in cats(already_mirror))
+    # work-authorization mention only when asked
+    want("auth: unasked line in a cover body flagged",
+         AUTH_CAT in cats("My work is linked below. I'm authorized to work in the US and can start."))
+    want("auth: 'don't need sponsorship' flagged", AUTH_CAT in cats("I don't need sponsorship to start."))
+    want("auth: 'my visa' flagged", AUTH_CAT in cats("Happy to talk about my visa timeline on a call."))
+    want("auth: 'I'd need sponsorship later' flagged",
+         AUTH_CAT in cats("I can start right away, and I'd need sponsorship later."))
+    want("auth: subjectless 'Will need sponsorship later.' flagged",
+         AUTH_CAT in cats("Open to relocating. Will need sponsorship later."))
+    want("auth: an answer to the question in the same paragraph is clean",
+         AUTH_CAT not in cats("Will you now or in the future require sponsorship? No. I don't need sponsorship."))
+    want("auth: a question in a LATER notes paragraph does not switch it off",
+         AUTH_CAT in cats("I'm authorized to work in the US.\n\n"
+                          "- Form: \"Will you now or in the future require sponsorship?\" -> No"))
+    want("auth: the voice:allow visa marker clears it",
+         AUTH_CAT not in cats("I'm authorized to work in the US. <!-- voice:allow visa: recruiter asked -->"))
+    want("auth: 'I opt for' (the verb) is clean", AUTH_CAT not in cats("I opt for borders before shadows."))
+    want("auth: a note documenting the rule is clean", AUTH_CAT not in cats("- No sponsorship content in the body."))
+    want("auth: config off turns the family off",
+         AUTH_CAT not in cats("I don't need sponsorship to start.", auth=False))
 
-    synonym_mirror = ("A designer who ships his own production front end, with an AI-native workflow, "
-                       "is already the world Fathom operates in.")
-    want("catches 'is already the world X operates in' (the copula shell)",
-         "too-neat mirror" in cats(synonym_mirror))
+    # the never-say list, parsed from a synthetic 17-writing.md
+    kb = ("# 17 Writing\n\n## Never-say list\n\n<!--\n- `example phrase` : an example that must not fire\n-->\n\n"
+          "- `March 2024 to present` : never put my Acme dates in prose\n"
+          "- `re:\\bonly one (?:AI )?feature\\b` : the Northwind tool has several\n"
+          "- `re:([unclosed` : a broken pattern is skipped\n\n## Next section\n\n- `not in the list` : x\n")
+    ns = parse_never_say(kb)
+    want("never-say: two valid items parsed (comment, broken regex and next section ignored)", len(ns) == 2)
+    want("never-say: literal phrase flagged", NEVER_CAT in cats("I was at Acme from March 2024 to present.", ns))
+    want("never-say: regex item flagged", NEVER_CAT in cats("We shipped only one AI feature.", ns))
+    want("never-say: commented example does not fire", NEVER_CAT not in cats("an example phrase here", ns))
+    want("never-say: an item after the section does not fire", NEVER_CAT not in cats("not in the list", ns))
+    want("never-say: an empty list flags nothing", NEVER_CAT not in cats("March 2024 to present", []))
+    want("never-say: no section means no items", parse_never_say("# x\n\n- `a` : b\n") == [])
 
-    no_copula_mirror = ("I use Northwind every working day, so the honest version of why I'm applying "
-                         "is that I already work with the product all day.")
-    want("catches 'I already work' (no copula, the blanket-word fix)",
-         "too-neat mirror" in cats(no_copula_mirror))
+    # the retired style shapes are NOT flagged any more
+    for txt in ["I'm a builder who ships the whole thing myself.",
+                "It's not a mockup, but a real thing people use.",
+                "I design, I build, and I ship.",
+                "I'm so excited and passionate about this role.",
+                "It's the strongest, killer, world-class work I've done.",
+                "I already did that, and exactly that.",
+                "I did the research. I made the plan. I'd built the screens. I've shipped it."]:
+        want(f"retired shape no longer flagged: {txt!r}", not check(txt, never=[], auth_check=True))
 
-    want("catches em-dash", "em/en-dash" in cats("I ship the front end — all of it."))
-    want("catches en-dash (U+2013)", "em/en-dash" in cats("I ship the front end – all of it."))
+    plain = ("Hi Jordan, I saw your team is rebuilding the shipment page. At Globex I worked on the tracking "
+             "page operators used every day, and the thing we learned is that people open it to find what's "
+             "wrong, not to admire what's fine. Happy to talk if that's useful. Talk soon")
+    want("a plain human message is clean on every family", not check(plain, never=[], auth_check=True))
 
-    # A plain "the hardest part was <fact>" must not flag; the DOUBLED form still must.
-    want("plain 'the hardest part was <fact>' is NOT flagged as a performed superlative",
-         "performed superlative" not in cats(
-             "The hardest part was the billing: a race where a cancelled order could still charge a card."))
-    want("the DOUBLED 'hardest and most' IS still caught",
-         "performed superlative" in cats("The hardest and most interesting part was the sync."))
+    # sendable_prose
+    want("sendable_prose checks every answer after the first fence",
+         DASH_CAT in cats(sendable_prose("# Q\n**note:** x\n---\nAnswer one.\n---\nAnswer two \u2014 later.\n")))
+    want("sendable_prose drops metadata before the fence",
+         DASH_CAT not in cats(sendable_prose("# Q \u2014 title\n**v3 note:** a \u2014 b\n---\nPlain answer.\n")))
+    _cover = ("# Cover note: Acme\n<!-- split on a bare --- line -->\n\n---\nHi,\n\nPlain letter.\n"
+              "---\n\n## Why these specifics\n\n| Line | Pillar |\n|---|---|\n| a | b |\n\n"
+              "## Deliberately NOT said\n- held back \u2014 a note to self\n")
+    want("sendable_prose: a cover note's table separator and notes sections are not copy (S6)",
+         cats(sendable_prose(_cover)) == set())
+    want("sendable_prose: a dash inside the letter itself is still caught",
+         DASH_CAT in cats(sendable_prose(_cover.replace("Plain letter.", "Plain \u2014 letter."))))
+    want("sendable_prose drops a `> **Source:**` line",
+         DASH_CAT not in cats(sendable_prose("# Q\n---\n> **Source:** JD \u2014 quoted\nMy answer is plain.\n")))
 
-    want("catches §11-pt8 intensifier ('It's worth noting')",
-         "corporate connective tissue / intensifier (§11 pt 8)" in cats(
-             "It's worth noting that I ship the front end myself."))
-    want("catches antithesis 'it was never about X, it's Y'",
-         "antithesis (never about X, it was Y)" in cats(
-             "It was never about the volume, it's about the one right answer."))
-
-    perf = "It does one thing, and it refuses to do anything else. No feed, no streaks, no coach."
-    pf = cats(perf)
-    want("catches performed negative-list (no X, no Y, no Z)", "performed / trying to impress" in pf)
-    want("catches anthropomorphized 'it refuses to'", "performed / trying to impress" in pf)
-
-    # Over-APOLOGIZING: false modesty / naming a limitation must be caught.
-    modest = ("Honestly, I can't say for sure I'd be a good fit. One gap I'd flag: my stack is React "
-              "and Tailwind, not deep Next.js server components, so that is something I would have "
-              "to ramp on.")
-    mf = cats(modest)
-    want("catches false modesty ('can't say for sure I'd be a good fit')",
-         "false modesty / naming a limitation" in mf)
-    want("catches naming a limitation ('gap I'd flag' / 'ramp on')",
-         "false modesty / naming a limitation" in mf)
-
-    # ── Register-level detectors. Each catches a real tell that a plain keyword gate misses; the
-    # must-NOT set below (the plain rewrite + the approved DM control) proves the patterns catch
-    # the register shell, not a plain statement of the work.
-    want("mirror-in-disguise: 'the exact problem I've been working on'",
-         "mirror-in-disguise (the claim is banned in any wording, not the word)" in cats(
-             "That's the exact problem I've been working on at my current company."))
-    want("mirror-in-disguise: 'comes naturally to me' (a synonym a phrase-list rule would miss)",
-         "mirror-in-disguise (the claim is banned in any wording, not the word)" in cats(
-             "It comes naturally to me."))
-    want("mirror-in-disguise: 'second nature'",
-         "mirror-in-disguise (the claim is banned in any wording, not the word)" in cats(
-             "That is second nature to me."))
-    want("building-to-a-point: 'Here's the part I care about most'",
-         "building to a point (performed setup)" in cats(
-             "Here's the part of this work I care about most: judgment."))
-    want("performed superlative: 'the hardest and most interesting part'",
-         "performed superlative" in cats("It was the hardest and most interesting part of building it."))
-    want("fit-sell: 'strong fit'", "fit-sell / god-mode confidence" in cats("I'm a strong fit for this role."))
-    want("fit-sell: 'proven track record'",
-         "fit-sell / god-mode confidence" in cats("I have a proven track record of shipping product."))
-    want("fit-sell: 'I don't just design, I ship'",
-         "fit-sell / god-mode confidence" in cats("I don't just design, I ship."))
-    want("announced passion: 'excited about'",
-         "announced passion / excitement" in cats("I'm excited about this role."))
-    want("forced-warmth: 'I'd owe you one'",
-         "forced-warmth idiom" in cats("If you can refer me, I'd owe you one."))
-    want("reflexive triad: 'I design, I build, and I ship'",
-         "reflexive triad (rule of three)" in cats("I design, I build, and I ship."))
-    want("rinse-and-repeat opener",
-         "rinse-and-repeat template opener" in cats(
-             "I saw the Senior Product Designer role, and the line about owning a product area."))
-
-    # 🔴 MUST NOT FLAG: an approved plain-register DM. If a new detector trips this, it's too broad;
-    # this is the exact tone this project's plain-voice bar is aiming for.
-    alex_dm = ("Hey Alex, thanks for the add. Your post about letting the model decide what "
-               "actually serves the query stuck with me. I've been making that same bet, just from "
-               "the design side. At Fathom I built the design system solo, and the whole reason it "
-               "exists is so the coding agents read the tokens and component contracts straight off "
-               "an internal server instead of guessing. I design the product, then ship the front "
-               "end myself the same way. And honestly, seeing a CEO credit his designer the way you "
-               "do is half of why I applied. The application's in for the product design role. "
-               "Casey's got a note from me too, so this isn't me sneaking in a side door. Work's at "
-               "example.com. Worth a look? Jordan")
-    alex_findings = check(alex_dm)
-    want(f"the approved plain-register DM stays CLEAN (got: {[c for c, _, _ in alex_findings]})",
-         not alex_findings)
-
-    # The plain, neutral, confident rewrite must be CLEAN.
-    plain = ("Here is how I work. I design products for dense, complex work and make them clear and "
-             "fast to use. I built our design system at Fathom on my own, so the whole front end "
-             "pulls from one source of truth. I take the design to production myself, which means "
-             "what ships is what I decided. The part I care about most is judgment: what is actually "
-             "worth building and what to cut. Mirror interests me because you are keeping a real "
-             "person's voice inside a product, which is close to what I have built.")
-    plain_findings = check(plain)
-    want(f"the plain rewrite is CLEAN (got: {[c for c,_,_ in plain_findings]})", not plain_findings)
-
-    # ── Performed control / swagger + performed repetition. The exact tells this project's plain
-    # voice bar names; the plain statement of the same fact is NOT flagged.
-    want("swagger: 'I'm on top of it the whole time'",
-         "performed control / swagger" in cats(
-             "The AI writes the code and I'm on top of it the whole time."))
-    want("swagger: 'keep it on a short leash'",
-         "performed control / swagger" in cats("I use AI a lot but I keep it on a short leash."))
-    want("swagger: 'not babysitting every screen'",
-         "performed control / swagger" in cats("So I'm not sitting there babysitting every screen."))
-    want("swagger: 'the judgment, that stays with me'",
-         "performed control / swagger" in cats("Let it build, but the judgment, that stays with me."))
-    want("repetition: 'nobody used them. Like, nobody.'",
-         "performed repetition (a beat for emphasis)" in cats(
-             "We shipped fast and nobody used them. Like, nobody."))
-    want("🔴 the PLAIN control statement is NOT swagger (must not flag)",
-         "performed control / swagger" not in cats(
-             "The AI writes most of the code, and I go through it and make the design decisions."))
-
-    # ── Anchoring checks: object-agnostic patterns must not fire on plain facts that are not about
-    # you, while the self-referential tell still fires.
-    want("🔴 'the typeface was a great fit' is NOT fit-sell (plain object)",
-         "fit-sell / god-mode confidence" not in cats(
-             "The Inter typeface was a great fit for the dense tables."))
-    want("fit-sell still fires on 'I'm a great fit'",
-         "fit-sell / god-mode confidence" in cats("I'm a great fit for this role."))
-    want("🔴 'best turnout the event ever had' is NOT a performed superlative",
-         "performed superlative" not in cats("It was the best turnout the event ever had."))
-    want("performed superlative still fires on 'the hardest thing I've ever built'",
-         "performed superlative" in cats("That was the hardest thing I've ever built."))
-    want("🔴 'babysitting the overnight deploy' is NOT swagger (plain usage)",
-         "performed control / swagger" not in cats(
-             "I was babysitting the overnight deploy when it failed."))
-    want("swagger still fires on 'not babysitting every screen'",
-         "performed control / swagger" in cats("So I'm not sitting there babysitting every screen."))
-
-    # ── sendable_prose(): multi-section files, blockquoted metadata, and documenting-a-fix text.
-    want("sendable_prose checks EVERY answer, not just the first (a later 'hard way' is caught)",
-         "story-arc" in cats(sendable_prose(
-             "# Q\n**note:** x\n---\nAnswer one is plain.\n---\nAnd that's why I learned it the hard way.\n")))
-    want("sendable_prose drops a `> **Source:**` quoted line",
-         "performed / trying to impress" not in cats(sendable_prose(
-             "# Q\n---\n> **Source:** posting says 'no feed, no streaks, no coach'\nMy answer is plain.\n")))
-
-    # The metadata that DOCUMENTS a removed tell (a note about a dropped "learned it the hard way"
-    # story arc) sits BEFORE the fence and must be dropped, or the gate false-fires on the very
-    # sentence recording the fix. Only the fenced copy is what gets checked.
-    narration = ('# Q3 narration\n**v3 note:** v1 had a "learned it the hard way" story arc; removed.\n'
-                 '---\nYeah. I use AI on the build side. I write tests for the things that matter.\n')
-    want("sendable_prose drops the metadata 'hard way' (checks only the fenced copy)",
-         "story-arc" not in cats(sendable_prose(narration)))
-    want("sendable_prose still catches a tell INSIDE the fenced copy",
-         "story-arc" in cats(sendable_prose(
-             "# Q\n**note:** x\n---\nAnd that's why I learned it the hard way, honestly.\n")))
-
-    print("voice_check.py selftest\n")
+    print("voice_check.py selftest (hard facts and named phrases only)\n")
     for label, ok in results:
-        print(f"  {'✓' if ok else '✗'} {label}")
+        print(f"  {'PASS' if ok else 'FAIL'} {label}")
     print()
     if failed:
         print(f"SELFTEST FAILED: {failed} of {passed + failed} wrong")
@@ -494,9 +333,6 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
-    # --sendable: read a FILE (or stdin with -) but check only its SENDABLE copy: the fenced body,
-    # with metadata and markdown structure stripped. This is how a Stop hook can read a note file
-    # without false-positiving on its own scaffolding.
     sendable = False
     if argv and argv[0] == "--sendable":
         sendable = True

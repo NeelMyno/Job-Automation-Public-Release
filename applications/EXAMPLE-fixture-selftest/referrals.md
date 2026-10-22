@@ -1,4 +1,4 @@
-# Acme Corp: Design Lead · referral pack (SELFTEST FIXTURE)
+# Acme Corp: Platform Lead · referral pack (SELFTEST FIXTURE)
 
 **This whole dossier is synthetic.** Every name, company, and quote below is invented, built only
 so `python3 scripts/verify_claims.py --selftest` has something to run against on a fresh clone with
@@ -11,28 +11,28 @@ start a real dossier. Never this one.
 
 | # | Name | Title | Why them |
 |---|---|---|---|
-| 1 | **Jordan Rivera** | Design Lead, Acme Corp | Owns the team this role reports into. |
+| 1 | **Jordan Rivera** | Platform Lead, Acme Corp | Owns the team this role reports into. |
 | 2 | **Sam Okafor** | Engineering Manager, Acme Corp | Cross-functional partner on the same team. |
 
 ## The messages (ready to paste)
 
-### 1. Jordan Rivera, Design Lead at Acme Corp
+### 1. Jordan Rivera, Platform Lead at Acme Corp
 
 **Profile:** https://example.com/in/jordan-rivera-fixture
 
 **Connection note**
-> Hi Jordan, applying for the Design Lead role at Acme Corp. I build design systems and ship the front end myself.
+> Hi Jordan, applying for the Platform Lead role at Acme Corp. I build internal tools and ship them myself.
 
 **Direct message (Use InMail: NO, because a free connection note is available)**
-> Thanks for connecting. You said "Loved your talk on design systems, especially the bit about shared tokens across three product lines" after the meetup, which is why I wanted to reach out directly. I'm applying for the Design Lead role and would value your read on the team.
+> Thanks for connecting. You said "Loved your talk on internal tooling, especially the bit about shared dashboards across three product lines" after the meetup, which is why I wanted to reach out directly. I'm applying for the Platform Lead role and would value your read on the team.
 
 ### 2. Sam Okafor, Engineering Manager at Acme Corp
 
-> OPERATOR-VERIFY: this note assumes Sam has been on Acme Corp's design-adjacent team for about
+> OPERATOR-VERIFY: this note assumes Sam has been on Acme Corp's platform team for about
 > two years, based on an unconfirmed profile read. Confirm before sending.
 
 **Connection note**
-> Hi Sam, applying for the Design Lead role and would value a referral if my background fits the team's bar.
+> Hi Sam, applying for the Platform Lead role and would value a referral if my background fits the team's bar.
 
 ---
 

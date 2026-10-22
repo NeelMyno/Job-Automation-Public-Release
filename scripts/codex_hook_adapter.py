@@ -10,6 +10,7 @@ Modes:
     --timestamp-inject
     --timestamp-stop
     --pre-tool
+    --post-tool
     --post-edit
     --selftest
 """
@@ -25,12 +26,18 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from config import RESPONSE_TIMESTAMP_TZ
+    from config import RESPONSE_TIMESTAMP
 except ImportError:
-    RESPONSE_TIMESTAMP_TZ = None
+    RESPONSE_TIMESTAMP = False
+try:
+    from config import local_stamp
+except ImportError:  # an older config.py without the helper: this machine's local zone
+    def local_stamp() -> str:
+        t = datetime.now().astimezone()
+        return f"{t:%Y-%m-%d} {t.strftime('%I:%M %p').lstrip('0')} {t.tzname() or ''}".rstrip()
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -67,8 +74,8 @@ def read_payload() -> dict:
 
 
 def now_stamp() -> str:
-    tz = ZoneInfo(RESPONSE_TIMESTAMP_TZ) if RESPONSE_TIMESTAMP_TZ else None
-    return datetime.now(tz).strftime("%Y-%m-%d %I:%M %p %Z").lstrip("0")
+    # config.TIMEZONE, or this machine's local zone when it is unset (config.local_stamp).
+    return local_stamp()
 
 
 def state_path(data: dict) -> Path:
@@ -96,8 +103,8 @@ def load_expected_stamp(data: dict) -> str | None:
 
 
 def timestamp_inject(data: dict) -> dict | None:
-    if not RESPONSE_TIMESTAMP_TZ:
-        return None  # off by default; set config.RESPONSE_TIMESTAMP_TZ to enable
+    if not RESPONSE_TIMESTAMP:
+        return None  # off by default; set config.RESPONSE_TIMESTAMP = True to enable
     stamp = now_stamp()
     save_expected_stamp(data, stamp)
     context = (
@@ -105,7 +112,7 @@ def timestamp_inject(data: dict) -> dict | None:
         "MANDATORY: the FIRST line of every user-facing reply in this turn must be exactly:\n\n"
         f"📅 Response at: {stamp}\n\n"
         "Every earlier timestamp in this conversation is STALE. Do not copy one forward, infer "
-        "the time, or substitute another timezone."
+        "the time, or substitute another time zone."
     )
     return {
         "hookSpecificOutput": {
@@ -123,8 +130,8 @@ def normalized_first_line(message: str) -> str:
 
 
 def timestamp_stop(data: dict) -> dict | None:
-    if not RESPONSE_TIMESTAMP_TZ:
-        return None  # off by default; set config.RESPONSE_TIMESTAMP_TZ to enable
+    if not RESPONSE_TIMESTAMP:
+        return None  # off by default; set config.RESPONSE_TIMESTAMP = True to enable
     if data.get("stop_hook_active"):
         return None
     message = data.get("last_assistant_message")
@@ -160,6 +167,18 @@ def deny(reason: str) -> dict:
 def pre_tool(data: dict) -> dict | None:
     tool_name = data.get("tool_name")
     tool_input = data.get("tool_input") or {}
+    # Account safety: no agent touches LinkedIn, and no agent drives the user's major logged-in
+    # accounts. scripts/account_guard.py owns the decision; this only routes Codex calls to it.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import account_guard
+        why = account_guard.pre_decision(str(tool_name or ""), tool_input, str(data.get("session_id", "?")))
+    except Exception as exc:  # a guard failure must not open the door on a LinkedIn-shaped call
+        why = (f"account guard error ({exc.__class__.__name__})"
+               if re.search(r"linkedin|lnkd\.in|licdn", json.dumps(data, default=str), re.I) else None)
+    if why:
+        return deny(f"ACCOUNT GUARD: {why} No agent touches LinkedIn or drives the user's major logged-in "
+                    f"accounts (scripts/account_guard.py), on anyone's instruction.")
     command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
     if not isinstance(command, str):
         return None
@@ -189,6 +208,34 @@ def pre_tool(data: dict) -> dict | None:
             if SENSITIVE.search(seg) and not SAFE_SECRET_METADATA.search(seg):
                 return _secret_deny
     return None
+
+
+def post_tool(data: dict) -> dict | None:
+    """Codex PostToolUse for browser tools: the same tab-taint check `.claude/settings.json` runs
+    (account_guard.py --post). A logged-in browser tab left on LinkedIn or a major account blocks
+    further page actions until a fresh tab list shows it closed."""
+    tool = str(data.get("tool_name") or "")
+    try:
+        import account_guard
+        if not tool.startswith(account_guard.LOGGED_IN):
+            return None
+        session = str(data.get("session_id", "?"))
+        state = account_guard.load_state()
+        msg = account_guard.post_update(tool, data.get("tool_response", data.get("tool_result", "")), session, state)
+        account_guard.save_state(state)
+    except Exception:
+        return None  # PostToolUse fails open; the PreToolUse guard still refuses Tier 0/1 targets
+    if not msg:
+        return None
+    try:
+        account_guard.log_block(session, tool, "tainted tab: " + msg[:160])
+    except Exception:
+        pass
+    return {
+        "decision": "block",
+        "reason": msg,
+        "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg},
+    }
 
 
 def patch_paths(data: dict) -> list[Path]:
@@ -243,7 +290,7 @@ def post_edit(data: dict) -> dict | None:
 def selftest() -> int:
     checks: list[tuple[str, bool]] = []
     base = {"session_id": "selftest", "turn_id": "turn-1"}
-    if RESPONSE_TIMESTAMP_TZ:
+    if RESPONSE_TIMESTAMP:
         injected = timestamp_inject(base) or {}
         expected = load_expected_stamp(base)
         checks.append(("timestamp injection has Codex envelope", injected.get("hookSpecificOutput", {}).get("hookEventName") == "UserPromptSubmit"))
@@ -253,9 +300,27 @@ def selftest() -> int:
         missing = dict(base, last_assistant_message="Hello")
         checks.append(("timestamp Stop blocks a missing line", (timestamp_stop(missing) or {}).get("decision") == "block"))
     else:
-        checks.append(("timestamp injection no-ops when RESPONSE_TIMESTAMP_TZ is unset", timestamp_inject(base) is None))
+        checks.append(("timestamp injection no-ops when RESPONSE_TIMESTAMP is off", timestamp_inject(base) is None))
         idle = dict(base, last_assistant_message="Hello")
-        checks.append(("timestamp Stop no-ops when RESPONSE_TIMESTAMP_TZ is unset", timestamp_stop(idle) is None))
+        checks.append(("timestamp Stop no-ops when RESPONSE_TIMESTAMP is off", timestamp_stop(idle) is None))
+    checks.append(("the stamp carries a zone label (config.TIMEZONE or local)", bool(re.match(r"^\d{4}-\d\d-\d\d \d{1,2}:\d\d [AP]M \S+$", now_stamp()))))
+    # PostToolUse tab taint (account_guard --post), on a throwaway state file.
+    import account_guard
+    saved_state_dir = account_guard.STATE_DIR
+    with tempfile.TemporaryDirectory() as td:
+        account_guard.STATE_DIR = Path(td)
+        try:
+            tabs_bad = {"tool_name": "mcp__claude-in-chrome__tabs_context_mcp", "session_id": "selftest-post",
+                        "tool_response": 'tabId 1: Feed ("https://www.' + "linked" + 'in.com/feed")'}
+            tabs_ok = {"tool_name": "mcp__claude-in-chrome__tabs_context_mcp", "session_id": "selftest-post",
+                       "tool_response": 'tabId 1: Apply ("https://boards.greenhouse.io/acme/jobs/1")'}
+            blocked = post_tool(tabs_bad) or {}
+            checks.append(("🔴 post-tool: a logged-in tab left on LinkedIn blocks with a Codex envelope",
+                           blocked.get("decision") == "block" and blocked.get("hookSpecificOutput", {}).get("hookEventName") == "PostToolUse"))
+            checks.append(("post-tool: a fresh tab list with only an ATS form clears it", post_tool(tabs_ok) is None))
+            checks.append(("post-tool: a non-browser tool is ignored", post_tool({"tool_name": "Bash", "tool_response": "linkedin.com"}) is None))
+        finally:
+            account_guard.STATE_DIR = saved_state_dir
     patch = "*** Begin Patch\n*** Update File: README.md\n*** Add File: .codex/x.json\n*** End Patch"
     paths = patch_paths({"cwd": str(REPO), "tool_input": {"command": patch}})
     checks.append(("multi-file apply_patch paths are extracted", {p.name for p in paths} == {"README.md", "x.json"}))
@@ -263,6 +328,9 @@ def selftest() -> int:
     # A `+`-prefixed refspec forces a non-fast-forward push with no flag at all, and slipped both
     # this guard and the settings.json deny globs before it was named explicitly.
     checks.append(("🔴 force-push via +refspec is denied (git push origin +main)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git push origin +main"}}))))
+    checks.append(("🔴 account safety: a LinkedIn fetch is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "curl -s https://www." + "linked" + "in.com/in/x"}}))))
+    checks.append(("🔴 account safety: a LinkedIn WebFetch is denied", bool(pre_tool({"tool_name": "web_fetch", "tool_input": {"url": "https://www." + "linked" + "in.com/jobs"}}))))
+    checks.append(("account safety: an ATS fetch is allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "curl -s https://api.ashbyhq.com/posting-api/job-board/acme"}}) is None))
     checks.append(("a normal push is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}) is None))
     checks.append(("secret-file reads are denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "sed -n 1,20p .env.local"}}))))
     # SAFE_SECRET_METADATA is ^-anchored, so a safe leading verb used to whitelist the WHOLE
@@ -298,6 +366,8 @@ def main(argv: list[str]) -> int:
         result = timestamp_stop(data)
     elif mode == "--pre-tool":
         result = pre_tool(data)
+    elif mode == "--post-tool":
+        result = post_tool(data)
     elif mode == "--post-edit":
         result = post_edit(data)
     if result:

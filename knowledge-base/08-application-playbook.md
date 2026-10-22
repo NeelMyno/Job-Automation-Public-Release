@@ -52,8 +52,8 @@ A five-step shape, each step doing one job:
 5. **A close** that names the action you want (an interview, a conversation) without begging for it.
 
 **Honesty wall:** no work-authorization claims in the letter body, ever; that belongs on the form,
-not in prose (`CLAUDE.md` §14 rule 2). **Voice:** run every draft through `scripts/voice_check.py`
-before it ships. **Deliverable:** `applications/<company>-<role>/cover-letter/cover-note.md` →
+not in prose (`CLAUDE.md` §14 rule 2). **Voice:** owned by `knowledge-base/17-writing.md`; a fresh reviewer reads
+every draft aloud against it before it ships (`scripts/voice_check.py` only checks hard facts). **Deliverable:** `applications/<company>-<role>/cover-letter/cover-note.md` →
 rendered to `cover-letter.html` → rendered to the PDF.
 
 ## JD scanner: five checks before you tailor anything

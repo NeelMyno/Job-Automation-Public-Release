@@ -32,9 +32,9 @@ tenure/annotation marker, and the primary signal is requirement-shaped phrasing 
 CONFIGURATION (optional -- see scripts/config.py)
 --------------------------------------------------
 Set `YOUR_YEARS_OF_EXPERIENCE = <a number>` in scripts/config.py to enable this gate for your own
-setup. Left unset (the default), the gate is a documented no-op: it never crashes and never fires
-a false DROP, it just has nothing to compare a JD against yet. This mirrors every other optional
-value in config.py (see that file's own docstring).
+setup. Left unset (the default), the gate checks NOTHING and says so: it prints "not checked: set
+YOUR_YEARS_OF_EXPERIENCE" and exits 3, never 0, so an unset gate can never be read as "0
+unhandled". It never crashes and never guesses a number.
 
 USAGE
 -----
@@ -44,8 +44,8 @@ USAGE
   seniority_gate.py --all --unsubmitted        # only not-yet-applied dossiers (the action list)
   seniority_gate.py --all --unsubmitted --drops-only   # just the DROP folder paths, one per line
 
-EXIT: 0 = no UNSUBMITTED drop found (or the gate is unconfigured). 1 = at least one unsubmitted
-DROP (the thing to fix).
+EXIT: 0 = checked, no UNSUBMITTED drop found. 1 = at least one unsubmitted DROP (the thing to fix).
+2 = usage error. 3 = NOT CHECKED: YOUR_YEARS_OF_EXPERIENCE is unset (a warning, never a pass).
 """
 from __future__ import annotations
 import re
@@ -111,6 +111,11 @@ _EN_DASH = chr(0x2013)
 _EM_DASH = chr(0x2014)
 _RANGE_SEP = r"(?:-|" + _EN_DASH + r"|" + _EM_DASH + r"|to)"
 _DASH_CLASS = r"\-" + _EN_DASH + _EM_DASH
+# A company horizon right after a range ("it'll take 5-10 years of focus to deliver") is not a bar.
+_HORIZON = re.compile(r"\s+(?:of\s+(?:focus|growth|runway|history|operations?|service)\b|to (?:deliver|come)\b|ago\b)")
+# The words that make a bare number an EXPERIENCE requirement rather than any other count of years.
+_EXP_NOUN = r"(?:experience|product|design|professional|industry|relevant|engineering|ux|ui|software|work)"
+_EXP_VERB = r"(?:designing|building|shipping|leading|developing|managing)"
 
 
 def _tenure_markers() -> tuple[str, ...]:
@@ -124,15 +129,25 @@ def _tenure_markers() -> tuple[str, ...]:
     name = getattr(config, "OPERATOR_NAME", None)
     if name:
         markers.append(name.lower())
-    if YEARS_OF_EXPERIENCE is not None:
-        markers.append(f"~{YEARS_OF_EXPERIENCE}")
-        markers.append(f"~ {YEARS_OF_EXPERIENCE}")
+    # Deliberately NOT a marker: "~N" built from your own configured years. A JD can say
+    # "~3 to ~7 years" too, and treating that as your tenure silently passed a real requirement.
     return tuple(markers)
 
 
 def _mentions(line: str):
     """Yield (needed_floor, ceiling_or_None, is_preferred) for each experience-requirement
-    mention in one line. Requirement-shaped phrasings only; tenure/cadence lines suppressed."""
+    mention in one line. Requirement-shaped phrasings only; tenure/cadence lines suppressed.
+    Alternatives joined by "OR a minimum of" ("a minimum of 5 years relevant work experience OR a
+    minimum of 9 years equivalent combination of education and experience") are one bar met by
+    EITHER path, so only the lowest alternative binds. Two bars joined by AND still bind at the
+    higher one."""
+    found = list(_raw_mentions(line))
+    if len(found) > 1 and re.search(r"\bor\s+(?:a\s+)?(?:minimum|at least)\b", line.lower()):
+        found = [min(found, key=lambda t: t[0])]
+    yield from found
+
+
+def _raw_mentions(line: str):
     l = line.lower()
     if any(m in l for m in NON_REQUIREMENT):
         # The line is about cadence/age/ago -- but it could still hold a real "N+ years"
@@ -142,30 +157,51 @@ def _mentions(line: str):
             return
     if any(m in l for m in _tenure_markers()):
         return  # your own tenure, or this repo's own notes about you -- never a role requirement
-    if not re.search(r"\byears?\b|\byrs?\b", l):
+    if not re.search(r"\byears?\b|\byrs?\b|\bdecade\b", l):
         return
     pref = any(p in l for p in PREFERRED)
 
     # Range: "5-8 years", "6 to 9 yrs"  -> floor = first, ceiling = second
-    for m in re.finditer(r"(\d{1,2})\s*" + _RANGE_SEP + r"\s*(\d{1,2})\s*\+?\s*" + YR, l):
+    # ("~3 to ~7 years" too: the tilde on the second number is allowed.)
+    for m in re.finditer(r"(\d{1,2})\s*" + _RANGE_SEP + r"\s*~?\s*(\d{1,2})\s*\+?\s*" + YR, l):
+        if _HORIZON.match(l, m.end()):
+            continue  # a company horizon, not a bar
         yield (int(m.group(1)), int(m.group(2)), pref)
     # "N+ years" / "N or more years" / "N plus years"  -> floor N (drop the sign)
     for m in re.finditer(r"(\d{1,2})\s*" + _MORE + r"\s*" + YR, l):
+        # the "6+" in a range "4-6+ years" is the range's ceiling, already read above
+        if re.search(r"\d\s*" + _RANGE_SEP + r"\s*$", l[:m.start()]):
+            continue
         yield (int(m.group(1)), None, pref)
     # "at least / minimum (of) N years"
     for m in re.finditer(r"(?:at least|minimum(?:\s+of)?|min\.?)\s*(\d{1,2})\s*\+?\s*" + YR, l):
         yield (int(m.group(1)), None, pref)
-    # spelled: "eight+ years", "six or more years", "eight years of experience"
+    # spelled: "eight+ years", "six or more years", "at least seven years", "eight years of
+    # experience". A BARE spelled number needs an experience anchor, like the bare-digit rule below:
+    # a benefits line such as "a sabbatical after seven years of service" is not a requirement.
     for w, n in NUM_WORDS.items():
-        if re.search(rf"\b{w}(?:\s*\+|\s+or\s+more|\s+or\s+greater|\s+plus)?\s*{YR}", l):
+        if re.search(rf"\b{w}(?:\s*\+|\s+or\s+more|\s+or\s+greater|\s+plus)\s*{YR}", l) \
+                or re.search(rf"(?:at least|minimum(?:\s+of)?|min\.?)\s*{w}\s*{YR}", l) \
+                or re.search(rf"(?<!last )(?<!past )\b{w}\s+{YR}\s+(?:of\s+{_EXP_NOUN}|{_EXP_VERB}|experience)", l):
             yield (n, None, pref)
+    # "a decade of experience" / "roughly a decade designing" = a 10-year bar ("nearly"/"almost" = 9).
+    # Anchored to an experience word, so "the next decade of growth" or a company's own "more than a
+    # decade of investment" never counts.
+    for m in re.finditer(r"\b(nearly |almost |roughly |about |around |over |more than |at least )?(?:a|one) decade\s+"
+                         r"(?:of\s+(?:(?:relevant|professional|industry|hands-on|product|ux|ui|design|engineering|software)\s+){0,3}experience"
+                         r"|" + _EXP_VERB + r")", l):
+        yield (9 if (m.group(1) or "").strip() in ("nearly", "almost") else 10, None, pref)
     # bare "N years of experience / of product design" -- allowed ONLY on a clean line
     # (tenure markers already excluded above); still require an experience anchor.
-    if re.search(r"\b" + YR + r"\s+of\s+(?:experience|product|design|professional|industry|relevant|engineering)", l) \
-            or re.search(r"\b" + YR + r"\s+(?:designing|building|shipping|leading|of\s+experience)", l):
-        for m in re.finditer(r"(?<![\d." + _DASH_CLASS + r"])(\d{1,2})\s+" + YR + r"\b", l):
+    if re.search(r"\b" + YR + r"\s+of\s+" + _EXP_NOUN, l) \
+            or re.search(r"\b" + YR + r"\s+(?:" + _EXP_VERB[3:-1] + r"|of\s+experience)", l):
+        # "the last ten years building it" / "the past 10 years" is company history, not a bar
+        for m in re.finditer(r"(?<![\d." + _DASH_CLASS + r"])(?<!last )(?<!past )(\d{1,2})\s+" + YR + r"\b", l):
             # skip if this same number was already a "+"/range/at-least/"or more" match (handled above)
             if re.search(rf"{m.group(1)}\s*(?:\+|" + _DASH_CLASS + r"|to|or\s+more)", l):
+                continue
+            # ...or the second number of a range ("3 - 7 years", "~3 to ~7 years")
+            if re.search(r"\d\s*" + _RANGE_SEP + r"\s*~?\s*$", l[:m.start()]):
                 continue
             yield (int(m.group(1)), None, pref)
 
@@ -191,7 +227,12 @@ def analyze_jd(text: str):
         if f == floor and c is not None:
             ceiling = max(ceiling or 0, c)
     pref_floor = max((f for f, _ in pref_only), default=None)
-    return {"floor": floor, "ceiling": ceiling, "pref_floor": pref_floor, "evidence": evidence}
+    pref_ceiling = None
+    for f, c in pref_only:
+        if f == pref_floor and c is not None:
+            pref_ceiling = max(pref_ceiling or 0, c)
+    return {"floor": floor, "ceiling": ceiling, "pref_floor": pref_floor, "pref_ceiling": pref_ceiling,
+            "evidence": evidence}
 
 
 def title_of(dossier: Path) -> str:
@@ -229,6 +270,9 @@ def verdict_for(dossier: Path):
         return ("DROP", floor, f"JD requires {floor}+ years (you have {your_years})", ev)
     if floor == your_years and ceiling and ceiling >= your_years + CEILING_SPREAD_FOR_REVIEW:
         return ("REVIEW", your_years, f"JD says {your_years}-{ceiling} years -- floor matches you but ceiling reaches senior", ev)
+    # the same range on an "ideally ..." line is still a senior ceiling, not a silent PASS
+    if floor is None and pref_floor == your_years and (a["pref_ceiling"] or 0) >= your_years + CEILING_SPREAD_FOR_REVIEW:
+        return ("REVIEW", your_years, f"JD says {your_years}-{a['pref_ceiling']} years (preferred) -- floor matches you but ceiling reaches senior", ev)
     if pref_floor and pref_floor >= DROP_FLOOR and (floor is None or floor < DROP_FLOOR):
         return ("REVIEW", pref_floor, f"{pref_floor}+ years is 'preferred', floor is {floor if floor is not None else 'unstated'}", ev)
     if senior and (floor is None or floor <= your_years):
@@ -311,12 +355,12 @@ def selftest() -> int:
         print(f"  {mark} {desc}: got {got!r} want {want!r}")
 
     # A JD stating an explicit high floor -- this is why the gate exists.
-    senior_jd = "- 8+ years of product design experience, with a proven track record of shipping complex products from concept to launch. We care more about staff-level impact than years on a resume"
+    senior_jd = "- 8+ years of professional experience, with a proven track record of shipping complex projects from start to finish. We care more about staff-level impact than years on a resume"
     a = analyze_jd(senior_jd)
-    check("'8+ years of product design experience' -> floor 8", a["floor"], 8)
+    check("'8+ years of professional experience' -> floor 8", a["floor"], 8)
 
     # A role the fictional candidate genuinely fits -- must PASS.
-    check("'5+ years of product design experience' -> floor 5", analyze_jd("5+ years of product design experience")["floor"], 5)
+    check("'5+ years of relevant experience' -> floor 5", analyze_jd("5+ years of relevant experience")["floor"], 5)
 
     # Cadence line must NOT register as a requirement.
     check("'travel up to six times per year' -> no floor",
@@ -328,21 +372,59 @@ def selftest() -> int:
 
     # Requirement variants.
     check("'at least 7 years' -> floor 7", analyze_jd("We want at least 7 years of experience")["floor"], 7)
-    check("'6-9 years' -> floor 6", analyze_jd("6-9 years of experience designing product")["floor"], 6)
+    check("'6-9 years' -> floor 6", analyze_jd("6-9 years of experience building production systems")["floor"], 6)
     check("'10+ years' -> floor 10", analyze_jd("10+ years of experience")["floor"], 10)
-    check("'3+ years' -> floor 3", analyze_jd("3+ years of experience in product design")["floor"], 3)
+    check("'3+ years' -> floor 3", analyze_jd("3+ years of experience in operations")["floor"], 3)
 
     # The abbreviation / 'or more' / spelled forms that a naive `years?`-only regex would miss.
     # A JD writing its bar as "8+ yrs" must still register a floor, never silently pass.
-    check("'8+ yrs of product design experience' -> floor 8 (abbreviation form)",
-          analyze_jd("8+ yrs of product design experience")["floor"], 8)
-    check("'6+ yrs product design' -> floor 6", analyze_jd("6+ yrs product design")["floor"], 6)
+    check("'8+ yrs of relevant experience' -> floor 8 (abbreviation form)",
+          analyze_jd("8+ yrs of relevant experience")["floor"], 8)
+    check("'6+ yrs software engineering' -> floor 6", analyze_jd("6+ yrs software engineering")["floor"], 6)
     check("'six or more years of experience' -> floor 6",
           analyze_jd("We want six or more years of experience")["floor"], 6)
     check("'Minimum 7 yrs of experience' -> floor 7", analyze_jd("Minimum 7 yrs of experience")["floor"], 7)
-    check("'at least 8 yrs designing product' -> floor 8", analyze_jd("at least 8 yrs designing product")["floor"], 8)
+    check("'at least 8 yrs leading teams' -> floor 8", analyze_jd("at least 8 yrs leading teams")["floor"], 8)
     # and the abbreviation still PASSES a role the candidate fits.
-    check("'5+ yrs of product design' -> floor 5 (candidate fits)", analyze_jd("5+ yrs of product design")["floor"], 5)
+    check("'5+ yrs of industry experience' -> floor 5 (candidate fits)", analyze_jd("5+ yrs of industry experience")["floor"], 5)
+
+    # Real JD shapes the parser once misread, as fictional lines.
+    check("benefits line 'a sabbatical after seven years of service' -> no floor",
+          analyze_jd("As a thank-you to long-term team members, we offer a sabbatical after seven years of service.")["floor"], None)
+    check("'eight years of professional experience' -> floor 8",
+          analyze_jd("eight years of professional experience")["floor"], 8)
+    check("'at least seven years in product roles' -> floor 7",
+          analyze_jd("You have at least seven years in product roles")["floor"], 7)
+    check("'seven+ years' -> floor 7", analyze_jd("seven+ years shipping B2B software")["floor"], 7)
+    check("'six years building B2B tools' -> floor 6", analyze_jd("six years building B2B tools")["floor"], 6)
+    check("'Globex spent the last ten years building it' -> no floor (company history)",
+          analyze_jd("Globex spent the last ten years building it; users in 190 countries")["floor"], None)
+    check("'the past 10 years building payments' -> no floor",
+          analyze_jd("We have spent the past 10 years building payments infrastructure")["floor"], None)
+    check("'4-6+ years of end-to-end ownership' -> floor 4, not 6",
+          analyze_jd("4-6+ years of end-to-end product ownership")["floor"], 4)
+    check("'minimum of 5 years ... OR a minimum of 9 years equivalent' -> floor 5",
+          analyze_jd("Bachelor's degree AND a minimum of 5 years relevant work experience "
+                     "OR a minimum of 9 years equivalent combination of education and relevant experience")["floor"], 5)
+    check("'6+ years of experience, 2-3 in a lead role' -> floor 6",
+          analyze_jd("6+ years of experience, 2-3 years in a lead role")["floor"], 6)
+    check("'3 - 7 years of experience' -> floor 3, not 7",
+          analyze_jd("- **Years asked:** 3 - 7 years of relevant experience")["floor"], 3)
+    check("'~3 to ~7 years of experience' -> floor 3, not 7",
+          analyze_jd("> Hiring at Northwind: multiple roles, ~3 to ~7 years of experience.")["floor"], 3)
+    check("'it'll take 5-10 years of focus to deliver' -> no floor (company horizon)",
+          analyze_jd("Our team knows it'll take 5-10 years of focus to deliver.")["floor"], None)
+    check("'roughly a decade of industry experience' -> floor 10",
+          analyze_jd("You bring roughly a decade of industry experience")["floor"], 10)
+    check("'nearly a decade managing consumer programs' -> floor 9",
+          analyze_jd("nearly a decade managing consumer programs")["floor"], 9)
+    check("'more than a decade of UI investment' -> no floor (the company's, not a bar)",
+          analyze_jd("Initech has a mature product surface with more than a decade of UI investment")["floor"], None)
+    check("'the next decade of growth' -> no floor", analyze_jd("we drive the next decade of growth")["floor"], None)
+    check("'at least 5 years and at least 7 years in fintech' (AND) -> floor 7",
+          analyze_jd("at least 5 years of engineering and at least 7 years in fintech")["floor"], 7)
+    check("'8 years of software engineering' -> floor 8",
+          analyze_jd("8 years of software engineering in production systems")["floor"], 8)
 
     # End-to-end verdicts on synthetic dossiers, with a fixed fictional configuration: the test
     # candidate has 5 years, so DROP_FLOOR is 6 -- independent of whatever a real user's own
@@ -353,31 +435,39 @@ def selftest() -> int:
     try:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            d = Path(td) / "acme-staff-product-designer"
+            d = Path(td) / "acme-staff-engineer"
             d.mkdir()
-            (d / "README.md").write_text("# Acme Corp: Staff Product Designer\n")
+            (d / "README.md").write_text("# Acme Corp: Staff Engineer\n")
             (d / "jd-acme.md").write_text(senior_jd)
             v = verdict_for(d)
             check("senior-shaped dossier -> DROP", v[0], "DROP")
 
-            d2 = Path(td) / "beta-senior-product-designer"
+            d2 = Path(td) / "globex-senior-analyst"
             d2.mkdir()
-            (d2 / "README.md").write_text("# Beta Inc: Senior Product Designer\n")
-            (d2 / "jd-beta.md").write_text("5+ years of product design experience in B2B SaaS")
+            (d2 / "README.md").write_text("# Globex: Senior Analyst\n")
+            (d2 / "jd-globex.md").write_text("5+ years of relevant experience in B2B SaaS")
             check("5+ senior dossier -> PASS", verdict_for(d2)[0], "PASS")
 
-            d3 = Path(td) / "gamma-staff-designer"
+            d3 = Path(td) / "initech-staff-accountant"
             d3.mkdir()
-            (d3 / "README.md").write_text("# Gamma Corp: Staff Product Designer\n")
-            (d3 / "jd-gamma.md").write_text("We value impact over tenure. Strong portfolio required.")
+            (d3 / "README.md").write_text("# Initech: Staff Accountant\n")
+            (d3 / "jd-initech.md").write_text("We value impact over tenure. Strong track record required.")
             check("Staff title, no years stated -> REVIEW", verdict_for(d3)[0], "REVIEW")
 
             # End-to-end: a JD that states its bar ONLY as "8+ yrs" must still DROP.
-            d4 = Path(td) / "delta-staff-product-designer"
+            d4 = Path(td) / "northwind-staff-engineer"
             d4.mkdir()
-            (d4 / "README.md").write_text("# Delta LLC: Staff Product Designer\n")
-            (d4 / "jd-delta.md").write_text("You have 8+ yrs of product design experience shipping at scale.")
+            (d4 / "README.md").write_text("# Northwind: Staff Engineer\n")
+            (d4 / "jd-northwind.md").write_text("You have 8+ yrs of software engineering experience shipping at scale.")
             check("a JD stating its bar only as '8+ yrs' -> DROP (abbreviation form)", verdict_for(d4)[0], "DROP")
+
+            # A "5-8+" range on an "ideally" line must not turn the 8-year ceiling into a silent PASS.
+            d5 = Path(td) / "umbrella-senior-analyst"
+            d5.mkdir()
+            (d5 / "README.md").write_text("# Umbrella: Senior Analyst\n")
+            (d5 / "jd-umbrella.md").write_text("- 5-8+ years building complex B2B SaaS products, ideally "
+                                              "workflow-heavy or data-dense ones")
+            check("'5-8+ years ..., ideally ...' -> REVIEW (senior ceiling)", verdict_for(d5)[0], "REVIEW")
     finally:
         DROP_FLOOR = saved_drop_floor
 
@@ -392,6 +482,24 @@ def selftest() -> int:
             d.mkdir()
             (d / "jd-acme.md").write_text(senior_jd)
             check("unconfigured gate -> UNCONFIGURED, never a crash or a guess", verdict_for(d)[0], "UNCONFIGURED")
+            # S12: unset must say plainly it did not check, and must never exit 0 or print a
+            # "0 UNHANDLED" line a reader (or a hook) could take as proof.
+            import io, contextlib
+            buf, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc_all = run_all(True, False)
+                rc_one = run_one(str(d))
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc_drops = run_all(True, True)
+            text = buf.getvalue()
+            check("unset: --all --unsubmitted exits 3 (not checked), never 0", rc_all, EXIT_NOT_CHECKED)
+            check("unset: a single dossier exits 3 too", rc_one, EXIT_NOT_CHECKED)
+            check("unset: --drops-only exits 3 and warns on stderr", (rc_drops, NOT_CHECKED_LINE in err.getvalue()),
+                  (EXIT_NOT_CHECKED, True))
+            check("unset: output says 'not checked: set YOUR_YEARS_OF_EXPERIENCE'",
+                  "not checked: set YOUR_YEARS_OF_EXPERIENCE" in text, True)
+            check("unset: output never carries a '=> N UNHANDLED' line",
+                  bool(re.search(r"=>\s*\d+\s+UNHANDLED", text)), False)
     finally:
         DROP_FLOOR = saved_drop_floor
 
@@ -400,18 +508,24 @@ def selftest() -> int:
 
 
 # ------------------------------- runners -------------------------------
-def _warn_unconfigured() -> None:
-    print("seniority_gate: YOUR_YEARS_OF_EXPERIENCE is not set in scripts/config.py.")
-    print("This gate has nothing to compare a JD's stated years requirement against, so it is")
-    print("skipped (not a failure). Add e.g. `YOUR_YEARS_OF_EXPERIENCE = 5` to scripts/config.py")
-    print("to enable it for your own setup.")
+EXIT_NOT_CHECKED = 3
+NOT_CHECKED_LINE = "seniority_gate: not checked: set YOUR_YEARS_OF_EXPERIENCE in scripts/config.py"
+
+
+def _warn_unconfigured(stream=None) -> None:
+    out = stream or sys.stdout
+    print(NOT_CHECKED_LINE, file=out)
+    print("  No dossier was compared against a years requirement, so this run proves nothing.", file=out)
+    print("  It is NOT a pass and NOT \"0 unhandled\". Add your real number, e.g.", file=out)
+    print("  `YOUR_YEARS_OF_EXPERIENCE = 5`, to scripts/config.py and run it again.", file=out)
+    print("=> NOT CHECKED (exit 3)", file=out)
 
 
 def run_all(only_unsubmitted: bool, drops_only: bool) -> int:
     if DROP_FLOOR is None:
-        if not drops_only:
-            _warn_unconfigured()
-        return 0
+        # --drops-only prints folder paths for a script to consume, so the warning goes to stderr.
+        _warn_unconfigured(sys.stderr if drops_only else None)
+        return EXIT_NOT_CHECKED
     fmap = folder_status_map()
     rows = []
     for d in sorted(APPS.iterdir()):
@@ -460,7 +574,7 @@ def run_one(path: str) -> int:
     verdict, bar, reason, ev = verdict_for(d)
     if verdict == "UNCONFIGURED":
         _warn_unconfigured()
-        return 0
+        return EXIT_NOT_CHECKED
     fmap = folder_status_map()
     handled = is_handled(d, fmap)
     icon = {"DROP": "\U0001F534", "REVIEW": "\U0001F7E1", "PASS": "\U0001F7E2", "NO-JD": "⚪"}.get(verdict, "?")

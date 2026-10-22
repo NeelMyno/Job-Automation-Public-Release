@@ -82,6 +82,9 @@ NOT SCANNED, deliberately:
                       claim-verification tool, if you have one, owns that surface. `sources/`
                       subfolders are verbatim snapshots, and editing one to make a check pass is
                       forgery.
+    gitignored files  scratch and disposable generated output (for example a generated outreach
+                      bundle that copies dossier text). Skipped by the default sweep only; a path
+                      named on the command line is always scanned, ignored or not.
 
 USAGE
     python3 scripts/canon.py                # check every live surface   -> exit 1 on any finding
@@ -204,7 +207,7 @@ _INSTEAD_OF = re.compile(r"\b(?:instead\s+of|rather\s+than)\b[^,\n]{0,25}$", re.
 # One escape may name SEVERAL rule-ids as a comma list: a single DO-NOT-SAY line legitimately
 # quotes a whole family of related retired claims at once ("don't say X, Y, or Z") and needs each
 # one excused. A single id is just a one-element list, so this stays backward-compatible.
-ALLOW = re.compile(r"<!--\s*canon:allow\s+([a-z0-9-]+(?:\s*,\s*[a-z0-9-]+)*)\s*(?:—|--|-)\s*(.+?)-->", re.I)
+ALLOW = re.compile(r"<!--\s*canon:allow\s+([a-z0-9-]+(?:\s*,\s*[a-z0-9-]+)*)\s*(?:\u2014|--|-)\s*(.+?)-->", re.I)
 
 # ...UNLESS the line is labelled as copy meant to be used. A line that says "Résumé-ready:" is a
 # line an agent will paste, no matter what the paragraph above it warns. This override is the
@@ -250,8 +253,8 @@ INVISIBLE = set(
 DASHES = set(
     "‐"   # HYPHEN                      <- proven bypass
     "‑"   # NON-BREAKING HYPHEN         <- proven bypass
-    "–"   # EN DASH                     <- proven bypass
-    "‒—―"                     # FIGURE DASH, EM DASH, HORIZONTAL BAR
+    "\u2013"   # EN DASH                     <- proven bypass
+    "‒\u2014―"                     # FIGURE DASH, EM DASH, HORIZONTAL BAR
     "−⁃˗֊᠆"         # MINUS SIGN, HYPHEN BULLET, MODIFIER, ARMENIAN, MONGOLIAN
     "﹘﹣－"                     # SMALL EM DASH, SMALL HYPHEN-MINUS, FULLWIDTH HYPHEN
 )
@@ -356,6 +359,7 @@ SCAN_GLOBS = [
     "README.md",
     "docs/DESIGN.md",
     ".claude/commands/*.md",
+    ".claude/rules/*.md",          # path-scoped law files (the application protocol lives here)
     ".claude/workflows/*.js",
 ]
 
@@ -568,12 +572,43 @@ def scan_paths(paths: list[Path]) -> list[Finding]:
     return findings
 
 
+def _gitignored(rels: list[str]) -> set[str] | None:
+    """The subset of repo-relative paths git ignores, or None if git could not answer.
+
+    None means "unknown", and the caller then scans everything: a broken or missing git must
+    never shrink the scope silently.
+    """
+    if not rels:
+        return set()
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "--stdin"],
+                           input="\n".join(rels), capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode not in (0, 1):            # 1 = none ignored; anything else is an error
+        return None
+    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+
+
 def live_surface() -> list[Path]:
+    """Every file under SCAN_GLOBS, minus EXCLUDE_*, minus anything git ignores.
+
+    Gitignored files are not live surfaces: they are scratch or disposable generated output.
+    A generated bundle that copies dossier text can otherwise flood the sweep with findings
+    whose real home is checked by another gate. A file named explicitly on the command line
+    (the PostToolUse hook) is still scanned, ignored or not.
+    """
     seen: dict[str, Path] = {}
     for g in SCAN_GLOBS:
         for p in REPO.glob(g):
             if p.is_file() and not _excluded(p):
                 seen[str(p.resolve())] = p
+    rel = {str(p.resolve().relative_to(REPO)): k for k, p in seen.items()}
+    ignored = _gitignored(sorted(rel))
+    if ignored:
+        for r in ignored:
+            seen.pop(rel.get(r, ""), None)
     return sorted(seen.values())
 
 
@@ -615,6 +650,15 @@ _EXAMPLE_RETIRED: list[dict] = [
         "why": "(fictional, --selftest only) an internal codename retired from public-facing "
                "surfaces only; it may still appear in private planning notes.",
         "instead": "the shipped product name",
+    },
+    {
+        "id": "example-understated-count",
+        # A rule can carry a lookbehind so the TRUE neighbouring wording never fires:
+        # "one integration" is retired, "more than one integration" is correct.
+        "pattern": r"(?<!than )\b(?:one|only)\s+integration\b",
+        "why": "(fictional, --selftest only) the product ships several integrations; "
+               "'its one integration' understates it.",
+        "instead": "\"its integrations include ...\"",
     },
 ]
 
@@ -711,9 +755,9 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("BYPASS unicode: auto‐deploy (U+2010 hyphen)",
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old auto‐deploy step.", True),
-    ("BYPASS unicode: auto–deploy (U+2013 en dash)",
+    ("BYPASS unicode: auto\u2013deploy (U+2013 en dash)",
      "knowledge-base/06-projects-portfolio.md",
-     "The pipeline still runs the old auto–deploy step.", True),
+     "The pipeline still runs the old auto\u2013deploy step.", True),
 
     # --- 5. zero-width / invisible ---
     ("BYPASS unicode: auto-​deploy (U+200B zero-width space inside the word)",
@@ -788,6 +832,23 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("'instead of <the retired claim>' (the OBJECT rejection) must NOT fire",
      "knowledge-base/06-projects-portfolio.md",
      "Instead of auto-deploy, the pipeline now runs a manual review step before shipping.", False),
+
+    # --- a lookbehind in a rule keeps the TRUE neighbouring wording quiet ---
+    ("a lookbehind rule: 'its one integration' must fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Acme Sync's one integration is the Globex ledger.", True),
+    ("a lookbehind rule: 'its only integration' must fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Its only integration is the Globex ledger.", True),
+    ("a lookbehind rule: the TRUE 'more than one integration' must NOT fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Acme Sync ships more than one integration.", False),
+    ("a lookbehind rule: the TRUE 'several integrations' must NOT fire",
+     "knowledge-base/06-projects-portfolio.md",
+     "Its integrations include the Globex ledger and the Initech CRM.", False),
+    ("a .claude/rules/ path is checked like any other live surface",
+     ".claude/rules/application-protocol.md",
+     "Lead with: built the entire platform solo.", True),
 ]
 
 
@@ -810,6 +871,33 @@ def selftest() -> int:
             print(f"  {mark}  {label}")
     finally:
         RETIRED = saved
+    # SCOPE: the default sweep skips gitignored scratch, and only that. Needs git; outside a
+    # git checkout the sweep scans everything (stated, never a silent pass or fail).
+    ign = _gitignored(["pipeline/outreach-bundle-2099-01-01.md", "knowledge-base/INDEX.md"])
+    if ign is None:
+        print("  - scope checks skipped: git could not answer (not a git checkout?); the live "
+              "sweep then scans every file, ignored or not")
+    else:
+        gi = (REPO / ".gitignore").read_text(encoding="utf-8", errors="replace") \
+            if (REPO / ".gitignore").exists() else ""
+        live = {str(p.resolve().relative_to(REPO)) for p in live_surface()}
+        scope_checks = [
+            ("scope: tracked live files are NOT treated as ignored",
+             "knowledge-base/INDEX.md" not in ign),
+            ("scope: the live sweep still reaches knowledge-base/",
+             any(x.startswith("knowledge-base/") for x in live)),
+            ("scope: no gitignored file is left in the live sweep",
+             not (_gitignored(sorted(live)) or set())),
+        ]
+        if "outreach-bundle" in gi:
+            scope_checks.insert(0, ("scope: a gitignored outreach bundle is recognised as ignored",
+                                    "pipeline/outreach-bundle-2099-01-01.md" in ign))
+        for label, good in scope_checks:
+            if good:
+                passed += 1
+            else:
+                failed += 1
+            print(f"  {'✓ scope  ' if good else '✗ SCOPE  '}  {label}")
     print()
     if failed:
         print(f"SELFTEST FAILED: {failed} of {passed + failed} cases wrong")

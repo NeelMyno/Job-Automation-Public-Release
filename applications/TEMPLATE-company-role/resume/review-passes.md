@@ -22,9 +22,10 @@ plainly; then the honest counter-argument]
 [every claim traced to its source; anything genuinely a stretch is flagged for you to decide,
 never silently included or silently cut]
 
-## Lens 5: Voice & anti-slop
+## Lens 5: Voice (read-aloud)
 
-[checked against CLAUDE.md §11 for authentic, human-sounding copy]
+[a fresh reviewer read it aloud against knowledge-base/17-writing.md and your voice samples:
+the lines it marked and what changed; plus the `voice_check.py --sendable` exit (hard facts only)]
 
 ## Integration note
 

@@ -20,9 +20,9 @@ A "pending outreach" file is a defect by definition: the queue below is derivabl
 maintained copy of it is a second source of truth that will drift. (Legacy queue files are
 stamped OUTDATED and skipped by hooks.py's outreach_dupes.)
 
-Ledger-parsing note: the sent-ledger's stated schema is date·recipient·company·… but rows
-appended 2026-07-25 onward flipped the two columns (date·company·recipient). The ledger is
-append-only so the drift stays; this parser resolves each row by matching cells against the
+Ledger-parsing note: the sent-ledger's stated schema is date·recipient·company·… but in real use
+rows get appended with those two columns flipped (date·company·recipient). The ledger is
+append-only so such drift stays; this parser resolves each row by matching cells against the
 known-people and known-company sets instead of trusting column position.
 
 Not checked: a social platform's own connection/reply state (acceptance/replies are knowable
@@ -66,7 +66,9 @@ FOLLOWUP_RE = re.compile(r"follow[- ]?up|nudge", re.I)
 #   them = waiting on them; becomes a nudge after FOLLOWUP_DAYS of silence.
 #   rest = the one permitted nudge is spent, or the thread is parked: tracked, never surfaced as
 #          due (the one-nudge rule). It re-surfaces only by a reply flipping it back to "me".
-FU_RE = re.compile(r"^(me|them|rest)\|([^|]+)\|(.*)$", re.S)  # date validated in build() so a bad one surfaces
+#   closed = the thread is over: tracked, never surfaced. The grammar's owner is scripts/records.py;
+#            the shape is owned by .claude/rules/records-format.md.
+FU_RE = re.compile(r"^(me|them|rest|closed)\|([^|]+)\|(.*)$", re.S)  # date validated in build() so a bad one surfaces
 def _fu_rank(what: str) -> int:
     """Sort owed replies by value: a referral you can't lose ranks above a generic thread."""
     w = what.lower()
@@ -83,19 +85,23 @@ def _norm(s: str) -> str:
 
 def short_name(heading: str) -> str:
     """outreach_format.person_blocks returns the WHOLE `###` heading line as the name
-    ("Ann Alpha — designer · https://… · *ask = refer*"); the ledger and tracker carry just
+    ("Ann Alpha, then a dash, then the role, a link and the ask"); the ledger and tracker carry just
     "Ann Alpha". Split on the first em-dash/middot to compare like with like. A trailing
-    UNCLOSED paren is a role descriptor cut mid-way ("Chris Dzoba (peer engineer") and gets
-    trimmed; a balanced paren is a nickname ("Jonathan (Jonny) Summers-Muir") and stays."""
-    n = re.split(r"\s+—\s+|\s+·\s+|\s+-\s+", heading.strip(), maxsplit=1)[0].strip().strip("*_`")
+    UNCLOSED paren is a role descriptor cut mid-way ("Sam Ortiz (peer engineer") and gets
+    trimmed; a balanced paren is a nickname ("Jonathan (Jonny) Rivera") and stays."""
+    # ...and on the first comma: "Eve Epsilon, Director of Design, the hiring manager who posted this
+    # req" is a common heading style. Without the comma split the "name" runs to a dozen words,
+    # is_queue_person() refuses it, and the person silently vanishes from every bucket.
+    n = re.split(r"\s+\u2014\s+|\s+·\s+|\s+-\s+|,\s+", heading.strip(), maxsplit=1)[0].strip().strip("*_`")
+    n = re.sub(r"^\d+\s*[·.)]\s*", "", n)
     if n.count("(") > n.count(")"):
         n = n[:n.rindex("(")].strip()
     return n
 
 
 # Real referrals.md files carry `###` headings that are records, not people ("✅ EMAIL",
-# "Honest gaps", "Unified pack (pointer)", "Connection note: NOT SENDABLE…"). The live run of
-# 2026-07-27 leaked seven of these into the queue as sendable people; this is the filter.
+# "Honest gaps", "Unified pack (pointer)", "Connection note: NOT SENDABLE…"). A real defect this
+# guards against: without it, such headings leak into the queue as sendable people.
 NOT_A_QUEUE_PERSON = re.compile(
     r"[:✅⏳🔴]|^(?:if|none|not |no |honest|unified|connection|dm\b|email\b|inmail|sent|blocked|"
     r"pending|update|status|the |a |an )", re.I)
@@ -108,7 +114,22 @@ def is_queue_person(name: str) -> bool:
 
 # ── tracker ──────────────────────────────────────────────────────────────────────────────
 def tracker_rows(tracker_text: str) -> tuple[list[dict], list[dict]]:
-    """APPLICATIONS rows (co,status,folder) and NETWORK rows (name,company,status,note)."""
+    """APPLICATIONS rows (co,status,folder) and NETWORK rows (name,company,status,note,fu), read by
+    scripts/records.py (node, the browser's parser), so a folder written without its applications/
+    prefix or a key in an unusual position no longer hides a row. The regex reader below is the
+    fallback when records.py cannot read the text (a fragment, as in the selftest)."""
+    try:
+        import records as _R
+        t = _R.load_tracker(tracker_text)
+        if t.apps or t.net:
+            apps = [{"co": _R.s(a.get("co")), "status": _R.s(a.get("status")), "folder": _R.folder_of(a) or None}
+                    for a in t.apps]
+            net = [{"name": _R.s(n.get("name")), "company": _R.s(n.get("company")), "status": _R.s(n.get("status")),
+                    "note": _R.s(n.get("note")) or _R.s(n.get("notes")), "fu": n.get("fu")}
+                   for n in t.net if n.get("name")]
+            return apps, net
+    except Exception:  # noqa: BLE001 (fall back to the tolerant regex reader)
+        pass
     apps, net = [], []
     for m in re.finditer(r'\{co:"(?P<co>[^"]+)"[^}]*?status:"(?P<st>[^"]+)"[^}]*?\}', tracker_text):
         obj = m.group(0)
@@ -150,6 +171,11 @@ def parse_ledger(text: str, known_people: set[str], known_companies: set[str]) -
             continue
         dm = re.match(r"(\d{4})-(\d{2})-(\d{2})", cells[0])
         if not dm:
+            continue
+        # an application submit is its own row type, not a message to a person; a row that records
+        # a message that could not be sent is not a send
+        if any(c.startswith("\u2014 (application") for c in cells[1:3]) or \
+                re.search(r"COULD NOT SEND", " ".join(cells[4:]), re.I):
             continue
         when = date(int(dm.group(1)), int(dm.group(2)), int(dm.group(3)))
         a, b = _norm(cells[1]), _norm(cells[2])
@@ -211,23 +237,47 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
         people_by_dossier[a["folder"]] = blocks
         known_people |= {_norm(short_name(n)) for n, _ in blocks}
 
+    # one identity per person across the tracker, the rosters and the ledger (records.person_keys):
+    # "Jordan Rivera (CEO)", "Ann 'Annie' Alpha" and "MJ Lee, PhD" each resolve to their row
+    import records as _R
+    import records_check as _rc
+    alias: dict = {}
+    for n in net:
+        for k in _R.person_keys(n["name"]):
+            alias.setdefault(k, _norm(n["name"]))
+    for blocks in people_by_dossier.values():
+        for raw, _b in blocks:
+            for k in _R.person_keys(short_name(raw)):
+                alias.setdefault(k, _norm(short_name(raw)))
+    known_people |= set(alias)
+    fu_people = {_norm(n["name"]) for n in net if n.get("fu")}
     ledger_p = repo / "pipeline" / "sent-ledger.md"
     sends = parse_ledger(ledger_p.read_text(errors="ignore"), known_people, known_companies) \
         if ledger_p.exists() else []
+    split = []
+    for s in sends:   # a row to two people is a send to each ("Ann Alpha + Bob Beta")
+        parts = _rc._person_parts(s.person)
+        split += [Send(s.when, p, s.company, s.channel, s.rest) for p in parts] if len(parts) > 1 else [s]
+    sends = split
     by_person: dict[str, list[Send]] = {}
     for s in sends:
         nn = _norm(s.person)
+        hit = next((alias[k] for k in _R.person_keys(s.person) if k in alias), None)
+        if hit:
+            nn = hit
+        elif not _rc.is_person(short_name(s.person)):
+            continue  # a team mailbox (careers@, no-reply@) is not a thread with a person
         if nn not in known_people:
-            # Ledger rows decorate names ('Fei H. (surname unverified — addressed as "Fei")');
-            # unresolved, that decoration made Fei look never-contacted: a double-message risk.
+            # Ledger rows decorate names ('Dee D. (surname unverified, addressed as "Dee")');
+            # unresolved, that decoration made Dee look never-contacted: a double-message risk.
             prefix = _norm(short_name(s.person))
             if prefix in known_people:
                 nn = prefix
             elif nn in known_companies or not is_queue_person(short_name(s.person)):
                 q.unmatched.append((s.person, s.company, "row cells did not resolve to a known person"))
                 continue
-            else:
-                q.unmatched.append((s.person, s.company, "ledgered but rostered nowhere live"))
+            elif nn not in fu_people:
+                q.unmatched.append((s.person, s.company, "ledgered, rostered nowhere live, and no fu on a NETWORK row"))
         by_person.setdefault(nn, []).append(s)
 
     # reply evidence: ledger rest-text or NETWORK note
@@ -245,6 +295,12 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
         for raw_name, _block in blocks:
             name = short_name(raw_name)
             if not is_queue_person(name):
+                # A record heading ("✅ EMAIL", "Honest gaps") is rightly skipped. A block that carries a
+                # drafted note or DM is a PERSON whose heading this parser could not read: surface it,
+                # never drop it silently.
+                if re.search(r"(?im)^\s*[-*>]?\s*\*{0,2}(?:#?\d+\s*[.):·-]?\s*)?(?:connection[ -]note|direct[ -]message|note|dm)\b", _block) \
+                        and not NOT_A_QUEUE_PERSON.search(name):
+                    q.unmatched.append((raw_name[:70], dossier, "drafted copy under a heading that did not resolve to a person's name"))
                 continue
             nn = _norm(name)
             rows = by_person.get(nn, [])
@@ -273,13 +329,19 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
         m = FU_RE.match((n.get("fu") or "").strip())
         if m:
             state, since_s, what = m.group(1), m.group(2), m.group(3).strip()
+            if state == "closed":
+                continue  # the thread is over: tracked, never surfaced
             try:
                 days = (today - date.fromisoformat(since_s)).days
             except ValueError:
-                q.unmatched.append((n["name"], n["company"], f"fu date not ISO: {since_s!r}"))
+                q.unmatched.append((n["name"], n["company"], f"fu date not on record or not ISO: {since_s!r}"))
                 continue
             if state == "me":
                 q.owed_reply.append((n["name"], n["company"], since_s, days, what, _fu_rank(what)))
+            elif state == "them" and NOTE_ONLY_RE.search(what) and re.search(r"accept", what, re.I) \
+                    and not re.search(r"\baccepted\b", what, re.I):
+                # a connection note not yet accepted cannot be nudged; the DM waits on the accept (cold.py ages it)
+                q.fire_on_accept.append((n["name"], n["company"], since_s))
             elif state == "them" and days >= FOLLOWUP_DAYS:
                 q.followup_due.append((n["name"], n["company"], since_s, days))
             # state == "rest": nudge spent / parked (tracked, never surfaced as due)
@@ -306,6 +368,10 @@ def build(repo: Path = REPO, today: date | None = None) -> Queue:
     q.owed_reply.sort(key=lambda r: (r[5], -r[3]))
     _seen: set = set()
     q.followup_due = [r for r in q.followup_due if not (_norm(r[0]) in _seen or _seen.add(_norm(r[0])))]
+    _acc: set = set()
+    q.fire_on_accept = [r for r in q.fire_on_accept if not (_norm(r[0]) in _acc or _acc.add(_norm(r[0])))]
+    _due = {_norm(r[0]) for r in q.followup_due}
+    q.fire_on_accept = [r for r in q.fire_on_accept if _norm(r[0]) not in _due]
     _hot = ({_norm(r[0]) for r in q.owed_reply} | {_norm(r[0]) for r in q.followup_due}
             | {_norm(r[0]) for r in q.untagged_reply})
     q.replied = [r for r in q.replied if _norm(r[0]) not in _hot]
@@ -363,12 +429,12 @@ def selftest() -> int:
         ok = ok and cond
     with tempfile.TemporaryDirectory() as td:
         r = Path(td)
-        (r / "pipeline").mkdir(); (r / "applications" / "acme-designer" / ".").mkdir(parents=True)
-        (r / "applications" / "beta-designer").mkdir(parents=True)
+        (r / "pipeline").mkdir(); (r / "applications" / "acme-analyst" / ".").mkdir(parents=True)
+        (r / "applications" / "beta-analyst").mkdir(parents=True)
         (r / "pipeline" / "tracker.html").write_text(
-            '{co:"Acme", role:"d", status:"applied", folder:"applications/acme-designer"},\n'
-            '{co:"Beta", role:"d", status:"applied", folder:"applications/beta-designer"},\n'
-            '{co:"Dead", role:"d", status:"rejected", folder:"applications/dead-designer"},\n'
+            '{co:"Acme", role:"d", status:"applied", folder:"applications/acme-analyst"},\n'
+            '{co:"Beta", role:"d", status:"applied", folder:"applications/beta-analyst"},\n'
+            '{co:"Dead", role:"d", status:"rejected", folder:"applications/dead-analyst"},\n'
             '{name:"Riya Rep", company:"Acme", status:"active", note:"REPLIED 07-20"},\n'
             # the warm-lead reminder engine: fu-tagged NETWORK rows
             '{name:"Ref Refnandez", company:"Acme", status:"active", note:"REPLIED", fu:"me|2026-07-20|agreed to refer, the big one", link:"x"},\n'
@@ -376,36 +442,49 @@ def selftest() -> int:
             '{name:"Quiet Quinn", company:"Acme", status:"active", note:"DM sent", fu:"them|2026-07-20|asked for resume then quiet"},\n'
             '{name:"Fresh Fields", company:"Acme", status:"active", note:"DM sent", fu:"them|2026-07-26|just messaged, waiting"},\n'
             '{name:"Bad Date", company:"Acme", status:"active", note:"x", fu:"me|not-a-date|broken"},\n'
-            '{name:"Rest Restman", company:"Acme", status:"active", note:"nudged", fu:"rest|2026-07-10|the one nudge is spent, awaiting reply"},\n')
+            '{name:"Rest Restman", company:"Acme", status:"active", note:"nudged", fu:"rest|2026-07-10|the one nudge is spent, awaiting reply"},\n'
+            # the record format: shapes an older cold sweep could not see
+            '{name:"Closed Clara", company:"Acme", status:"active", note:"DM sent", fu:"closed|2026-07-10|role closed"},\n'
+            '{name:"Note Nadia", company:"Acme", status:"active", note:"x", fu:"them|2026-07-01|connection note sent, waiting on accept"},\n'
+            '{name:"Jordan Rivera", company:"Globex", status:"active", note:"x", fu:"them|2026-07-01|founder email sent"},\n')
         def block(nm, handle):
-            return (f"### {nm} — designer · https://www.linkedin.com/in/{handle} · *ask = refer*\n"
+            return (f"### {nm} \u2014 analyst · https://www.linkedin.com/in/{handle} · *ask = refer*\n"
                     f"- **Note:** I read your work, {nm.split()[0]}. My work is at example.com. Would you be open to referring me?\n"
                     f"- **DM:** Use InMail: NO (free path).\n\n"
-                    f"Hi {nm.split()[0]}, I read your case study on onboarding and the retention detail stuck with me.\n\n"
+                    f"Hi {nm.split()[0]}, I read your write-up on onboarding and the retention detail stuck with me.\n\n"
                     f"My work is at example.com.\n\nWould you be open to referring me? A no with a reason helps too.\n\nJordan\n")
-        (r / "applications" / "acme-designer" / "referrals.md").write_text(
+        comma = block("Eve Epsilon", "eve").replace(
+            "### Eve Epsilon \u2014 analyst", "### 6 · Eve Epsilon, Director of Operations, the hiring manager who posted this req", 1)
+        odd = block("Zed Omega", "zed").replace(
+            "### Zed Omega \u2014 analyst", "### Someone Whose Heading Runs On For Far Too Many Words To Be A Name", 1)
+        (r / "applications" / "acme-analyst" / "referrals.md").write_text(
             "## The messages\n\n" + block("Ann Alpha", "ann") + "\n" + block("Bob Beta", "bob")
-            + "\n" + block("Cara Gamma", "cara") + "\n" + block("Riya Rep", "riya")
-            + "\n" + block("Dee Delta", "dee"))
+            + "\n" + block("Cara Cee", "cara") + "\n" + block("Riya Rep", "riya")
+            + "\n" + block("Dee Delta", "dee") + "\n" + comma + "\n" + odd)
         today = date(2026, 7, 27)
         old = (today - timedelta(days=5)).isoformat()
         (r / "pipeline" / "sent-ledger.md").write_text(
             "| date | recipient | company | channel | ref | state | by |\n|---|---|---|---|---|---|---|\n"
             f"| {old} | Bob Beta | Acme | LinkedIn connection note (free) | x | ok | Jordan |\n"          # schema order
-            f"| {old} | Acme | Cara Gamma | LinkedIn DIRECT DM | x | ok | Jordan |\n"                      # FLIPPED order
+            f"| {old} | Acme | Cara Cee | LinkedIn DIRECT DM | x | ok | Jordan |\n"                      # FLIPPED order
             f"| {today.isoformat()} | Acme | Riya Rep | EMAIL | x | she REPLIED same day | Jordan |\n"    # reply + today count
-            f'| {old} | Dee Delta (surname unverified — addressed as "Dee") | Acme | LinkedIn DIRECT DM | x | ok | Jordan |\n'  # decorated name
-            f"| {old} | Acme | Zzz Unknown Corp | LinkedIn DM | x | ok | Jordan |\n")                     # unresolvable row
+            f'| {old} | Dee Delta (surname unverified \u2014 addressed as "Dee") | Acme | LinkedIn DIRECT DM | x | ok | Jordan |\n'  # decorated name
+            f"| {old} | Acme | Zzz Unknown Corp | LinkedIn DM | x | ok | Jordan |\n"                      # unresolvable row
+            f"| {old} | \u2014 (application form) | Acme | Ashby form | SUBMITTED by the user | x | Jordan |\n"  # an application row
+            f"| {old} | Jordan Rivera (CEO) | Globex | Email | x | ok | Jordan |\n")                    # a role in brackets
         (r / "pipeline" / "inmail-ledger.md").write_text("| As of | Credits left | Source |\n|---|---|---|\n| 2026-07-20 | **2** | Jordan |\n")
         (r / "pipeline" / "old-queue.md").write_text("# ⏸️ ON HOLD: do not send\nstuff\n")
         q = build(r, today=today)
         check("no-roster catches the live dossier with no referrals.md (and not the dead one)",
               [x[1] for x in q.no_roster] == ["Beta"])
-        check("ready-to-send = the never-contacted person only", [x[0] for x in q.ready] == ["Ann Alpha"])
+        check("ready-to-send = the never-contacted people only, INCLUDING a 'Name, Title, ...' comma heading",
+              [x[0] for x in q.ready] == ["Ann Alpha", "Eve Epsilon"])
+        check("drafted copy under a heading that is not a name SURFACES, never vanishes",
+              any("Someone Whose Heading" in u[0] for u in q.unmatched))
         check("note-only send parses in SCHEMA order -> fire-on-accept",
-              [x[0] for x in q.fire_on_accept] == ["Bob Beta"])
+              [x[0] for x in q.fire_on_accept if x[0] != "Note Nadia"] == ["Bob Beta"])
         check("FLIPPED-column DM row still resolves to the person -> follow-up due at 5d",
-              "Cara Gamma" in [x[0] for x in q.followup_due])
+              "Cara Cee" in [x[0] for x in q.followup_due])
         check("decorated ledger name ('Dee Delta (surname unverified…)') resolves -> NOT ready, follow-up due",
               "Dee Delta" not in [x[0] for x in q.ready] and "Dee Delta" in [x[0] for x in q.followup_due])
         check("unresolvable row surfaces in UNRESOLVED, never silently dropped",
@@ -427,6 +506,14 @@ def selftest() -> int:
         check("fu=rest is parked: never surfaced as due even past the threshold (one-nudge rule)",
               "Rest Restman" not in [x[0] for x in q.followup_due]
               and "Rest Restman" not in [x[0] for x in q.owed_reply])
+        check("fu=closed is tracked, never surfaced and never unresolved",
+              all("Closed Clara" not in str(x) for x in q.followup_due + q.owed_reply + q.unmatched + q.fire_on_accept))
+        check("fu=them on an unaccepted connection note waits on the accept; it is never a nudge",
+              "Note Nadia" in [x[0] for x in q.fire_on_accept] and "Note Nadia" not in [x[0] for x in q.followup_due])
+        check("an application row in the ledger is not a person and never unresolved",
+              all("application" not in x[0] for x in q.unmatched))
+        check("'Jordan Rivera (CEO)' in the ledger is the 'Jordan Rivera' row, never unresolved",
+              all("Jordan" not in x[0] for x in q.unmatched))
         check("today's sends count toward the per-company budget", q.budget.get("Acme") == 1)
         check("hold stamp surfaced", any("old-queue.md" in h[0] for h in q.holds))
         check("InMail balance read", q.inmail.startswith("2 "))
@@ -435,12 +522,12 @@ def selftest() -> int:
                       ["✅ EMAIL", "Honest gaps", "Unified pack (pointer)", "None. No recipient exists yet",
                        "Connection note: NOT SENDABLE (invite already pending)",
                        "If LinkedIn will not let a second message through", "Not found / honest gaps"])
-              and all(is_queue_person(x) for x in ["Ann Alpha", "Fei H.", "Jonathan (Jonny) Summers-Muir",
-                                                   'Elizabeth "Lizzy" Nammour']))
+              and all(is_queue_person(x) for x in ["Ann Alpha", "Dee D.", "Jonathan (Jonny) Rivera",
+                                                   'Dana "Dee" Delta']))
         q2 = build(r, today=today + timedelta(days=1))
         (r / "pipeline" / "sent-ledger.md").write_text(
             (r / "pipeline" / "sent-ledger.md").read_text() +
-            f"| {today.isoformat()} | Acme | Cara Gamma | LinkedIn DM (follow-up) | x | nudge | Jordan |\n")
+            f"| {today.isoformat()} | Acme | Cara Cee | LinkedIn DM (follow-up) | x | nudge | Jordan |\n")
         q3 = build(r, today=today + timedelta(days=9))
         check("one nudge maximum: after a follow-up row the person never re-queues",
               all("Cara" not in x[0] for x in q3.followup_due))

@@ -5,9 +5,11 @@ already fits. Tailoring is DERIVED, never freely authored; see resume/README.md.
 
 ## Cards played
 
-**IN:** [2-5 specific achievements/angles deliberately led with here, each tied to a specific JD
+<!-- scripts/verify_claims.py (rule R11) reads these two labels exactly as written. -->
+
+**Cards IN:** [2-5 specific achievements/angles deliberately led with here, each tied to a specific JD
 line]
-**OUT:** [specific true things deliberately NOT emphasized for this audience, and why: real,
+**Cards OUT:** [specific true things deliberately NOT emphasized for this audience, and why: real,
 honest content held in reserve, not a lie]
 
 ## Level fit
