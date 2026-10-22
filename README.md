@@ -14,6 +14,14 @@ New here? Open the repo in Claude Code or Codex and type **`/setup`** (Codex: `$
 asks a few short questions, reads your résumé and sets everything up. [`SETUP.md`](SETUP.md) is the
 same path by hand, plus prerequisites and troubleshooting.
 
+**What you need:** Claude Code or Codex, Python 3.9+ (with PyYAML, weasyprint and PyMuPDF: one
+install line in `SETUP.md`), and Node.js 20.19+ or 22.12+ with Google Chrome for form filling.
+`python3 scripts/doctor.py` checks all of it and prints the fix for anything missing.
+
+**Keep your copy private.** Once set up, this folder holds your résumé, your work-authorization
+answers and your job search. Clone it to your own computer or a private repo, and never push your
+filled-in copy to a public one.
+
 ## How it works
 
 Everything stands on a **knowledge base** (`knowledge-base/`): a distilled, always-accurate picture
@@ -22,16 +30,19 @@ of your profile, experience, projects, career narrative, and work-authorization 
 grounded in your real facts instead of a guess. The agent reads that knowledge base before every task.
 
 **Where jobs come from.** Not a fixed list. The crawler reads the public job boards of any company on
-Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Workday (the agent finds the companies that
-post your titles, using the free Common Crawl index, and adds any company you name), free public job
-APIs, and the Hacker News hiring thread. No keys and no logins are needed. Any board or source can
-be added. Employers on other systems (iCIMS, Taleo, Oracle, SuccessFactors and the rest) aren't read
-directly: the agent finds their postings by web search, adds them to your tracker with the rest, and
-still fills the application form.
+Greenhouse, Lever, Ashby, SmartRecruiters or Workable (the agent finds the companies that post your
+titles, using the free Common Crawl index, and adds any company you name), Workday boards from a
+careers URL, free public job APIs, and the Hacker News hiring thread. No logins are needed, and no
+keys except optional free ones (USAJOBS for federal jobs). Any board or source can be added.
+Employers on other systems (iCIMS, Taleo, Oracle, SuccessFactors, many hospitals, schools and
+retailers) aren't read directly: the agent finds their postings by web search, adds them to your
+tracker with the rest, and still fills the application form.
 
 **Who fills the forms.** The agent does. The repo ships the browser tool it uses (`.mcp.json` for
-Claude Code, `.codex/config.toml` for Codex; it needs Node.js and Google Chrome): it fills every field, checks each one in the page,
-attaches your résumé and cover letter, and leaves the form open for you to review and click Submit.
+Claude Code, `.codex/config.toml` for Codex; it needs Node.js and Google Chrome, and its usage
+statistics are turned off). The agent fills every field, checks each one in the page, attaches your
+résumé and cover letter, and leaves the form open for you to review and click Submit. If your session
+has no browser tool, `python3 scripts/doctor.py --fill` prints the steps to switch it on.
 
 The agent operates with the research + reasoning depth of a sharp career advisor (search-first,
 self-critical, honest), but with a builder's hands: it edits files, renders documents, and drives a
@@ -57,7 +68,8 @@ python3 scripts/throughput.py       # the goal itself: finished work sitting uns
                                     # contradicting itself, commits held back
 ```
 
-They also run from the harness (`.claude/settings.json`): true state, including every live-interview
+They also run from the harness (`.claude/settings.json` for Claude Code, `.codex/hooks.json` for
+Codex): true state, including every live-interview
 next-step, is printed at session start, every file written is checked, and a turn that introduces a
 defect is **blocked**.
 
@@ -77,12 +89,15 @@ defect is **blocked**.
 - `.claude/`: the commands (`/setup` to get started, `/wave` for applications, `/outreach` for
   networking), `rules/` (the application protocol and the record formats), the five-pass review
   workflow, and `settings.json` (the hooks).
-- `ops/` is this repo's own session record: `STATE.md`, `HANDOFF.md`, `decisions/` (an immutable ADR
-  ledger), `log/activity.md`, `notes/`.
-- `docs/`: the architecture diagram at the top of this file.
-- `applications/`: active per-job dossiers, one folder per job. Copy `TEMPLATE-company-role/` to
-  start one.
+- `ops/` is this repo's own session record: `INDEX.md`, `DEBT.md` (known problems), `decisions/` (an
+  immutable ADR ledger), `log/activity.md`, `briefs/`, `reports/`, `notes/`, plus `STATE.md` and
+  `HANDOFF.md`, which the agent writes as it works.
+- `docs/`: the architecture diagram at the top of this file, and `DESIGN.md` (the tracker's look).
+- `applications/`: active per-job dossiers, one folder per job. The agent copies
+  `TEMPLATE-company-role/` to start one.
 - `resume/`: your current résumé (source, built PDF, fonts).
+- `projects/`: `CLAIMS-MANIFEST.md`, the list of work samples you link to and what each one shows,
+  so no message claims more than the linked page does.
 - `pipeline/`: the job crawler (`job-crawler/`: crawl, discover, free sources; no keys), the live
   status tracker, and the send ledgers.
 
