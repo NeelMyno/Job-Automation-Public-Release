@@ -62,11 +62,9 @@ repo uses a placeholder; you provide the real content.
   own profile, never your everyday browser.
 - **About usage statistics.** The browser tool (`chrome-devtools-mcp`) sends usage statistics to
   Google by default (tool success rates, latency, environment details; see its
-  [README](https://github.com/ChromeDevTools/chrome-devtools-mcp#usage-statistics)). The Codex
-  config here turns that off with `--no-usage-statistics`. For Claude Code, add the same flag to
-  the `args` list in `.mcp.json`, so it reads
-  `"args": ["-y", "chrome-devtools-mcp@1.10.1", "--no-usage-statistics"]`, or set the environment
-  variable `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1`.
+  [README](https://github.com/ChromeDevTools/chrome-devtools-mcp#usage-statistics)). This repo
+  turns that off for both agents: `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) pass
+  `--no-usage-statistics`. To turn it back on, remove that flag from the `args` list.
 
 Check everything at once, any time:
 ```
