@@ -48,13 +48,19 @@ NOT CONFIGURED YET (a fresh clone)
   exit 0, which a reader or a hook would take as proof. If any file DOES record an answer, that
   answer cannot be checked, and the gate exits 1 (UNVERIFIED).
 
+THE RECORD SHAPE (applications/TEMPLATE-company-role/application.md, .claude/rules/records-format.md §6)
+    - "<question exactly as printed>" → Yes
+  Also read: `-> No`, `=> Yes`, `= No`, `: Yes`, a trailing bare `? Yes`, and `**Yes**`, bold or not.
+  A question line under an answers heading, or one with an answer separator, whose Yes/No cannot be
+  read is UNVERIFIED (exit 1), never clean.
+
 USAGE
     python3 scripts/visa_gate.py                     # every applications/*/application.md
     python3 scripts/visa_gate.py <path> ...          # specific files (used by the hook)
     python3 scripts/visa_gate.py --selftest          # a fixed, fictional regression suite
 Exit 0 = clean: every recorded answer was checked against your configured rule. Exit 1 = at least
-one wrong or missing answer, or recorded answers that cannot be checked because §3 is not filled
-in. Exit 3 = NOT CHECKED: §3 is not filled in yet and nothing recorded needs it (a fresh clone).
+one wrong or missing answer, a recorded answer whose Yes/No the gate cannot read (UNVERIFIED), or
+recorded answers that cannot be checked because §3 is not filled in. Exit 3 = NOT CHECKED: §3 is not filled in yet and nothing recorded needs it (a fresh clone).
 """
 
 from __future__ import annotations
@@ -120,9 +126,22 @@ ANSWER = re.compile(
     # **"No, I will not need sponsorship"**). A quoted QUESTION (**"Do you require…?"**) does NOT
     # start with yes/no, so it is not read here.
     r'|\*\*\s*[\"“”\'’]\s*(yes|no)\b'
-    r'|\b(?:answer|selected|submitted|chose|response)\b\s*[:\-]?\s*\*{0,2}[\"“”\'’]?\s*(yes|no)\b',
+    r'|\b(?:answer|selected|submitted|chose|response)\b\s*[:\-]?\s*\*{0,2}[\"“”\'’]?\s*(yes|no)\b'
+    # A separator answer: `"question?" → Yes`, `-> No`, `=> Yes`, `= No`, `: Yes`, bold or not. The
+    # yes/no must end its phrase (end of text, punctuation, a bracket or a dash), so prose such as
+    # "NOTE: no separate question" or "Yes / No" (an option list) is never read as an answer.
+    r'|(?:→|->|=>|=|:)\s*\*{0,2}\s*[\"“”\'’]?\s*(yes|no)\b'
+    r'(?=\s*(?:[.,;:!?)(\]\-\u2013\u2014*\"“”\'’|]|$))'
+    # A trailing bare answer: `- Do you require sponsorship? Yes` (a table cell `| No |` too).
+    r'|(?<![*\w])(yes|no)\s*[.!]?\s*\|?\s*$',
     re.I,
 )
+
+# A separator that says "the answer follows" (the template's canonical `"question" → answer` shape).
+ANSWER_SLOT = re.compile(r"→|->|=>|\b(?:answer|selected|submitted|chose|response)\s*[:=]", re.I)
+# A heading for the block of answers as filled. A question line under it is a recorded answer, so an
+# answer the gate cannot read there is UNVERIFIED, never silently passed.
+ANSWERS_HEADING = re.compile(r"^\s*#{1,6}\s.*\banswers?\b", re.I)
 
 # Multi-question lines are real and common: "Worked here before: **No** · Authorized: **Yes**".
 # Matching across the whole line pairs the wrong question with the wrong answer. The `;` separator
@@ -410,13 +429,17 @@ def _adr_exists(adr: str) -> bool:
     return any((REPO / "ops" / "decisions").glob(f"{num}-*.md"))
 
 
-def recorded_answers(text: str) -> list[tuple[int, str, str, str, bool, str]]:
-    """Every recorded work-authorization answer: (line index, line, question segment, kind,
-    inverted, answer). Needs no configuration, so an unconfigured gate can still tell "nothing
-    recorded" from "recorded but unverifiable"."""
-    out: list[tuple[int, str, str, str, bool, str]] = []
+def _walk(text: str):
+    """Yield (line index, line, segment, kind, inverted, answer or None, unreadable?) for every
+    work-authorization question segment. `unreadable` is True when the segment is plainly a recorded
+    answer (an answer separator such as `→` follows the question, or it sits under an answers
+    heading) but no yes/no can be read from it."""
     lines = text.splitlines()
+    under_answers = False
     for i, line in enumerate(lines):
+        if re.match(r"^\s*#{1,6}\s", line):
+            under_answers = bool(ANSWERS_HEADING.match(line))
+            continue
         if not (SPONSOR.search(line) or AUTHORIZED.search(line)):
             continue
         segs = SEGMENT.split(line)
@@ -443,10 +466,25 @@ def recorded_answers(text: str) -> list[tuple[int, str, str, str, bool, str]]:
                 # hard-stop question.
                 if seg.strip() == line.strip() and "**" not in seg and i + 1 < len(lines):
                     got = _answer_in(lines[i + 1], is_continuation=True)
-            if got is None:
-                continue
-            out.append((i, line, seg, kind, inverted, got))
-    return out
+            unreadable = False
+            if got is None and not CONDITIONAL.search(seg):
+                after = seg.split("?", 1)[1] if "?" in seg else seg
+                unreadable = bool(ANSWER_SLOT.search(after)) or under_answers
+            yield i, line, seg, kind, inverted, got, unreadable
+
+
+def recorded_answers(text: str) -> list[tuple[int, str, str, str, bool, str]]:
+    """Every recorded work-authorization answer: (line index, line, question segment, kind,
+    inverted, answer). Needs no configuration, so an unconfigured gate can still tell "nothing
+    recorded" from "recorded but unverifiable"."""
+    return [(i, line, seg, kind, inv, got)
+            for i, line, seg, kind, inv, got, _ in _walk(text) if got is not None]
+
+
+def unreadable_answers(text: str) -> list[tuple[int, str]]:
+    """(line number, line) of every recorded work-authorization answer whose yes/no the gate cannot
+    read. Such a line is UNVERIFIED: the gate exits non-zero, it never reports it as clean."""
+    return [(i + 1, line) for i, line, _s, _k, _v, got, bad in _walk(text) if bad]
 
 
 def scan_text(rel: str, text: str, cfg: dict) -> list[Finding]:
@@ -583,6 +621,23 @@ CASES: list[tuple[str, str, bool]] = [
     ("the same hyphenated inverted question answered Yes - the lie, MUST fire",
      '- "Are you legally authorized to work in the United States without employer-sponsored visa '
      'support now or in the future?": **Yes**', True),
+
+    # --- the template's own shapes. Before this fix the gate read only bold **Yes**/**No**, so a
+    # wrong answer written the way the template shows it passed as CLEAN. ---
+    ("template arrow shape, hard-stop flipped to No: MUST fire",
+     '- "Will you now or in the future require sponsorship for employment visa status?" → No', True),
+    ("template arrow shape, honest Yes: must NOT fire",
+     '- "Will you now or in the future require sponsorship for employment visa status?" → Yes', False),
+    ("ascii arrow, to-begin answered Yes: MUST fire",
+     '- "Do you require sponsorship to begin employment?" -> Yes', True),
+    ("colon shape, plain text, authorized-now answered No: MUST fire",
+     "- Are you legally authorized to work in the United States: No", True),
+    ("trailing bare answer after the question mark, wrong: MUST fire",
+     "- Will you now or in the future require sponsorship? No", True),
+    ("trailing bare answer in a plain table cell, wrong: MUST fire",
+     "| 4 | Will you now or in the future require sponsorship? | No |", True),
+    ("an option list after a colon is not an answer: must NOT fire",
+     '- "Do you require sponsorship to begin employment?" (dropdown: Yes / No)', False),
 ]
 
 # A second fictional configuration that exercises the two optional mappings: the future answer
@@ -623,6 +678,14 @@ authorized-now: [YES/NO] | [one-line reason]
 sponsorship-to-begin: [YES/NO] | [one-line reason]
 sponsorship-now-or-future: [YES/NO] | [one-line reason]
 restricted-authorization: [YES/NO] | [one-line reason]
+```
+"""
+_NO_SPONSOR_KB = """# answers
+```work-authorization
+authorized-now: YES | example
+sponsorship-to-begin: NO | example
+sponsorship-now-or-future: NO | example
+restricted-authorization: NO | example
 ```
 """
 _MAPPED_KB = """# answers
@@ -745,6 +808,26 @@ def selftest() -> int:
             KB_ANSWERS = tdp / "missing.md"
             with contextlib.redirect_stdout(io.StringIO()):
                 rc_missing = main([str(tdp / "with.md")])
+            # The two observed false-CLEANs, through main(), against a KB that needs no sponsorship.
+            KB_ANSWERS = tdp / "kb-none.md"
+            KB_ANSWERS.write_text(_NO_SPONSOR_KB, encoding="utf-8")
+            shapes = {
+                "arrow": '- "Will you now or in the future require sponsorship for employment visa '
+                         'status?" → Yes\n',
+                "plain": "- Will you now or in the future require sponsorship? Yes\n",
+                "unreadable": '## Exact form answers (as filled, 2026-01-01)\n\n- "Will you now or '
+                              'in the future require sponsorship?" → I selected the second option\n',
+                "unreadable_slot": '- "Do you require sponsorship to begin employment?" → see notes\n',
+                "listing": '## Form questions\n\n- "Will you now or in the future require '
+                           'sponsorship?" (dropdown: Yes / No)\n',
+                "right": '## Exact form answers (as filled, 2026-01-01)\n\n- "Will you now or in the '
+                         'future require sponsorship?" → No\n',
+            }
+            rcs = {}
+            for name, body in shapes.items():
+                (tdp / f"{name}.md").write_text(body, encoding="utf-8")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rcs[name] = main([str(tdp / f"{name}.md")])
         finally:
             KB_ANSWERS = saved_kb
     for label, good in [
@@ -753,6 +836,12 @@ def selftest() -> int:
         ("CONFIG    unconfigured + a recorded answer exits 1 (UNVERIFIED, never a pass)", rc_with == 1),
         ("CONFIG    unconfigured + nothing recorded exits 3 (not checked), never 0", rc_without == EXIT_NOT_CHECKED),
         ("CONFIG    a missing answers file behaves the same as unconfigured (no crash)", rc_missing == 1),
+        ("SHAPE     template arrow answer, wrong vs KB, exits 1 (was CLEAN)", rcs["arrow"] == 1),
+        ("SHAPE     plain-text trailing answer, wrong vs KB, exits 1 (was CLEAN)", rcs["plain"] == 1),
+        ("SHAPE     an unreadable answer under an answers heading exits 1 (UNVERIFIED)", rcs["unreadable"] == 1),
+        ("SHAPE     an unreadable answer after an arrow exits 1 (UNVERIFIED)", rcs["unreadable_slot"] == 1),
+        ("SHAPE     a question listing with its options is not an answer, exits 0", rcs["listing"] == 0),
+        ("SHAPE     the right answer in the canonical shape exits 0", rcs["right"] == 0),
     ]:
         passed, failed = (passed + 1, failed) if good else (passed, failed + 1)
         print(f"  {'✓' if good else '✗'} {label}")
@@ -798,7 +887,8 @@ def main(argv: list[str]) -> int:
         for p in paths:
             if not p.is_file():
                 continue
-            rec = recorded_answers(p.read_text(encoding="utf-8", errors="replace"))
+            body = p.read_text(encoding="utf-8", errors="replace")
+            rec = recorded_answers(body) + unreadable_answers(body)
             if rec:
                 try:
                     rel = str(p.resolve().relative_to(REPO))
@@ -817,6 +907,7 @@ def main(argv: list[str]) -> int:
 
     findings: list[Finding] = []
     gaps: list[str] = []
+    unreadable: list[tuple[str, int, str]] = []
     checked = 0
     for p in paths:
         if not p.is_file():
@@ -828,6 +919,7 @@ def main(argv: list[str]) -> int:
         except ValueError:
             rel = str(p)
         findings.extend(scan_text(rel, text, cfg))
+        unreadable.extend((rel, n, ln) for n, ln in unreadable_answers(text))
         g = coverage_gap(rel, text)
         if g:
             gaps.append(g)
@@ -844,7 +936,7 @@ def main(argv: list[str]) -> int:
     decided = [f for f in findings if f.decided]
     open_findings = [f for f in findings if not f.decided]
 
-    if not open_findings and not gaps:
+    if not open_findings and not gaps and not unreadable:
         print("\nCLEAN: every recorded work-authorization answer matches your configured rule.")
         if decided:
             print(f"\n{len(decided)} ANSWER(S) ALREADY SUBMITTED AND RULED ON "
@@ -863,6 +955,13 @@ def main(argv: list[str]) -> int:
         for f in decided:
             print(f.render())
             print()
+    if unreadable:
+        print(f"{len(unreadable)} UNVERIFIED ANSWER(S): a work-authorization answer is recorded here but")
+        print("the gate cannot read its Yes/No. Rewrite it in the one shape:")
+        print('  - "<question exactly as printed>" → Yes   (or → No)\n')
+        for rel, n, ln in unreadable:
+            snippet = ln.strip()
+            print(f"  [UNVERIFIED] {rel}:{n}\n      line:     {snippet[:157] + '...' if len(snippet) > 160 else snippet}\n")
     if gaps:
         print(f"{len(gaps)} SUBMITTED APPLICATION(S) WITH NO RECORDED ANSWER:\n")
         for g in gaps:

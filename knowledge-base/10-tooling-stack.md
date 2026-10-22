@@ -24,7 +24,7 @@ separate window. `.claude/rules/application-protocol.md` §14 bounds it.
 The job crawler (`pipeline/job-crawler/`) is free and needs no login. It is **not a fixed list of
 boards or sources**: the agent adds company boards and switches sources on as your search needs
 them, and the latest crawl's own JSON `sources` list is the only true answer to "what did it
-search". It reads three kinds of source:
+search". The crawler reads three kinds of source, and the agent's web search adds a fourth:
 
 1. **Company job boards on six applicant tracking systems (ATSes)**: Greenhouse, Lever, Ashby,
    SmartRecruiters, Workable and Workday, each through its own public JSON endpoint. The boards live
@@ -44,8 +44,12 @@ search". It reads three kinds of source:
 
 **Coverage, plainly.** Workday boards can't be guessed, so they come in only through `--urls`
 links. iCIMS, Taleo, Oracle, SuccessFactors and other systems are not read directly. For an employer
-on one of those, the agent finds the posting by web search, and it still fills that employer's
-application form for you. `pipeline/job-crawler/README.md` has the full detail and how to add a new
+on one of those, the agent finds the posting by web search, adds it to `pipeline/tracker.html` as an
+APPLICATIONS `lead` row (shape: `.claude/rules/records-format.md` §1), ranks it with the crawled
+jobs, and still fills that employer's application form for you. In many fields (healthcare,
+teaching, trades, retail, government, local employers) most postings sit on those systems, and the
+free feeds above are mostly remote jobs, heavy on tech. So web search ("<title> jobs <city>", the
+employers' own career pages) is a fourth source in its own right, not a fallback. `pipeline/job-crawler/README.md` has the full detail and how to add a new
 ATS or source.
 
 ## Optional: deepens research if you add it

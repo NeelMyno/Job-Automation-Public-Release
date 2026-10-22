@@ -1207,6 +1207,33 @@ def _other_sessions_windows(transcript_path: str, max_age_h: float = 12.0) -> li
     return out
 
 
+def _has_claude_tool_records(transcript_path: str) -> bool:
+    """True when THIS chat's transcript (or a subagent's) holds at least one Claude Code tool_use
+    block. False for a missing, unreadable or foreign-format transcript (such as a Codex rollout),
+    where the cross-chat scoping below has nothing to read and must not drop anything."""
+    try:
+        tp = Path(transcript_path).resolve()
+        if not transcript_path or not tp.is_file():
+            return False
+        sub = tp.parent / tp.stem
+        for f in [tp] + (sorted(sub.rglob("*.jsonl")) if sub.is_dir() else []):
+            with open(f, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if '"tool_use"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    content = (rec.get("message") or {}).get("content") if isinstance(rec, dict) else None
+                    if isinstance(content, list) and any(
+                            isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
+                        return True
+    except Exception:
+        return False
+    return False
+
+
 def _drop_other_sessions_files(changed: list[str], transcript_path: str, unpushed_only: set[str] | None = None,
                                commits: dict[str, list[tuple[str, float, float]]] | None = None,
                                shas: set[str] | None = None) -> list[str]:
@@ -1225,6 +1252,11 @@ def _drop_other_sessions_files(changed: list[str], transcript_path: str, unpushe
        keeps the file unless another session was running a tool at that time too and the time falls
        outside every bounded call of this session. Inside both stays; the loop breaker covers it.
     """
+    if not _has_claude_tool_records(transcript_path):
+        # A transcript in another format (Codex writes its own) carries no Claude tool_use records,
+        # so "this chat's files" would read as empty and every changed file would be dropped: the
+        # Stop gate would then check nothing. No proof of whose file it is = keep it (fail closed).
+        return list(changed)
     own, others = _session_edited_files(transcript_path)
     kept = [f for f in changed if not (f in others and others[f] > own.get(f, ""))]
     wins = _own_tool_windows(transcript_path)
@@ -1347,25 +1379,29 @@ def _loop_breaker(sid: str, findings: list[str], flagged: set[str], self_finding
 
 def stop(changed: list[str] | None = None, last_message: str | None = None,
          transcript: str | None = None, stop_hook_active: bool | None = None,
-         session_id: str | None = None) -> int:
+         session_id: str | None = None, payload: dict | None = None) -> int:
     """Block the turn if a file changed this session carries a defect, if a machine-voice DRAFT was
     presented in chat this turn, or (once set up) if the user handed over an event and nothing was
     recorded.
 
-    `changed`, `last_message`, `transcript`, `stop_hook_active` and `session_id` are injectable so
+    `changed`, `last_message`, `transcript`, `stop_hook_active`, `session_id` and `payload` (the
+    hook's stdin JSON) are injectable so
     the selftest can exercise the blocking path itself, not just call a function and trust its
     return value. A gate with no test of its own teeth is the one gate that can silently stop biting.
     """
     real_call = changed is None
     tp = ""
+    payload_message = ""
     already_blocked = bool(stop_hook_active)
     sid = session_id or ""
-    if real_call:
+    if real_call or payload is not None:
         try:
-            _payload = json.load(sys.stdin)
+            _payload = payload if payload is not None else json.load(sys.stdin)
             tp = _payload.get("transcript_path") or ""
             already_blocked = bool(_payload.get("stop_hook_active"))
             sid = str(_payload.get("session_id") or "") or (Path(tp).stem if tp else "")
+            # Codex hands the last reply in the Stop payload; its transcript is not in Claude's format.
+            payload_message = str(_payload.get("last_assistant_message") or "")
         except Exception:
             tp = ""
     unpushed_only: set[str] = set()
@@ -1375,13 +1411,15 @@ def stop(changed: list[str] | None = None, last_message: str | None = None,
     # EXAMPLE-/TEMPLATE- dossiers are scaffolding (the same rule resume_gate, seniority_gate and
     # records_check follow): their placeholder copy fails the gates by design.
     changed = [f for f in changed if not _SCAFFOLD.match(f)]
-    if real_call and changed and tp:
+    if (real_call or payload is not None) and changed and tp:
         changed = _drop_other_sessions_files(changed, tp, unpushed_only)
-    if real_call and last_message is None:
+    if (real_call or payload is not None) and last_message is None:
         try:
             last_message = _last_assistant_text(tp) if tp else None
         except Exception:
             last_message = None
+        if not last_message and payload_message:
+            last_message = payload_message
     # The record reflex runs before the "nothing changed" exit: a turn that changed NOTHING after
     # the user handed over information is exactly the miss it catches. At most ONE block per turn:
     # on the retry after a block it stays quiet, so it can never loop.
@@ -1753,9 +1791,23 @@ def selftest() -> int:
         vrel = str(vfile.resolve().relative_to(REPO))
         t("--stop BLOCKS a flagged narration FILE", "voice_check:" in _run_stop(changed=[vrel]))
         vfile.unlink()
+        # The referral voice path: before batch_voice_check carried changed_messages() this check
+        # was dead, while the PostToolUse warning still promised a Stop block.
+        rfile = tmpdir / "referrals.md"
+        rfile.write_text("# Northwind\n\n## The messages\n\n### 1 · Sam Lee · Shift Lead\n"
+                         "**Profile:** https://example.com/1\n\n**Connection note:**\n> Hi Sam, a short note.\n\n"
+                         f"**Direct message:**\n> Hi Sam,\n>\n> {voice_bad}\n\n", encoding="utf-8")
+        rrel = str(rfile.resolve().relative_to(REPO))
+        t("referral voice path is live (changed_messages reads a new referrals.md)",
+          len(_changed_referral_messages(rrel)) == 2)
+        rout = _run_stop(changed=[rrel])
+        t("--stop BLOCKS a flagged DM in a referrals.md this tree wrote",
+          _blocks(rout) and "voice_check: " + rrel in rout)
+        rfile.unlink()
     finally:
-        if probe.exists():
-            probe.unlink()
+        for leftover in tmpdir.glob("*"):
+            if leftover.is_file():
+                leftover.unlink()
         try:
             tmpdir.rmdir()
         except OSError:
@@ -1888,6 +1940,43 @@ def selftest() -> int:
         t("cross-chat: another chat's file is dropped, this chat's is kept", kept == [f_mine])
         t("cross-chat: an unreadable transcript drops nothing",
           _drop_other_sessions_files([f_mine, f_theirs], str(sd / "missing.jsonl")) == [f_mine, f_theirs])
+        # A Codex rollout has no Claude tool_use records. Before the fix every changed file was
+        # dropped as "not this chat's", so a planted CRITICAL visa answer never blocked.
+        codex = sd / "codex-rollout.jsonl"
+        codex.write_text("\n".join(json.dumps(r) for r in [
+            {"type": "session_meta", "payload": {"id": "c1"}},
+            {"type": "response_item", "payload": {"type": "message", "role": "user",
+                                                   "content": [{"type": "input_text", "text": "hi"}]}},
+            {"type": "response_item", "payload": {"type": "function_call", "name": "apply_patch",
+                                                   "arguments": "{}"}},
+        ]) + "\n", encoding="utf-8")
+        t("cross-chat: a non-Claude transcript keeps every changed file (fail closed)",
+          _drop_other_sessions_files([f_mine, f_theirs], str(codex)) == [f_mine, f_theirs])
+        cdir = REPO / "applications" / ".hooks-selftest-codex"
+        cdir.mkdir(exist_ok=True)
+        capp = cdir / "application.md"
+        _orig_sh3 = globals()["sh"]
+        try:
+            capp.write_text("- Will you now or in the future require sponsorship? **No**\n", encoding="utf-8")
+            crel = str(capp.resolve().relative_to(REPO))
+            globals()["sh"] = _fake("visa_gate.py", 1, f"  [CRITICAL] {crel}:1  (sponsorship-now-or-future)\n")
+            rc_codex = _run_stop(changed=[crel], payload={"transcript_path": str(codex), "session_id": "c1"})
+            t("--stop with a Codex transcript BLOCKS a planted CRITICAL visa answer",
+              _blocks(rc_codex) and "visa" in rc_codex)
+            globals()["sh"] = _orig_sh3
+            rc_draft = _run_stop(changed=[], payload={
+                "transcript_path": str(codex), "session_id": "c2",
+                "last_assistant_message": f"Here's Q8, your answer.\n\n---\n{voice_bad}\n---\n"})
+            t("--stop reads Codex's last_assistant_message for the chat-draft check",
+              _blocks(rc_draft) and "voice (chat draft)" in rc_draft)
+        finally:
+            globals()["sh"] = _orig_sh3
+            if capp.exists():
+                capp.unlink()
+            try:
+                cdir.rmdir()
+            except OSError:
+                pass
 
         # Loop breaker: a repeat block on a file this chat never wrote lets the turn end.
         _STOP_STATE_DIR = tdp / "stop-gate"

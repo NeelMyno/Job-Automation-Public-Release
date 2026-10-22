@@ -79,7 +79,8 @@ The two exceptions, because each earns its scheme:
   filed as `YYYY-MM-DD-<description>.<ext>`.
 - `calls/`: call transcripts.
 - **Optional, produced only when the work calls for them (document, never force):**
-  `form-answers-paste-kit.md` (a paste-kit route when browser automation is blocked),
+  a `## Paste kit` section inside `application.md`, never a separate file, and only for a named
+  reason (`.claude/rules/application-protocol.md` §14 owns the reasons and the kit's shape),
   `research-report.md` (a deeper research pass), `referral-<name>.md` + `referral-resumes/`
   (per-referrer tailoring), `video-slides/` (a walkthrough deck).
 

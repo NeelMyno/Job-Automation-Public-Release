@@ -16,8 +16,9 @@ refuses those rows. Run it at session start, and at the end of any turn that cha
     python3 scripts/records_check.py --selftest
 
 Surfaces: pipeline/tracker.html (APPLICATIONS and NETWORK rows), pipeline/sent-ledger.md,
-pipeline/inmail-ledger.md (optional), applications/<slug>/application.md of every submitted row, and
-file names under applications/<slug>/correspondence/ and calls/.
+pipeline/inmail-ledger.md (optional), applications/<slug>/application.md of every submitted row,
+file names under applications/<slug>/correspondence/ and calls/, ops/DEBT.md rows, the ratified-decisions
+table in knowledge-base/11-preferences-and-conventions.md, and ops/HANDOFF.md (one block).
 
 NOT checked: whether a value is TRUE (only its shape); the referrals.md person grammar
 (scripts/outreach_format.py owns it); the @OWED-on-interview rule (scripts/commitments.py owns it).
@@ -39,7 +40,10 @@ ROOT = REPO  # the tree being checked; run() sets it (the selftest checks a temp
 
 OWED_OPEN = re.compile(r"@OWED\[")
 OWED_OK = re.compile(r"@OWED\[\s*(them|you)\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|\?)\s*\|\s*([^\]]*?)\s*\]")
-APP_REQUIRED = ("co", "role", "status", "posted", "source", "jd", "apply", "folder", "refs", "everify", "next")
+APP_REQUIRED = ("co", "role", "status", "posted", "source", "jd", "apply", "folder", "refs", "next")
+# Optional keys, checked only when present: `everify` (whether the employer uses E-Verify) matters to
+# some users and not to others, so a row without it is in shape.
+APP_OPTIONAL_TEXT = ("everify",)
 NET_REQUIRED = ("name", "role", "status")
 DATED_FILE = re.compile(r"^(?:\d{4}-\d{2}-\d{2}|undated)-[a-z0-9][a-z0-9.-]*\.[A-Za-z0-9]+$")
 TIME = r"(?: ~?\d{1,2}:\d{2} ?[AP]M(?: [A-Z]{2,5})?| \d{1,2}:\d{2}(?: [A-Z]{2,5})?)?"
@@ -49,6 +53,8 @@ NO_SUBMIT_HEAD = re.compile(r"^## NO SUBMIT ON RECORD\b", re.M)
 ANSWERS_HEAD = re.compile(
     r"^## Exact form answers \((?:as filled, (?:\d{4}-\d{2}-\d{2}|date not recorded)(?:[,;:] [^\n]*)?|not recorded)\)\s*$",
     re.M)
+DEBT_ROW = re.compile(r"^\|\s*(\d{4}-\d\d-\d\d)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*\|\s*([^|]*?)\s*\|\s*$")
+DEBT_STATUS = re.compile(r"^(?:OPEN|CLOSED \d{4}-\d\d-\d\d: \S.*)$")
 INMAIL_ROW = re.compile(r"^\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*(?:\d+|unknown)\s*\|\s*[^|]+\|\s*$")
 PLACEHOLDER_ROW = re.compile(r"^\|\s*\[[^\]]*\]\s*\|")      # a template row: | [YYYY-MM-DD] | [N] | ... |
 NOT_A_PERSON = re.compile(r"\bteam\b|recruiting|talent acquisition|hiring|no-?reply|careers|jobs@|@|\bform\b|^" + R.EM_DASH,
@@ -125,6 +131,9 @@ def check_tracker(t: R.Tracker, led: list, F: list, T: Tally) -> None:
         for k in APP_REQUIRED:
             if k not in r:
                 pr.append(f"missing `{k}`")
+        for k in APP_OPTIONAL_TEXT:
+            if k in r and not isinstance(r.get(k), str):
+                pr.append(f"`{k}` is present but not a string")
         st = R.s(r.get("status"))
         if st not in S:
             pr.append(f"status {st!r} not in the page's STATUS map")
@@ -296,12 +305,87 @@ def check_dossiers(t: R.Tracker, F: list, T: Tally, only: set | None = None) -> 
                                      "not YYYY-MM-DD-<lowercase-slug>.<ext> or undated-<slug>.<ext>"))
 
 
+def check_debt(text: str | None, F: list, T: Tally) -> None:
+    """ops/DEBT.md: every item is one table row `| YYYY-MM-DD | owner | item | OPEN |`, closed by
+    changing the status to `CLOSED YYYY-MM-DD: <what fixed it>`. An item written as a heading or in
+    another row shape is invisible to the aging check at session start."""
+    if not text:
+        return
+    for n, line in enumerate(text.splitlines(), 1):
+        h = re.match(r"^#{2,6}\s+(.*)", line)
+        if h:
+            if re.match(r"^\[?20\d\d-\d\d-\d\d", h.group(1)):
+                T.units["ops/DEBT.md"] += 1
+                T.bad["ops/DEBT.md"] += 1
+                F.append(Finding("DEBT", f"line {n}", "a debt item written as a heading; it belongs in a table row"))
+            continue
+        if not line.startswith("|") or re.match(r"^\|\s*(Opened|-|:)", line):
+            continue
+        T.units["ops/DEBT.md"] += 1
+        m = DEBT_ROW.match(line)
+        pr = []
+        if not m:
+            pr.append("table row is not | YYYY-MM-DD | owner | item | OPEN or CLOSED YYYY-MM-DD: what |")
+        else:
+            if not m.group(2).strip("* "):
+                pr.append("owner cell is empty")
+            if not DEBT_STATUS.match(m.group(4).strip()):
+                pr.append(f"status cell {m.group(4).strip()[:30]!r} is not OPEN or 'CLOSED YYYY-MM-DD: <what>'")
+        if pr:
+            T.bad["ops/DEBT.md"] += 1
+            F.extend(Finding("DEBT", f"line {n}", p) for p in pr)
+
+
+def check_kb11(text: str | None, F: list, T: Tally) -> None:
+    """knowledge-base/11: every row of the ratified-decisions table has a YYYY-MM-DD date and the same
+    number of cells as the table's own header (the shipped table has Date | Decision | Why)."""
+    if not text:
+        return
+    m = re.search(r"^## Ratified decisions.*?$(.*?)(?=^## |\Z)", text, re.S | re.M)
+    width = None
+    for line in (m.group(1) if m else "").splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = R.split_cells(line)
+        if re.match(r"^\|\s*Date\b", line):
+            width = len(cells)
+            continue
+        if re.match(r"^\|\s*:?-", line):
+            continue
+        T.units["KB-11 decisions"] += 1
+        pr = []
+        if not cells or not R.ISO.match(cells[0]):
+            pr.append("date cell is not YYYY-MM-DD")
+        if width is not None and len(cells) != width:
+            pr.append(f"{len(cells)} cells, the table has {width}")
+        if pr:
+            T.bad["KB-11 decisions"] += 1
+            F.extend(Finding("KB-11", line[:60], x) for x in pr)
+
+
+def check_handoff(text: str | None, F: list, T: Tally) -> None:
+    """ops/HANDOFF.md is ONE pointer block, overwritten at each close (the /wave template). A second
+    top-level `# ` block means an old handoff was stacked instead of replaced."""
+    if text is None:
+        return
+    T.units["ops/HANDOFF.md"] += 1
+    body = re.sub(r"^```.*?^```", "", text, flags=re.S | re.M)
+    blocks = re.findall(r"^# (.+)$", body, re.M)
+    if len(blocks) > 1:
+        T.bad["ops/HANDOFF.md"] += 1
+        F.append(Finding("HANDOFF", "ops/HANDOFF.md",
+                         f"{len(blocks)} top-level blocks; it is one block, overwritten at each close"))
+
+
 # run
 SURFACE_OF = (
     (re.compile(r"^pipeline/tracker\.html$"), {"tracker", "dossiers"}),
     (re.compile(r"^pipeline/sent-ledger\.md$"), {"ledger", "tracker"}),
     (re.compile(r"^pipeline/inmail-ledger\.md$"), {"inmail"}),
     (re.compile(r"^applications/[^/]+/"), {"dossiers"}),
+    (re.compile(r"^ops/DEBT\.md$"), {"debt"}),
+    (re.compile(r"^knowledge-base/11-preferences-and-conventions\.md$"), {"kb11"}),
+    (re.compile(r"^ops/HANDOFF\.md$"), {"handoff"}),
 )
 
 
@@ -322,7 +406,7 @@ def run(files: list | None = None, repo: Path = REPO) -> tuple[list, Tally]:
     ROOT = repo
     F: list = []
     T = Tally()
-    want = {"tracker", "ledger", "inmail", "dossiers"}
+    want = {"tracker", "ledger", "inmail", "dossiers", "debt", "kb11", "handoff"}
     only = None
     if files is not None:
         want, folders = surfaces_for(files)
@@ -345,6 +429,12 @@ def run(files: list | None = None, repo: Path = REPO) -> tuple[list, Tally]:
         check_inmail(read("pipeline/inmail-ledger.md"), F, T)
     if "dossiers" in want:
         check_dossiers(t, F, T, only)
+    if "debt" in want:
+        check_debt(read("ops/DEBT.md"), F, T)
+    if "kb11" in want:
+        check_kb11(read("knowledge-base/11-preferences-and-conventions.md"), F, T)
+    if "handoff" in want:
+        check_handoff(read("ops/HANDOFF.md"), F, T)
     return F, T
 
 
@@ -452,6 +542,45 @@ def selftest() -> int:
             'const NET_STATUS = {lead:{}};\nlet view="apps";</script>')
         F5, _ = run(repo=r)
         c("an empty tracker with no ledger is CLEAN", not F5)
+    with tempfile.TemporaryDirectory() as td:
+        r = Path(td)
+        (r / "pipeline").mkdir()
+        (r / "ops").mkdir()
+        (r / "knowledge-base").mkdir()
+        (r / "pipeline" / "tracker.html").write_text(
+            '<script>const APPLICATIONS = [\n'
+            '  {co:"Umbrella", role:"Charge Nurse", status:"lead", posted:"unknown", source:"s", jd:"", apply:"", '
+            'folder:"", refs:0, next:"x"},\n'
+            '  {co:"Hooli", role:"Store Manager", status:"lead", posted:"unknown", source:"s", jd:"", apply:"", '
+            'folder:"", refs:0, everify:3, next:"x"},\n'
+            '];\nconst NETWORK = [\n];\nconst STATUS = {lead:{}};\nconst NET_STATUS = {lead:{}};\nlet view="apps";</script>')
+        (r / "ops" / "DEBT.md").write_text(
+            "# Known defects\n\n| Opened | Owner | Item | Status |\n|---|---|---|---|\n"
+            "| 2026-01-02 | agent | a gate misreads a dropdown | OPEN |\n"
+            "| 2026-01-03 | you | a stale tracker row | CLOSED 2026-01-04: row fixed |\n"
+            "| 2026-01-05 | agent | a third item | done |\n"
+            "| Jan 6 | agent | a fourth item | OPEN |\n"
+            "## 2026-01-07 a prose item\n")
+        (r / "knowledge-base" / "11-preferences-and-conventions.md").write_text(
+            "## Ratified decisions & taste-call log\n\n| Date | Decision | Why |\n|---|---|---|\n"
+            "| 2026-01-15 | one page | screeners skim |\n| 2026-01-16 | only two |\n| soon | x | y |\n\n## Related\n")
+        (r / "ops" / "HANDOFF.md").write_text("# HANDOFF, written at close\n## Next\n- x\n\n# HANDOFF, older block\n")
+        F6, _ = run(repo=r)
+        t6 = "\n".join(str(f) for f in F6)
+        c("a tracker row with no `everify` is in shape (the key is optional)", "Umbrella" not in t6)
+        c("a present `everify` that is not a string is named", "Hooli" in t6 and "`everify` is present" in t6)
+        c("DEBT: OPEN and 'CLOSED <date>: <what>' rows pass", "line 5" not in t6 and "line 6" not in t6)
+        c("DEBT: a 'done' status, an undated row and a heading item are named",
+          "line 7: status cell 'done'" in t6 and "line 8: table row is not" in t6 and "line 9: a debt item written as a heading" in t6)
+        c("KB-11: a row matching the header width passes", "one page" not in t6)
+        c("KB-11: a short row and an undated row are named",
+          "2 cells, the table has 3" in t6 and "[KB-11] | soon" in t6)
+        c("HANDOFF: two top-level blocks are named", "[HANDOFF]" in t6)
+        (r / "ops" / "HANDOFF.md").write_text("# HANDOFF, written at close\n```\n# a fenced example\n```\n## Next\n")
+        F7, _ = run(files=["ops/HANDOFF.md"], repo=r)
+        c("HANDOFF: one block (a fenced example does not count) passes, --files scopes to it", not F7)
+        F8, _ = run(files=["ops/DEBT.md"], repo=r)
+        c("--files ops/DEBT.md checks only DEBT", F8 and all(f.surface == "DEBT" for f in F8))
     print("\nSELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
 

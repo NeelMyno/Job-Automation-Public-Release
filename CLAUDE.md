@@ -66,16 +66,16 @@ it, this turn, not from memory:
 | "the application is done" | the form is **open, filled, DOM-verified, handed to you to review and submit** (§14.0). A dossier is not an application. |
 | "the copy is clean" | `python3 scripts/verify_claims.py "<dossier>"` → exit 0, and the agent quotes its `NOT checked:` line verbatim |
 | "the knowledge base is right" | `python3 scripts/canon.py` → exit 0 |
-| "the résumé is one full page" | `python3 scripts/resume_gate.py` → exit 0. Exit 3 is an open item (a short but honest page) that you decide, never padded and never a pass (rule owner: `resume/README.md`) |
+| "the résumé is one full page" | `python3 scripts/resume_gate.py` → exit 0. Exit 3 is an open item (a short but honest page) that you decide, never padded and never a pass. Exit 2 means no résumé PDF is built yet, so nothing was checked. Exit 1 is a failure (rule owner: `resume/README.md`) |
 | "the work-authorization answers are right" | `python3 scripts/visa_gate.py` → exit 0, **plus** the DOM read-back (the gate reads the record, not the clicked radio button). Exit 3 means your answers are not filled in yet, so nothing was checked: never a pass |
-| "no over-reach role was filled" | `python3 scripts/seniority_gate.py --all --unsubmitted` → **0 unhandled**, with `YOUR_YEARS_OF_EXPERIENCE` set in `scripts/config.py`. While it is unset the gate prints "NOT CHECKED" and exits 3; that is never proof, and the claim stays unverified. |
+| "no over-reach role was filled" | `python3 scripts/seniority_gate.py --all --unsubmitted` → exit 0 and **0 unhandled** (exit 1 = unhandled ones remain), with `YOUR_YEARS_OF_EXPERIENCE` set in `scripts/config.py`. While it is unset the gate prints "NOT CHECKED" and exits 3; that is never proof, and the claim stays unverified. |
 | "the rules are consistent" | `python3 scripts/check_law.py` → exit 0 |
 | "the records are in format" | `python3 scripts/records_check.py` → exit 0 (shapes: `.claude/rules/records-format.md`) |
 | "nothing has gone cold unseen" | `python3 scripts/cold.py`: every cold class listed by name with its age |
 | "the crawl found jobs" | `crawl.py`'s own JSON: it lists every source that ran, how many jobs each returned, and every source skipped and why |
 | "the wave is done" | `python3 scripts/throughput.py` → zero `ready-but-never-sent` |
 | "the application bundle is complete" | `python3 scripts/throughput.py` → zero `cover-missing`. A cover letter PDF is mandatory in every bundle, exactly like the résumé. |
-| "no live interview lost its next-step" | `python3 scripts/commitments.py` → exit 0. Every `status:"interview"` row carries a dated `@OWED[owner\|date\|what]`. |
+| "no live interview lost its next-step" | `python3 scripts/commitments.py` → exit 0 (exit 2 = a live interview with no tracked next-step). Every `status:"interview"` row carries a dated `@OWED[owner\|date\|what]`. |
 | "it's committed" | `git log -1` shows it, and `git status` is clean for those paths |
 
 If the command can't be named, the honest word is **"unverified"**: say that instead. A wrong
@@ -211,8 +211,13 @@ postings matching your titles, plus any company or link you name); (2) free publ
 in `pipeline/job-crawler/sources.yaml`; (3) the monthly Hacker News hiring thread. Any company, board
 or source can be added, and the agent adds them itself. Workday boards come in through links only,
 and employers on other systems (iCIMS, Taleo, Oracle, SuccessFactors and the rest) are not read
-directly: the agent finds their postings by web search and still fills the form. When you ask where
-jobs come from, the answer is the latest crawl's own source list, never a fixed set.
+directly: the agent finds their postings by web search, adds each live one to the tracker as an
+APPLICATIONS `lead` row (shape: `.claude/rules/records-format.md` §1), ranks it with the crawled
+jobs, and fills that employer's form like any other. In many fields (healthcare, teaching, trades,
+retail, government, local employers) most postings live on those other systems, and the free feeds
+are mostly remote jobs, heavy on tech; so a thin crawl means "search the web wider", never "there
+are no jobs". When you ask where jobs come from, the answer is the latest crawl's own source list
+plus the web search, never a fixed set.
 
 **Nothing in this repo is specific to any one role, industry, or visa category.** Every
 example below uses a placeholder company and a placeholder role on purpose: swap in your own.
@@ -226,7 +231,8 @@ honest about what it knows versus what it's inferring, **but one that builds.** 
 planner who hands you a brief and stops; it edits files, writes code, renders documents, runs the
 crawler, and drives a browser to fill (never submit) real forms. The repo ships the browser tool it
 needs (`.mcp.json` for Claude Code, `.codex/config.toml` for Codex); approve it the first time your
-agent asks.
+agent asks. That tool needs Node.js 20.19+ or 22.12+ and Google Chrome installed (`SETUP.md` §1;
+`python3 scripts/doctor.py --fill` checks both).
 
 The only hard walls are your own safety gates: never push to a remote, mutate a production
 database, spend real money, or send an irreversible external message without your explicit
@@ -513,6 +519,11 @@ reflex, without being asked.** Row shapes: `.claude/rules/records-format.md` §1
 Until you've recorded an explicit answer in `knowledge-base/11-preferences-and-conventions.md`, the
 default is **commit locally, never push without asking**: the safe default for a template nobody has
 customized yet.
+
+**Commit messages and PR text carry no AI attribution:** no `Co-Authored-By: Claude` line and no
+"Generated with Claude Code" line, in any commit message or pull request description. The repo's
+`.claude/settings.json` turns Claude Code's own attribution off (`"attribution": {"commit": "",
+"pr": ""}`); do not add the lines by hand either.
 
 **Footgun:** if your shell is zsh and a commit message you're about to run through `git commit -m
 "..."` contains a backtick, it is command substitution and gets silently executed and stripped.

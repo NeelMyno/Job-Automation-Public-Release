@@ -14,6 +14,16 @@ filters all of them by the same rules (`filters.yaml`):
 JSON that companies and job sites publish. The only key anywhere is the optional free USAJOBS key,
 read from your environment, never from a file.
 
+**ATS coverage, plainly.** `discover.py --sweep` and `--company` find boards on Greenhouse, Lever,
+Ashby, SmartRecruiters and Workable. Workday boards are read too, but only after you give
+`discover.py --urls` a Workday careers URL. iCIMS, Taleo, Oracle and SuccessFactors are not read
+directly, and many employers (hospitals, schools, government, retailers) use systems like those.
+For them, search the web: `discover.py --queries` prints the queries, including plain ones such as
+"registered nurse jobs columbus" built from your `home_metros`. Any result URL on a supported ATS
+can go into `discover.py --urls -`; add the rest as lead rows in `pipeline/tracker.html` and apply
+there (the agent fills those forms too). When a crawl finds 3 matches or fewer, its `hints` say
+this too.
+
 Also included: **`liveness.py`**, a clean-room ghost-job re-checker. Re-verify a lead is still live
 before spending time tailoring or applying to it: `python3 liveness.py --url <URL>` or `--tracker`.
 Greenhouse, Lever and Ashby postings are checked against the board's public API (the job id is on
@@ -30,7 +40,7 @@ fields*. They never invent, embellish, or rank by anything but the real signal. 
 ## Setup
 
 ```
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
 Then set your role titles in **`filters.yaml` `include_titles`** (any role: "data analyst",
@@ -93,7 +103,7 @@ The `source:` field tells them apart from rows you wrote; discovery never edits 
 | Company ATS boards (`boards.yaml`) | yes | any company on Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Workday | one read per board per run |
 | Himalayas | yes | remote jobs, title search, `country: US` | one fetch an hour |
 | Jobicy | yes | remote jobs, `geo: usa`, keyword tag | one pass an hour (its terms) |
-| Remotive | yes | remote jobs | one call per run, at most every 6 hours (its terms) |
+| Remotive | yes | remote jobs (a short list, about 10 recent jobs, unless you set one title) | one call per run, at most every 6 hours (its terms) |
 | Remote OK | yes | remote jobs, one recent feed | one fetch an hour |
 | USAJOBS | when `USAJOBS_API_KEY` and `USAJOBS_EMAIL` are set | US federal jobs, any occupation | one fetch an hour |
 | The Muse | no: its docs ask you to register beyond testing | US onsite and remote | one fetch an hour |
@@ -209,7 +219,10 @@ and fixtures in its selftest.
 
 ## Not covered (yet)
 
-- **Rippling, iCIMS, Taleo**: not yet supported; add a fetcher if a target you care about needs one.
+- **iCIMS, Taleo, Oracle, SuccessFactors, Rippling**: not read directly. Find those employers'
+  postings with a web search (`discover.py --queries`), pipe any URLs that sit on a supported ATS into
+  `discover.py --urls -`, and add the rest as lead rows in `pipeline/tracker.html` to apply there.
+  Add a fetcher if a target you care about needs one.
 - **LinkedIn, Indeed, Glassdoor**: intentionally excluded. LinkedIn's terms forbid automated
   crawling, and driving any of these job-board accounts with a script risks a ban; you use them by hand.
 - **Adzuna, Jooble**: free keys exist, but their US endpoint, limits and terms were not confirmed,

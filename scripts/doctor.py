@@ -11,6 +11,9 @@ no network calls. It reads files and asks the local `node` for its version; that
 
 Exit 0 = all OK. Exit 1 = warnings only. Exit 2 = at least one blocker. With --fill, only the
 form-filling checks count toward the exit code (crawler and PDF-rendering checks are not run).
+--fill always ends with the steps to turn the browser tool on, under the heading
+"If your tool list has no browser tool", because a green config check cannot see a server the user
+declined at the approval prompt.
 
 Why this exists: a fresh clone that had no browser tool configured left the agent telling its user
 to fill application forms by hand. `--fill` turns that silent gap into exit 2 with the exact steps
@@ -53,18 +56,28 @@ NODE_ENGINES = "^20.19.0 || ^22.12.0 || >=23"
 # (or <angle brackets>, the canonical-facts template's own style) is unfilled template text.
 PLACEHOLDER = re.compile(r"^\s*[\[<]")
 
+ENABLE_HEADING = "If your tool list has no browser tool:"
 ENABLE_STEPS = (
-    "To turn the browser tool on:\n"
-    "  1. Install Node.js 20.19+ or 22.12+ (https://nodejs.org), then open a new terminal.\n"
+    "  1. Install Node.js 20.19+ or 22.12+ (https://nodejs.org) and Google Chrome\n"
+    "     (https://www.google.com/chrome/), then open a new terminal.\n"
     "  2. Claude Code: the repo's .mcp.json already lists `chrome-devtools`. Start `claude` from\n"
-    "     the repo folder and approve the `chrome-devtools` project server when asked. Type /mcp to\n"
-    "     check it shows as connected. Asked before and said no? Run\n"
-    "     `claude mcp reset-project-choices` and start again.\n"
+    "     the repo folder and approve the `chrome-devtools` project server when asked. Then type\n"
+    "     /mcp: if `chrome-devtools` shows as disabled, enable it there. If you said no to the\n"
+    "     approval prompt earlier, quit, run `claude mcp reset-project-choices`, start `claude`\n"
+    "     again and approve it.\n"
     "  3. Codex: .codex/config.toml already lists it; Codex only reads that file for a trusted\n"
     "     project, so trust this folder when Codex asks. Or add it for yourself:\n"
     f"     `codex mcp add chrome-devtools -- npx -y {MCP_PKG}`\n"
     "  4. Restart the session so the agent picks the tool up, then run this check again.\n"
+    "The first start downloads the tool with npx, so it needs internet and can take a minute.\n"
     "It opens its own separate Chrome profile, never your everyday browser.")
+# The one sentence for what the agent does when its session has no browser tool at all. The same
+# words sit in .claude/rules/application-protocol.md section 14 and .claude/commands/wave.md 7.0.
+NO_TOOL_LINE = ("With no browser tool in its session at all, the agent gives you these steps and "
+                "stops at the form; once you restart, it fills the form. It never asks you to fill "
+                "the form by hand.")
+# The blockers a session's own browser tool makes moot: the agent can still fill with that tool.
+TOOL_ONLY_BLOCKERS = {"node", "browser-tool"}
 
 
 def check(name, status, msg, fix="", fill=False):
@@ -102,7 +115,7 @@ def check_pyyaml(importable=_importable):
     if importable("yaml"):
         return check("pyyaml", OK, "PyYAML installed")
     return check("pyyaml", BLOCK, "PyYAML is missing (the job crawler needs it)",
-                 "Run: pip install -r pipeline/job-crawler/requirements.txt")
+                 "Run: python3 -m pip install -r pipeline/job-crawler/requirements.txt")
 
 
 def _weasy_import_error():
@@ -127,7 +140,7 @@ def check_weasyprint(import_error=None, cli=None):
                      f"(this Python cannot import it: {err}, which the render commands do not need)")
     return check("weasyprint", WARN, f"weasyprint is not installed (no `weasyprint` command; import: {err})",
                  "Needed only to render résumé and cover-letter PDFs. Install it one way: "
-                 "`pip install weasyprint` (on macOS also `brew install pango`), or on macOS "
+                 "`python3 -m pip install weasyprint` (on macOS also `brew install pango`), or on macOS "
                  "`brew install weasyprint`, which puts the `weasyprint` command on your PATH. "
                  "See SETUP.md Troubleshooting.")
 
@@ -181,6 +194,63 @@ def check_node(version_str=None, have_npx=None):
     return check("node", OK, f"Node.js {vs} and npx present", fill=True)
 
 
+def find_chrome(platform=None, exists=None, which=None, env=None):
+    """Path of an installed Google Chrome, or None. chrome-devtools-mcp drives Google Chrome
+    (its README: "Chrome current stable version or newer"); it does not install one."""
+    import os
+    platform = platform or sys.platform
+    exists = exists or os.path.exists
+    which = which or shutil.which
+    env = os.environ if env is None else env
+    if platform == "darwin":
+        app = "Google Chrome.app/Contents/MacOS/Google Chrome"
+        cands = ["/Applications/" + app, str(Path.home() / "Applications" / app)]
+    elif platform.startswith("win"):
+        cands = [str(Path(env[k]) / "Google" / "Chrome" / "Application" / "chrome.exe")
+                 for k in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA") if env.get(k)]
+    else:
+        found = next((w for w in (which(n) for n in ("google-chrome", "google-chrome-stable"))
+                      if w), None)
+        if found:
+            return found
+        cands = ["/opt/google/chrome/chrome"]
+    return next((c for c in cands if exists(c)), None)
+
+
+def check_chrome(path=None):
+    """A warning, never a crash: Chrome may sit somewhere this check does not look."""
+    where = find_chrome() if path is None else (path or None)
+    if where:
+        return check("chrome", OK, f"Google Chrome found at {where}", fill=True)
+    return check("chrome", WARN, "Google Chrome was not found (the browser tool drives Chrome; it "
+                 "does not install it)",
+                 "Install Google Chrome from https://www.google.com/chrome/. If Chrome is already "
+                 "installed somewhere unusual, this warning is safe to ignore.", fill=True)
+
+
+def check_pymupdf(importable=_importable):
+    """resume_gate.py and verify_claims.py (R9) read the rendered PDFs with PyMuPDF (`import
+    fitz`). Without it the résumé gate fails and verify_claims refuses any dossier holding a PDF,
+    which blocks the gate that runs right before a form is filled."""
+    if importable("fitz"):
+        return check("pymupdf", OK, "PyMuPDF installed (the résumé and grounding gates read PDFs)",
+                     fill=True)
+    return check("pymupdf", BLOCK, "PyMuPDF is missing (resume_gate.py and verify_claims.py read "
+                 "the rendered PDFs with it)", "Run: python3 -m pip install pymupdf", fill=True)
+
+
+def check_pdftotext(path=None):
+    """Optional: the five-pass review (.claude/workflows/application-review.js) tells reviewers to
+    read the PDF with `pdftotext -layout`. Without it they read the PDF another way."""
+    where = shutil.which("pdftotext") if path is None else (path or None)
+    if where:
+        return check("pdftotext", OK, f"pdftotext found at {where}")
+    return check("pdftotext", WARN, "pdftotext is not installed (optional: the five-pass review "
+                 "reads the PDF with it)",
+                 "Install poppler: macOS `brew install poppler`, Ubuntu/Debian "
+                 "`apt install poppler-utils`, Windows: see https://poppler.freedesktop.org.")
+
+
 def _mcp_has_server(text) -> bool | None:
     if text is None or isinstance(text, tuple):
         return None
@@ -227,7 +297,7 @@ def check_browser_config(root: Path):
         missing.append(".codex/config.toml has no [mcp_servers.chrome-devtools]")
     status = WARN if where else BLOCK
     fix = ("Restore the repo's .mcp.json and .codex/config.toml (git checkout -- .mcp.json "
-           ".codex/config.toml), or add the server yourself:\n" + ENABLE_STEPS)
+           ".codex/config.toml), then follow the steps under \"" + ENABLE_HEADING + "\" below.")
     return check("browser-tool", status,
                  ("configured for " + ", ".join(where) + "; " if where else "") + "; ".join(missing),
                  fix, fill=True)
@@ -409,11 +479,13 @@ def check_config(root: Path):
 
 # Run
 
-def run(root: Path, fill_only: bool = False, node=None, npx=None, importable=_importable):
-    checks = [check_python(), check_node(node, npx), check_browser_config(root)] + check_kb(root)
+def run(root: Path, fill_only: bool = False, node=None, npx=None, importable=_importable,
+        chrome=None, pdftotext=None):
+    checks = [check_python(), check_node(node, npx), check_chrome(chrome),
+              check_browser_config(root), check_pymupdf(importable)] + check_kb(root)
     if not fill_only:
-        checks += [check_pyyaml(importable), check_weasyprint(), check_filters(root),
-                   check_boards(root), check_config(root)]
+        checks += [check_pyyaml(importable), check_weasyprint(), check_pdftotext(pdftotext),
+                   check_filters(root), check_boards(root), check_config(root)]
     # --fill answers one question, "can the agent fill a form?", so only form-filling checks
     # count toward its exit code, whatever else a future edit adds to the list.
     counted = [c for c in checks if c["fill"]] if fill_only else checks
@@ -429,17 +501,24 @@ def render(checks, code, fill_only) -> str:
         if c["status"] != OK and c["fix"]:
             lines += ["         fix: " + ln if i == 0 else "         " + ln
                       for i, ln in enumerate(c["fix"].splitlines())]
+    blocked = [c["name"] for c in checks if c["status"] == BLOCK]
     if fill_only and code == 2:
-        blocked = [c["name"] for c in checks if c["status"] == BLOCK]
         lines.append("")
         lines.append("FORM FILLING IS NOT READY (" + ", ".join(blocked) + ").")
-        if any(n in ("node", "browser-tool") for n in blocked):
-            lines.append(ENABLE_STEPS)
-        lines.append("This reads the repo's configuration only, not the session. If the session the agent "
-                     "is in already has ANY browser automation tool in its own tool list, the agent uses "
-                     "that tool and fills the form anyway.")
-        lines.append("Only with no browser tool at all does the agent do everything else (research, résumé, "
-                     "cover letter, the list of exact answers) and say plainly which step is waiting on you.")
+        if set(blocked) <= TOOL_ONLY_BLOCKERS:
+            lines.append("This reads the repo's configuration only, not the session. If the session the "
+                         "agent is in already has ANY browser automation tool in its own tool list, the "
+                         "agent uses that tool and fills the form anyway.")
+        else:
+            lines.append("Fix the STOP lines above first (/setup fixes the knowledge-base ones). The agent "
+                         "fills no form until they pass: an empty or wrong knowledge base has nothing true "
+                         "to type.")
+    tool_lines = {"node", "chrome", "browser-tool"}
+    if fill_only or any(c["name"] in tool_lines and c["status"] != OK for c in checks):
+        lines.append("")
+        lines.append(ENABLE_HEADING)
+        lines.append(ENABLE_STEPS)
+        lines.append(NO_TOOL_LINE)
     lines.append({0: "All OK.", 1: "OK with warnings.", 2: "Blockers found (exit 2)."}[code])
     return "\n".join(lines)
 
@@ -527,7 +606,7 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as td:
         fresh = Path(td) / "fresh"
         _make(fresh, filled=False)
-        checks, code = run(fresh, node="v22.12.0", npx=True)
+        checks, code = run(fresh, node="v22.12.0", npx=True, chrome="/c", importable=lambda m: True)
         for n in ("kb-01", "kb-02", "kb-07", "kb-12", "filters"):
             t(f"fresh clone: {n} is a blocker", status(checks, n), BLOCK)
         t("fresh clone: boards is a warning, naming discover.py --sweep",
@@ -540,18 +619,18 @@ def selftest() -> int:
 
         ready = Path(td) / "ready"
         _make(ready, filled=True)
-        checks, code = run(ready, node="v22.12.0", npx=True, importable=lambda m: True)
+        checks, code = run(ready, node="v22.12.0", npx=True, importable=lambda m: True, chrome="/c", pdftotext="/p")
         for n in ("kb-01", "kb-02", "kb-07", "kb-12", "filters", "boards", "config", "browser-tool"):
             t(f"filled clone: {n} OK", status(checks, n), OK)
         t("filled clone exits 0 or 1 (weasyprint is warn-only)", code in (0, 1), True)
-        _, code = run(ready, fill_only=True, node="v22.12.0", npx=True)
+        _, code = run(ready, fill_only=True, node="v22.12.0", npx=True, chrome="/c", importable=lambda m: True)
         t("--fill on a ready clone exits 0", code, 0)
         (ready / "pipeline/job-crawler/boards.yaml").write_text(BOARDS_T, encoding="utf-8")
-        checks, code = run(ready, node="v22.12.0", npx=True, importable=lambda m: True)
+        checks, code = run(ready, node="v22.12.0", npx=True, importable=lambda m: True, chrome="/c", pdftotext="/p")
         t("empty boards.yaml says it ships empty, not 'example boards'",
           ("ships empty" in next(c for c in checks if c["name"] == "boards")["message"],
            status(checks, "boards")), (True, WARN))
-        _, code = run(ready, fill_only=True, node="v22.12.0", npx=True)
+        _, code = run(ready, fill_only=True, node="v22.12.0", npx=True, chrome="/c", importable=lambda m: True)
         t("--fill exit ignores a crawler warning (empty boards)", code, 0)
         t("without PyYAML, a commented example board is not counted",
           (len(_board_names_by_hand(BOARDS_T)), len(_board_names_by_hand(BOARDS_F))), (0, 1))
@@ -559,19 +638,66 @@ def selftest() -> int:
 
         nobrowser = Path(td) / "nobrowser"
         _make(nobrowser, filled=True, mcp=False, codex=False)
-        checks, code = run(nobrowser, fill_only=True, node="v22.12.0", npx=True)
+        checks, code = run(nobrowser, fill_only=True, node="v22.12.0", npx=True, chrome="/c", importable=lambda m: True)
         t("--fill with no browser tool exits 2", code, 2)
         out = render(checks, code, True)
         t("--fill blocker prints Claude Code and Codex enable steps",
           all(s in out for s in ("reset-project-choices", "codex mcp add chrome-devtools", MCP_PKG)),
           True)
         t("--fill skips crawler checks", any(c["name"] == "filters" for c in checks), False)
+        t("--fill with only browser blockers says the session's own tool still fills",
+          "fills the form anyway" in out, True)
+
+        # D1: a user who declined the approval prompt has a green config. --fill must still
+        # print the enable steps (/mcp, reset-project-choices, restart), not only "All OK."
+        checks, code = run(ready, fill_only=True, node="v22.12.0", npx=True, chrome="/c",
+                           importable=lambda m: True)
+        out = render(checks, code, True)
+        t("--fill on a ready clone still prints the enable steps under their heading",
+          (code, all(x in out for x in (ENABLE_HEADING, "/mcp", "reset-project-choices",
+                                        "Restart the session", NO_TOOL_LINE))), (0, True))
+        full_checks, full_code = run(ready, node="v22.12.0", npx=True, chrome="/c", pdftotext="/p",
+                                     importable=lambda m: True)
+        t("full run with the browser tool ready does not repeat the enable steps",
+          ENABLE_HEADING in render(full_checks, full_code, False), False)
+
+        # D2: an empty KB must not get "fills the form anyway" (wave.md 0a stops on it).
+        checks, code = run(fresh, fill_only=True, node="v22.12.0", npx=True, chrome="/c",
+                           importable=lambda m: True)
+        out = render(checks, code, True)
+        t("--fill on an empty KB says fix first, never 'fills the form anyway'",
+          (code, "fills the form anyway" in out, "fills no form until they pass" in out),
+          (2, False, True))
+
+        # D5 / D6: Chrome, PyMuPDF and pdftotext.
+        t("no Chrome is a warning, not a crash or a blocker", check_chrome("")["status"], WARN)
+        t("Chrome found is OK", check_chrome("/Applications/x")["status"], OK)
+        t("find_chrome on macOS finds the app bundle",
+          find_chrome("darwin", exists=lambda p: p.startswith("/Applications/"),
+                      which=lambda n: None, env={}) is not None, True)
+        t("find_chrome on Linux uses google-chrome on PATH",
+          find_chrome("linux", exists=lambda p: False,
+                      which=lambda n: "/usr/bin/google-chrome" if n == "google-chrome" else None,
+                      env={}), "/usr/bin/google-chrome")
+        t("find_chrome on Windows reads Program Files",
+          find_chrome("win32", exists=lambda p: p.endswith("chrome.exe"), which=lambda n: None,
+                      env={"PROGRAMFILES": "C:/PF"}) is not None, True)
+        t("find_chrome returns None when nothing is installed",
+          find_chrome("linux", exists=lambda p: False, which=lambda n: None, env={}), None)
+        t("PyMuPDF missing blocks form filling",
+          (check_pymupdf(lambda m: m != "fitz")["status"], check_pymupdf(lambda m: True)["fill"]),
+          (BLOCK, True))
+        t("pdftotext missing is a warning, not a form-filling check",
+          (check_pdftotext("")["status"], check_pdftotext("")["fill"]), (WARN, False))
+        checks, code = run(ready, fill_only=True, node="v22.12.0", npx=True, chrome="",
+                           importable=lambda m: True)
+        t("--fill with no Chrome exits 1 (warning), not 2", code, 1)
 
         half = Path(td) / "half"
         _make(half, filled=True, mcp=True, codex=False)
         t("Claude config only is a warning, not a blocker",
           check_browser_config(half)["status"], WARN)
-        _, code = run(ready, fill_only=True, node="v18.0.0", npx=True)
+        _, code = run(ready, fill_only=True, node="v18.0.0", npx=True, chrome="/c", importable=lambda m: True)
         t("--fill with Node 18 exits 2", code, 2)
 
         broken = Path(td) / "broken"

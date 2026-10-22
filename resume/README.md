@@ -10,7 +10,7 @@ résumé automatically. Never restate those values anywhere else; point here.
 ## Rebuild
 
 ```
-pip install weasyprint
+python3 -m pip install weasyprint
 weasyprint resume.html your_name_resume.pdf
 ```
 

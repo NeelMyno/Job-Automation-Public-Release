@@ -7,8 +7,14 @@ then filter out.
 Two gates, both set in filters.yaml:
 
 1. Region gate (require_us, us_markers, location_block). Drops a posting whose location names a
-   clearly non-US place and names no US marker. Matching is on word boundaries, so 'india' does
-   not hit 'Indianapolis, IN' and 'mexico' does not hit 'New Mexico'.
+   clearly non-US place and names no US marker. Every term matches as a whole word or phrase, so
+   'india' does not hit 'Indianapolis, IN' and ', ca' never hits 'Toronto, Canada'. The 50 states
+   and DC are built in, by full name and by code: a code counts only right after a comma and as a
+   separate token ('Dublin, OH', 'Austin, TX 78701'), so 'Remote or onsite' never reads as Oregon.
+   A US marker beats a foreign place name, so 'London, OH' and 'Berlin, NH' are kept.
+   Known limit: a state code that is also a country code ('Bengaluru, IN') reads as a US state,
+   so that posting is kept. Keeping one foreign posting is the safer mistake than dropping
+   'Dublin, CA' or 'Lisbon, OH'.
 
 2. Work-mode gate (remote_ok, onsite_ok, home_metros):
      remote_ok: true            keep remote postings (false: drop postings that are remote only)
@@ -32,12 +38,41 @@ _REMOTE = re.compile(r"(?<![a-z0-9])(remote|anywhere|distributed|work from home|
 _ONSITE = re.compile(r"(?<![a-z0-9])(hybrid|on-?site|in[- ]office|in[- ]person)(?![a-z0-9])")
 
 
+# The 50 states and DC: code -> full name. Built in, so the region gate never depends on a short
+# hand-made list in filters.yaml.
+US_STATES = {
+    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california",
+    "co": "colorado", "ct": "connecticut", "de": "delaware", "fl": "florida", "ga": "georgia",
+    "hi": "hawaii", "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas",
+    "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland", "ma": "massachusetts",
+    "mi": "michigan", "mn": "minnesota", "ms": "mississippi", "mo": "missouri", "mt": "montana",
+    "ne": "nebraska", "nv": "nevada", "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico",
+    "ny": "new york", "nc": "north carolina", "nd": "north dakota", "oh": "ohio", "ok": "oklahoma",
+    "or": "oregon", "pa": "pennsylvania", "ri": "rhode island", "sc": "south carolina",
+    "sd": "south dakota", "tn": "tennessee", "tx": "texas", "ut": "utah", "vt": "vermont",
+    "va": "virginia", "wa": "washington", "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
+    "dc": "district of columbia",
+}
+# A state code right after a comma, as its own token: ", oh" in "Dublin, OH" or "Dublin, OH 43017",
+# never ", ca" inside "Toronto, Canada" or ", ma" inside "Makati, Manila".
+_STATE_CODE = re.compile(r",\s*(?:" + "|".join(sorted(US_STATES)) + r")(?![a-z])")
+_STATE_NAME = re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(n) for n in sorted(
+    set(US_STATES.values()) | {"washington dc", "washington d.c."}, key=len, reverse=True)) + r")(?![a-z0-9])")
+
+
+def _norm_term(t):
+    """A filters.yaml place term as plain lowercase text. A term that is only a comma and a state
+    code (", tx", the old shape) is dropped: the built-in state codes cover it, matched safely."""
+    t = str(t).strip().lower()
+    return "" if re.fullmatch(r",\s*[a-z]{2}", t) else t
+
+
 @functools.lru_cache(maxsize=None)
 def _block_re(terms):
     """Compile a list of place names into ONE word-boundary regex, cached per term tuple. Digits
     count as word characters so a term never bleeds into an adjacent token."""
-    parts = [r"(?<![a-z0-9])" + re.escape(t.strip().lower()) + r"(?![a-z0-9])"
-             for t in terms if t and str(t).strip()]
+    words = sorted({_norm_term(t) for t in terms if t is not None} - {""}, key=len, reverse=True)
+    parts = [r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])" for w in words]
     return re.compile("|".join(parts)) if parts else None
 
 
@@ -81,9 +116,19 @@ def region_ok(job, F):
     if not ll.strip():
         return True
     br = _block_re(tuple(F.get("location_block") or []))
-    blocked_hit = bool(br and br.search(ll))
-    us_hit = any(u in ll for u in (F.get("us_markers") or []))
-    return not (blocked_hit and not us_hit)
+    if not (br and br.search(ll)):
+        return True
+    return us_hit(ll, F)
+
+
+def us_hit(text, F=None):
+    """Does this location text name a US place: a built-in state (code or name) or one of
+    filters.yaml's us_markers, each matched as a whole word?"""
+    ll = (text or "").lower()
+    if _STATE_CODE.search(ll) or _STATE_NAME.search(ll):
+        return True
+    ur = _block_re(tuple((F or {}).get("us_markers") or []))
+    return bool(ur and ur.search(ll))
 
 
 def work_mode(job):
@@ -140,6 +185,20 @@ def _selftest():
     assert not region_ok(J("Dublin, Ireland"), us)
     assert region_ok(J("Indianapolis, IN"), us) and region_ok(J("Albuquerque, New Mexico"), us)
     assert region_ok(J(""), us) and region_ok(J("Dublin, Ireland"), {})
+    # whole words only: a state code is never read inside a longer word
+    wide = {"require_us": True, "us_markers": ["united states", "usa", "us", ", ca", ", ma"],
+            "location_block": ["canada", "toronto", "manila", "philippines", "nigeria", "lagos",
+                               "europe", "ireland", "dublin", "london", "berlin", "lisbon"]}
+    for gone in ("Toronto, Canada", "Makati, Manila, Philippines", "Lagos, Nigeria", "Remote (Europe)",
+                 "Toronto, ON, Canada", "Business Bay, Dublin, Ireland"):
+        assert not region_ok(J(gone), wide), gone
+    # a US state beats a foreign place name, by code or by full name, in any common shape
+    for kept in ("Dublin, OH", "London, OH", "Berlin, NH", "Lisbon, OH", "Toronto, OH",
+                 "Dublin, OH 43017", "Dublin, Ohio", "London, Kentucky, United States",
+                 "Remote - US or Canada", "Remote (USA) / Toronto"):
+        assert region_ok(J(kept), wide), kept
+    assert us_hit("Columbus, OH") and us_hit("Remote, Washington DC") and not us_hit("Remote or onsite")
+    assert not us_hit("Paris, France") and not us_hit("Oregano Labs, Indianapolis")
     # work mode reading
     assert work_mode(J("Remote (United States)")) == "remote"
     assert work_mode(J("Hybrid - Denver, CO")) == "onsite"

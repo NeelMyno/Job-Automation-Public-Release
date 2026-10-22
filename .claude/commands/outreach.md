@@ -133,7 +133,7 @@ is what makes REPLIED detection work). Commit each batch (push per your own §10
 1. **No agent touches LinkedIn, or the operator's logged-in social and email accounts, by any route.**
    Logged-out public pages are fine to fetch; profiles behind a login, sends, and acceptance checks
    are the operator's hands only. Ask them for a screenshot or pasted text.
-2. **Tooling freeze while the queue is open** (same as `/wave` wall #1): gate/script/tracker-schema
+2. **Tooling freeze while the queue is open** (`.claude/rules/application-protocol.md` §13.8 wall #2): gate/script/tracker-schema
    work goes to `ops/DEBT.md` unless it makes an outgoing message false (fix that instance, ≤15 min).
 3. **No new queue files, ever** (the SSOT law above). Superseding a legacy queue file = stamp it
    OUTDATED in its first lines (`hooks.py` treats that as consumed).

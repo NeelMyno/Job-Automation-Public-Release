@@ -1354,6 +1354,17 @@ def selftest() -> int:
                  "unpushed-commits", "fill-claimed-not-evidenced", "cover-missing",
                  "duplicate-application", "recruiter-availability-unsourced",
                  "tracker-behind-dossier", "tracker-unparseable"}
+    # No site configured is "not checked", never a match.
+    _su, _ss = LIVE_RESUME_URL, SITE
+    try:
+        LIVE_RESUME_URL, SITE = None, None
+        _line = live_site_status()
+        check("live-site: no site configured reads NOT checked, never 'matches the repo'",
+              "NOT checked" in _line and "no site configured" in _line)
+        LIVE_RESUME_URL = "https://example.com/resume.pdf"
+        check("live-site: a configured URL reads as checked", live_site_status().startswith("live site: checked"))
+    finally:
+        LIVE_RESUME_URL, SITE = _su, _ss
     registered = {name for name, _ in CHECKS}
     missing = registered - exercised
     check(f"every registered check is exercised (missing: {sorted(missing) or 'none'})", not missing)
@@ -1369,6 +1380,15 @@ def selftest() -> int:
     return 0
 
 
+def live_site_status() -> str:
+    """One honest line on the live-site check: checked, or not checked and why. A copy with no site
+    configured has nothing to compare, and that is never reported as a match."""
+    if not LIVE_RESUME_URL and not SITE:
+        return ("live site: NOT checked: no site configured (set LIVE_RESUME_URL or SITE_CHECKOUT_PATH "
+                "in scripts/config.py if you publish a résumé).")
+    return "live site: checked against " + (LIVE_RESUME_URL or str(SITE))
+
+
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
@@ -1381,8 +1401,12 @@ def main(argv: list[str]) -> int:
     print("          the live site drifting from the repo · commits held back")
     print("  NOT checked: whether a submitted application was any good, and whether a form's fields")
     print("               were really filled; only a browser sees that (§14 DOM verification).")
+    site_line = live_site_status()
+    print(f"  {site_line}")
     if not findings:
-        print("\nCLEAN: nothing finished is sitting idle, and the live site matches the repo.")
+        tail = ("and the live site matches the repo." if site_line.startswith("live site: checked")
+                else "(the live site was not checked; see above).")
+        print(f"\nCLEAN: nothing finished is sitting idle {tail}")
         return 0
     order = {"HIGH": 0, "MEDIUM": 1}
     print(f"\n{len(findings)} ITEM(S) COSTING YOU APPLICATIONS:\n")

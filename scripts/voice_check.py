@@ -237,19 +237,19 @@ def selftest() -> int:
         return {c for c, _, _ in check(t, never=list(never), auth_check=auth)}
 
     # dashes
-    want("dash: em-dash flagged", DASH_CAT in cats("I rebuilt the tracking page \u2014 all of it."))
-    want("dash: en-dash flagged", DASH_CAT in cats("I rebuilt the tracking page \u2013 all of it."))
-    want("dash: spaced double-dash flagged", DASH_CAT in cats("I rebuilt the tracking page -- all of it."))
-    want("dash: a hyphenated word is clean", DASH_CAT not in cats("It was a long-running, real-time dashboard."))
+    want("dash: em-dash flagged", DASH_CAT in cats("I reorganized the stockroom \u2014 all of it."))
+    want("dash: en-dash flagged", DASH_CAT in cats("I reorganized the stockroom \u2013 all of it."))
+    want("dash: spaced double-dash flagged", DASH_CAT in cats("I reorganized the stockroom -- all of it."))
+    want("dash: a hyphenated word is clean", DASH_CAT not in cats("It was a long-running, part-time role."))
 
     # over-confidence
-    for txt in ["That's exactly how I work.", "that is exactly how I approach a dashboard.",
+    for txt in ["That's exactly how I work.", "that is exactly how I approach a month-end close.",
                 "Owning the system end to end is already how I work.",
                 "It's the same problem I solved at Globex.", "This is the same problem I worked on last year.",
-                "I think I'm a perfect fit for the role.", "I know exactly how to fix that page.",
+                "I think I'm a perfect fit for the role.", "I know exactly how to fix that schedule.",
                 "That is exactly what I built at Initech."]:
         want(f"over-confidence flagged: {txt!r}", OVER_CAT in cats(txt))
-    for txt in ["Your tracking page reminded me of a problem we had at Globex.",
+    for txt in ["Your patient intake form reminded me of a problem we had at Globex.",
                 "It took exactly five years.", "I have already relocated to the city.",
                 "I'm not sure yet how your team splits that work, so I'd like to ask."]:
         want(f"over-confidence clean: {txt!r}", OVER_CAT not in cats(txt))
@@ -270,7 +270,7 @@ def selftest() -> int:
                           "- Form: \"Will you now or in the future require sponsorship?\" -> No"))
     want("auth: the voice:allow visa marker clears it",
          AUTH_CAT not in cats("I'm authorized to work in the US. <!-- voice:allow visa: recruiter asked -->"))
-    want("auth: 'I opt for' (the verb) is clean", AUTH_CAT not in cats("I opt for borders before shadows."))
+    want("auth: 'I opt for' (the verb) is clean", AUTH_CAT not in cats("I opt for the early shift when I can."))
     want("auth: a note documenting the rule is clean", AUTH_CAT not in cats("- No sponsorship content in the body."))
     want("auth: config off turns the family off",
          AUTH_CAT not in cats("I don't need sponsorship to start.", auth=False))
@@ -290,18 +290,18 @@ def selftest() -> int:
     want("never-say: no section means no items", parse_never_say("# x\n\n- `a` : b\n") == [])
 
     # the retired style shapes are NOT flagged any more
-    for txt in ["I'm a builder who ships the whole thing myself.",
-                "It's not a mockup, but a real thing people use.",
-                "I design, I build, and I ship.",
+    for txt in ["I'm a charge nurse who runs the whole floor myself.",
+                "It's not a draft, but a real budget people use.",
+                "I plan, I teach, and I grade.",
                 "I'm so excited and passionate about this role.",
                 "It's the strongest, killer, world-class work I've done.",
                 "I already did that, and exactly that.",
-                "I did the research. I made the plan. I'd built the screens. I've shipped it."]:
+                "I did the count. I made the plan. I'd trained the crew. I've closed it out."]:
         want(f"retired shape no longer flagged: {txt!r}", not check(txt, never=[], auth_check=True))
 
-    plain = ("Hi Jordan, I saw your team is rebuilding the shipment page. At Globex I worked on the tracking "
-             "page operators used every day, and the thing we learned is that people open it to find what's "
-             "wrong, not to admire what's fine. Happy to talk if that's useful. Talk soon")
+    plain = ("Hi Jordan, I saw your clinic is moving to evening hours. At Globex I ran the front desk "
+             "through the same change, and what we learned is that the first two weeks are mostly about "
+             "the phone queue, not the schedule. Happy to talk if that's useful. Talk soon")
     want("a plain human message is clean on every family", not check(plain, never=[], auth_check=True))
 
     # sendable_prose

@@ -7,6 +7,7 @@ synthetic fixtures and a fake HTTP layer), plus a few extra edge cases.
 Run:  python3 test_discover.py
 """
 import io, sys, unittest, urllib.request
+from unittest import mock
 from contextlib import redirect_stderr
 from pathlib import Path
 import tempfile
@@ -54,6 +55,54 @@ class TestDiscover(NoNetwork):
         self.assertEqual(D.probe("lever", "empty", http)["status"], "empty")
         self.assertEqual(D.probe("lever", "gone", http)["status"], "dead")
         self.assertEqual(D.probe("lever", "boom", D.FakeHttp({"api.lever.co": 500}), sleep=lambda s: None)["status"], "error")
+
+
+class TestTimeBudget(NoNetwork):
+    def test_deadline_reaches_every_http_read(self):
+        clock = D.FakeClock()
+        ctx = D.Ctx(cache=Path(tempfile.mkdtemp()), clock=clock, F={"include_titles": ["x"]})
+        seen = []
+
+        def fake_read(req, timeout, **kw):
+            seen.append(kw)
+            return "{}"
+        ctx.deadline = 120.0
+        with mock.patch.object(D, "read_url", fake_read):
+            ctx.http.get_json("https://api.lever.co/v0/postings/acme?mode=json")
+        self.assertEqual(seen[0]["deadline"], 120.0)
+        self.assertIs(seen[0]["clock"], clock)
+
+    def test_probe_stops_retrying_when_time_is_short(self):
+        waits = []
+        r = D.probe("lever", "boom", D.FakeHttp({"api.lever.co": 500}), sleep=waits.append, left=lambda: 1.0)
+        self.assertEqual(r["status"], "error")
+        self.assertEqual(waits, [])
+
+    def test_unchecked_board_is_skipped_not_failed_after_deadline(self):
+        clock = D.FakeClock()
+        ctx = D.Ctx(cache=Path(tempfile.mkdtemp()), http=D.FakeHttp({"api.lever.co": 500}, clock, 50.0),
+                    sleep=lambda s: None, clock=clock, F={"include_titles": ["x"]})
+        ctx.deadline = 40.0
+        with redirect_stderr(io.StringIO()):
+            got = list(D.run_pool(ctx, [("lever", "a"), ("lever", "b")], 1, "t"))
+        self.assertEqual({g["status"] for g in got}, {"skipped"})
+
+    def test_index_503_backs_off_at_least_30_seconds(self):
+        waits = []
+        ctx = D.Ctx(cache=Path(tempfile.mkdtemp()), http=D.FakeHttp({"collinfo": 503}), sleep=waits.append,
+                    F={"include_titles": ["x"]})
+        with self.assertRaises(D.HttpStatus):
+            D._retry(ctx, lambda: ctx.http.get_json(D.COLLINFO), tries=2, waits=(3,))
+        self.assertEqual(waits, [30])
+
+    def test_503_wait_never_runs_past_the_budget(self):
+        clock, waits = D.FakeClock(), []
+        ctx = D.Ctx(cache=Path(tempfile.mkdtemp()), http=D.FakeHttp({"collinfo": 503}), sleep=waits.append,
+                    clock=clock, F={"include_titles": ["x"]})
+        ctx.deadline = 10.0
+        with self.assertRaises(D.OutOfTime):
+            D._retry(ctx, lambda: ctx.http.get_json(D.COLLINFO), tries=2, waits=(3,))
+        self.assertEqual(waits, [])
 
 
 if __name__ == "__main__":

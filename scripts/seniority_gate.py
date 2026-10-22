@@ -115,7 +115,42 @@ _DASH_CLASS = r"\-" + _EN_DASH + _EM_DASH
 _HORIZON = re.compile(r"\s+(?:of\s+(?:focus|growth|runway|history|operations?|service)\b|to (?:deliver|come)\b|ago\b)")
 # The words that make a bare number an EXPERIENCE requirement rather than any other count of years.
 _EXP_NOUN = r"(?:experience|product|design|professional|industry|relevant|engineering|ux|ui|software|work)"
-_EXP_VERB = r"(?:designing|building|shipping|leading|developing|managing)"
+_EXP_VERB = r"(?:designing|building|shipping|leading|developing|managing|teaching|nursing|selling|supervising|working)"
+# Any field's words before "experience": "7 years of nursing experience", "seven years of
+# accounting experience", "5 years clinical experience", "3+ years of hands-on HVAC experience".
+# Up to three words, so a long phrase cannot pull an unrelated number in from far away.
+_EXP_PHRASE = r"(?:of\s+)?(?:[\w/&-]+\s+){0,3}experience"
+
+# A line about the COMPANY's own years ("Globex has 40 years of manufacturing experience",
+# "Celebrating 25 years of customer experience excellence", "With 30 years of industry
+# experience, Initech leads...") is not a bar for the candidate. It counts as company voice
+# only when it ALSO carries no candidate cue, so "We need 5 years of experience" and "Our
+# ideal hire has 6 years" stay requirements. A bare "we", "our" or "us" is not enough on its own:
+# "Join our team! 5 years of retail experience." is still a bar.
+_COMPANY_VOICE = re.compile(
+    r"\bwe(?:'ve| have)\s+(?:had|been|spent|built|served|earned)?\b|\bcelebrat|\bfor (?:over|more than)\b"
+    r"|\b(?:has|have) served\b|\bin business\b|\bfounded\b|\bsince (?:19|20)\d\d\b"
+    r"|\b(?:has|have|brings?)\s+(?:over\s+|more than\s+|nearly\s+|almost\s+)?\d{1,2}\s+" + YR + r"\b"
+    r"|^with\s+(?:over\s+|more than\s+|nearly\s+|almost\s+)?\d{1,2}\s+" + YR + r"\b[^,]*,")
+_CANDIDATE_CUE = re.compile(
+    r"\byou\b|\byour\b|\byou'll\b|\byou've\b|\bcandidate|\bapplicant|\brequire|\bmust\b"
+    r"|\bminimum\b|\bat least\b|\+|\bpreferred\b|\bor more\b|\bqualif|\bideal\b|\bneed"
+    r"|\bshould\b|\blooking for\b|\bseeking\b|\bsomeone\b|\bhire\b|\bhiring\b")
+# Headings that open a section about the company ("About Northwind", "Who we are", "Our story").
+# Inside one, a line with no candidate cue is company history. Any other heading closes it.
+_ABOUT_HEADING = re.compile(
+    r"(?:#+\s*)?(?:about (?!the role\b|the job\b|the position\b|this role\b|you\b|the opportunity\b)"
+    r"[\w .&'-]{1,40}|who we are|our (?:story|company|mission|history)|company overview)\s*:?", re.I)
+_ANY_HEADING = re.compile(r"#+\s*\S.*|[A-Za-z][\w ,&/'()-]{1,50}:")
+_REQ_HEADING = re.compile(
+    r"(?:#+\s*)?(?:requirements?|qualifications?|minimum qualifications|preferred qualifications"
+    r"|what you(?:'ll)? (?:bring|need|have)|who you are|about you|you have|must haves?|nice to haves?"
+    r"|skills|experience|responsibilities|the role|about the role|what we(?:'re)? look(?:ing)? for)\s*:?", re.I)
+
+
+def _company_voice(line_lower: str) -> bool:
+    """True when a line talks about the company's own years and names no candidate bar."""
+    return bool(_COMPANY_VOICE.search(line_lower)) and not _CANDIDATE_CUE.search(line_lower)
 
 
 def _tenure_markers() -> tuple[str, ...]:
@@ -159,6 +194,8 @@ def _raw_mentions(line: str):
         return  # your own tenure, or this repo's own notes about you -- never a role requirement
     if not re.search(r"\byears?\b|\byrs?\b|\bdecade\b", l):
         return
+    if _company_voice(l):
+        return  # the company's own history ("Globex has 40 years of ..."), not a bar for you
     pref = any(p in l for p in PREFERRED)
 
     # Range: "5-8 years", "6 to 9 yrs"  -> floor = first, ceiling = second
@@ -182,18 +219,19 @@ def _raw_mentions(line: str):
     for w, n in NUM_WORDS.items():
         if re.search(rf"\b{w}(?:\s*\+|\s+or\s+more|\s+or\s+greater|\s+plus)\s*{YR}", l) \
                 or re.search(rf"(?:at least|minimum(?:\s+of)?|min\.?)\s*{w}\s*{YR}", l) \
-                or re.search(rf"(?<!last )(?<!past )\b{w}\s+{YR}\s+(?:of\s+{_EXP_NOUN}|{_EXP_VERB}|experience)", l):
+                or re.search(rf"(?<!last )(?<!past )\b{w}\s+{YR}\s+(?:of\s+{_EXP_NOUN}|{_EXP_VERB}|{_EXP_PHRASE})", l):
             yield (n, None, pref)
     # "a decade of experience" / "roughly a decade designing" = a 10-year bar ("nearly"/"almost" = 9).
     # Anchored to an experience word, so "the next decade of growth" or a company's own "more than a
     # decade of investment" never counts.
     for m in re.finditer(r"\b(nearly |almost |roughly |about |around |over |more than |at least )?(?:a|one) decade\s+"
-                         r"(?:of\s+(?:(?:relevant|professional|industry|hands-on|product|ux|ui|design|engineering|software)\s+){0,3}experience"
+                         r"(?:of\s+(?:[\w/&-]+\s+){0,3}experience"
                          r"|" + _EXP_VERB + r")", l):
         yield (9 if (m.group(1) or "").strip() in ("nearly", "almost") else 10, None, pref)
     # bare "N years of experience / of product design" -- allowed ONLY on a clean line
     # (tenure markers already excluded above); still require an experience anchor.
     if re.search(r"\b" + YR + r"\s+of\s+" + _EXP_NOUN, l) \
+            or re.search(r"\b" + YR + r"\s+" + _EXP_PHRASE, l) \
             or re.search(r"\b" + YR + r"\s+(?:" + _EXP_VERB[3:-1] + r"|of\s+experience)", l):
         # "the last ten years building it" / "the past 10 years" is company history, not a bar
         for m in re.finditer(r"(?<![\d." + _DASH_CLASS + r"])(?<!last )(?<!past )(\d{1,2})\s+" + YR + r"\b", l):
@@ -211,10 +249,18 @@ def analyze_jd(text: str):
     req = []          # non-preferred mentions
     pref_only = []    # preferred mentions
     evidence = []
+    in_about = False
     for raw in re.split(r"[\n]", text):
         line = raw.strip()
         if not line:
             continue
+        if _ABOUT_HEADING.fullmatch(line):
+            in_about = True
+            continue
+        if _REQ_HEADING.fullmatch(line) or _ANY_HEADING.fullmatch(line):
+            in_about = False
+        if in_about and not _CANDIDATE_CUE.search(line.lower()):
+            continue  # a line in the company's "About us" section, with no bar for the candidate
         for floor, ceil, is_pref in _mentions(line):
             if floor is None:
                 continue
@@ -426,6 +472,56 @@ def selftest() -> int:
     check("'8 years of software engineering' -> floor 8",
           analyze_jd("8 years of software engineering in production systems")["floor"], 8)
 
+    # Any field, not only software and design: the experience words can be anyone's.
+    check("'7 years of nursing experience required.' -> floor 7",
+          analyze_jd("7 years of nursing experience required.")["floor"], 7)
+    check("'Seven years of accounting experience.' -> floor 7",
+          analyze_jd("Seven years of accounting experience.")["floor"], 7)
+    check("'a decade of clinical experience' -> floor 10",
+          analyze_jd("You bring a decade of clinical experience")["floor"], 10)
+    check("'4+ years of classroom teaching experience' -> floor 4",
+          analyze_jd("4+ years of classroom teaching experience (grades 6-8)")["floor"], 4)
+    check("'6 years teaching high school math' -> floor 6",
+          analyze_jd("6 years teaching high school math")["floor"], 6)
+    check("'5 years journeyman electrician experience' -> floor 5",
+          analyze_jd("5 years journeyman electrician experience, licensed in-state")["floor"], 5)
+    check("'three years of hands-on HVAC experience' -> floor 3",
+          analyze_jd("three years of hands-on HVAC experience")["floor"], 3)
+    check("'8 years in retail store management experience' -> floor 8",
+          analyze_jd("Minimum 8 years retail store management experience")["floor"], 8)
+    check("a nurse's own tenure in a dossier note -> no floor",
+          analyze_jd("Jordan has 9 years total of nursing experience across two hospitals")["floor"], None)
+    check("'the clinic opened 12 years ago' -> no floor",
+          analyze_jd("The clinic opened 12 years ago and serves the whole county")["floor"], None)
+    check("'after seven years of service' (benefit, no 'experience') -> no floor",
+          analyze_jd("Paid sabbatical after seven years of service with the district")["floor"], None)
+
+    # The company's own years are not a bar for the candidate.
+    check("'Globex has 40 years of manufacturing experience.' -> no floor",
+          analyze_jd("Globex has 40 years of manufacturing experience.")["floor"], None)
+    check("'Celebrating 25 years of customer experience excellence' -> no floor",
+          analyze_jd("Celebrating 25 years of customer experience excellence")["floor"], None)
+    check("'With 30 years of industry experience, Initech is ...' -> no floor",
+          analyze_jd("With 30 years of industry experience, Initech is the region's most trusted supplier.")["floor"], None)
+    check("'30 years of industry experience' under an About heading -> only the real bar (4)",
+          analyze_jd("About Northwind\n30 years of industry experience\n\nRequirements\n"
+                     "- 4 years of retail experience")["floor"], 4)
+    check("'Umbrella has served the county for over 20 years of trusted experience' -> no floor",
+          analyze_jd("Umbrella has served the county for over 20 years of trusted experience")["floor"], None)
+    # ...but a company voice that still names a bar for the candidate stays a requirement.
+    check("'We need 5 years of bookkeeping experience' -> floor 5",
+          analyze_jd("We need 5 years of bookkeeping experience")["floor"], 5)
+    check("'Our ideal hire has 6 years of logistics experience' -> floor 6",
+          analyze_jd("Our ideal hire has 6 years of logistics experience")["floor"], 6)
+    check("'Join our team: 7 years of warehouse experience required' -> floor 7",
+          analyze_jd("Join our team: 7 years of warehouse experience required")["floor"], 7)
+    check("'Join our team! 5 years of retail experience.' -> floor 5 (a bare 'our' is not company voice)",
+          analyze_jd("Join our team! 5 years of retail experience.")["floor"], 5)
+    check("'We have 35 years of trucking experience behind every load' -> no floor",
+          analyze_jd("We have 35 years of trucking experience behind every load")["floor"], None)
+    check("a bare bullet '5 years of nursing experience' with no heading -> floor 5",
+          analyze_jd("- 5 years of nursing experience")["floor"], 5)
+
     # End-to-end verdicts on synthetic dossiers, with a fixed fictional configuration: the test
     # candidate has 5 years, so DROP_FLOOR is 6 -- independent of whatever a real user's own
     # scripts/config.py says (or doesn't say).
@@ -468,6 +564,22 @@ def selftest() -> int:
             (d5 / "jd-umbrella.md").write_text("- 5-8+ years building complex B2B SaaS products, ideally "
                                               "workflow-heavy or data-dense ones")
             check("'5-8+ years ..., ideally ...' -> REVIEW (senior ceiling)", verdict_for(d5)[0], "REVIEW")
+    finally:
+        DROP_FLOOR = saved_drop_floor
+
+    # The same nursing JD against several configured years: the bar is the USER's own number.
+    saved_drop_floor = DROP_FLOOR
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            dn = Path(td) / "acme-health-charge-nurse"
+            dn.mkdir()
+            (dn / "README.md").write_text("# Acme Health: Charge Nurse\n")
+            (dn / "jd-acme-health.md").write_text("7 years of nursing experience required.\n")
+            for yrs, want in ((1, "DROP"), (5, "DROP"), (7, "PASS"), (12, "PASS")):
+                DROP_FLOOR = yrs + 1
+                check(f"'7 years of nursing experience' with YOUR_YEARS_OF_EXPERIENCE={yrs} -> {want}",
+                      verdict_for(dn)[0], want)
     finally:
         DROP_FLOOR = saved_drop_floor
 

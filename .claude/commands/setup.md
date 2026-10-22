@@ -121,12 +121,21 @@ Once they confirm, set two values in `scripts/config.py` (every other value ther
      you or the user have), one per line on stdin, to `discover.py --urls -`.
   If the sweep ran out of time or the index did not answer, say so in one line and tell them the
   next `/wave` sweeps again and widens the list.
+  3. Postings the crawler cannot read: many employers (hospitals, school districts, government,
+     retailers, local firms) post on Workday, iCIMS, Taleo or their own careers site. Web-search
+     "<title> jobs <city>" and the employers' career pages, and add each live posting you find as
+     an APPLICATIONS row in `pipeline/tracker.html` with `status:"lead"`, its `jd:` and `apply:`
+     URLs and `source:"web search"` (shape: `.claude/rules/records-format.md` §1). `/wave` ranks
+     those rows with the crawled jobs and fills those employers' forms like any other.
   Free job feeds (no key needed for most) are listed in `pipeline/job-crawler/sources.yaml`; leave
   them on.
 - Show the result: `python3 pipeline/job-crawler/crawl.py --hours 720`. Tell the user in one or two
-  lines how many matching postings came back and from how many companies. Zero is a finding, not a
-  failure: say which of the three usual causes it looks like (titles phrased differently, too few
-  boards, a narrow window) and fix it.
+  lines how many matching postings came back, from how many companies, and how many lead rows the
+  web search added. Zero is a finding, not a failure. The most common cause, in many fields, is that
+  the employers post on systems the crawler cannot read, and the free feeds are mostly remote jobs,
+  heavy on tech: the fix is the web search in item 3 above, with lead rows. The other causes are
+  titles phrased differently from how employers write them, too few boards, and a narrow window.
+  Say which it looks like and fix it.
 
 ### 4. Second batch: work authorization (slow down here)
 
@@ -181,13 +190,17 @@ says the default holds and that they did not pick it.
 Run `python3 scripts/doctor.py`, then `python3 scripts/doctor.py --fill`. For each line that is not
 OK:
 - Fix it yourself when it is a file you own here (a KB field, filters, boards).
-- `pip install -r pipeline/job-crawler/requirements.txt`, or weasyprint when `doctor.py` says it is
+- `python3 -m pip install -r pipeline/job-crawler/requirements.txt`, or weasyprint when `doctor.py` says it is
   not installed at all: ask once ("Can I install these Python packages?") and run them on a yes.
   When `doctor.py` reports the `weasyprint` command as found, PDF rendering works; install nothing.
-- Node.js missing or old, or the browser tool not connected: give the user the exact steps
-  `doctor.py --fill` prints. Installing Node and approving the `chrome-devtools` server are theirs to
-  do; say why in one line (it installs software on their machine, and the approval prompt is theirs
-  to answer). After they restart the session, confirm the browser tool shows up in your tool list.
+- `pymupdf` missing: it is a Python package like the ones above; ask once and install it on a yes
+  (`python3 -m pip install pymupdf`). The résumé and grounding gates need it.
+- Node.js or Google Chrome missing or old, or the browser tool not in your tool list (check it even
+  when `doctor.py --fill` says all OK): give the user the steps `doctor.py --fill` prints under "If
+  your tool list has no browser tool". Installing Node and Chrome and approving the
+  `chrome-devtools` server are theirs to do; say why in one line (it installs software on their
+  machine, and the approval prompt is theirs to answer). After they restart the session, confirm
+  the browser tool shows up in your tool list.
 
 Run `python3 scripts/canon.py` as well; it must exit 0.
 

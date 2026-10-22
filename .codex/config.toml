@@ -11,7 +11,9 @@ hooks = true
 # the committed .mcp.json that Claude Code reads. It runs its own dedicated browser profile, never
 # your main browser. No keys. Codex loads a project .codex/config.toml only for a trusted project.
 # Format: https://learn.chatgpt.com/docs/extend/mcp?surface=cli (checked 2026-10-22).
+# --no-usage-statistics turns off the usage statistics the tool otherwise sends to Google
+# (chrome-devtools-mcp 1.10.1 README, "Usage statistics"; read from the npm package 2026-10-22).
 [mcp_servers.chrome-devtools]
 command = "npx"
-args = ["-y", "chrome-devtools-mcp@1.10.1"]
+args = ["-y", "chrome-devtools-mcp@1.10.1", "--no-usage-statistics"]
 startup_timeout_sec = 30

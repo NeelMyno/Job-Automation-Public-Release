@@ -134,37 +134,37 @@ RETIRED: list[dict] = []
 # Context classification
 # --------------------------------------------------------------------------------------
 
-# Negation must be ABOUT the retired string, not merely on the same line. The first draft of this
-# file matched any "not" anywhere in the line and therefore MISSED real defects where the "not"
-# belonged to a different clause than the one asserting the retired claim:
-#   "E-Verify is now a HARD FILTER, not a preference"   <- "not" negates *preference*, and the
-#                                                          sentence asserts the retired rule
-#   "Title reflects current reality (Product Design Engineer, not "Co-Op Intern")"
-#   "human taste vs AI slop ("un-slopping the AI slop"), builder, not engineer"
-# All three were suppressed by a "not" belonging to a different clause. Hence: a window, not a line.
+# Negation must be ABOUT the retired string, not merely on the same line. A checker that matched
+# any "not" anywhere in the line would MISS defects where the "not" belongs to a different clause
+# than the one asserting the retired claim (fictional examples):
+#   "Night-shift lead is now my official title, not a temporary role"   <- "not" negates
+#                                         *temporary role*, and the sentence asserts the claim
+#   "Title reflects current reality (Senior Accountant, not "Staff Accountant")"
+#   "a store that runs on trust ("the friendliest checkout in town"), owner, not manager"
+# Each would be suppressed by a "not" from a different clause. Hence: a window, not a line.
 LOOKBACK_CHARS = 80   # "never say X", "Drop X", "they are NOT X", "Delete X everywhere"
 LOOKAHEAD_CHARS = 40  # only for strong retirement verbs: "X is RETIRED", "X: superseded"
 
 NEGATION = re.compile(
-    # Plain "no" earns its place: `- No "un-slopping the AI slop" slogan.` is a prohibition, and
-    # the 80-char before-window keeps it from excusing unrelated prose.
-    # The lookarounds exclude hyphen-joined compounds: `builder-not-engineer` is an identity, not a
-    # negation, and its embedded "not" hid a real slogan survivor from this checker.
+    # Plain "no" earns its place: `- No "friendliest checkout in town" slogan.` is a prohibition,
+    # and the 80-char before-window keeps it from excusing unrelated prose.
+    # The lookarounds exclude hyphen-joined compounds: `owner-not-manager` is an identity, not a
+    # negation, and an embedded "not" like that could hide a slogan survivor from this checker.
     #
     # "instead of" / "rather than" and "correct(s|ed|ion)" used to sit in this list as bare
     # markers, and both turned out to excuse an ASSERTION instead of a retraction:
-    #   "Instead of letting a model answer, I built it to resolve into a typed filter." asserts
-    #   the retired claim (the typed filter) in a LATER clause; a bare "instead of" earlier in
-    #   the sentence wrongly excused it.
-    #   "The correction here is that the platform runs itself with zero maintenance." asserts the
-    #   retired claim while wearing the word "correction"; a bare "correct*" wrongly excused it.
+    #   "Instead of paper charts, I set up the whole ward's digital records alone." asserts the
+    #   retired claim (set up the records alone) in a LATER clause; a bare "instead of" earlier
+    #   in the sentence would wrongly excuse it.
+    #   "The correction here is that the audit closed with zero findings." asserts the retired
+    #   claim while wearing the word "correction"; a bare "correct*" would wrongly excuse it.
     # Both are re-added below as NARROWER checks that require the retired claim to actually be
     # the thing being retracted (`_INSTEAD_OF`, `_corrected_with_cue`), not just nearby vocabulary.
     r"(?<![-\w])(?:never|not|no|no longer|nowhere|drop(?:ped|s)?|delete[sd]?|retire[sd]?|forbidden|"
     r"banned?|blocklist(?:ed)?|avoid|supersed(?:e|ed|es)|"
     r"wrong|incorrect|do not|don't|must not|cannot|false|fabricat\w*|"
-    # "old" is narrowed to old *wording*, never old *things*. A bare "the old" once suppressed a
-    # real fabrication ("The old tracking page guessed at delivery times"): the artifact was
+    # "old" is narrowed to old *wording*, never old *things*. A bare "the old" would suppress an
+    # invented claim like "The old inventory sheet double-counted every return": the sheet was
     # genuinely old; the claim about it was invented.
     r"stop saying|off the r[ée]sum[ée]|old (?:figure|number|line|wording|framing|metric|claim)s?|"
     r"former|previously|used to)(?![-\w])|[⛔❌]|~~",
@@ -175,7 +175,7 @@ NEGATION = re.compile(
 
 STRONG_RETIREMENT = re.compile(
     r"\b(?:retired?|superseded?|forbidden|banned|deprecated|removed|dead|obsolete|"
-    r"fabricat\w*|not real|no CI runner|historical record)\b|[⛔❌]|~~", re.I
+    r"fabricat\w*|not real|historical record)\b|[⛔❌]|~~", re.I
 )
 
 # "correct*" excuses a retired claim only when the same window ALSO carries a corroborating cue:
@@ -244,7 +244,7 @@ ENTITY = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{
 # Written as escapes, not glyphs, because a table of invisible characters that you cannot see in
 # the source is a table nobody can audit.
 INVISIBLE = set(
-    "​"   # ZERO WIDTH SPACE            <- the proven `CI-ga​ted` bypass
+    "​"   # ZERO WIDTH SPACE            <- e.g. `auto-de​ploy`
     "‌‍⁠﻿"               # ZWNJ, ZWJ, WORD JOINER, BOM
     "­"   # SOFT HYPHEN (renders as nothing except at a line break)
     "͏᠎⁡⁢⁣⁤"
@@ -262,7 +262,7 @@ QUOTES = {**{c: "'" for c in "‘’‚‛′‵´"},
           **{c: '"' for c in "“”„‟″‶«»"}}
 
 # Confusable folding. These are the codepoints that render identically to a Latin letter in the
-# fonts this repo's files are read in: `СI-gated` (Cyrillic Es) is invisible to a human reviewer
+# fonts this repo's files are read in: `аuto-deploy` (Cyrillic a) is invisible to a human reviewer
 # AND to an ASCII regex, which is the worst combination a checker can have.
 _CYR_UP, _LAT_UP = "АВЕКМНОРСТУХІЈЅԚԜЁ", "ABEKMHOPCTYXIJSQWE"
 _CYR_LO, _LAT_LO = "аеорсухіјѕԛԝё", "aeopcyxijsqwe"
@@ -467,8 +467,8 @@ def scan_text(rel: str, text: str) -> list[Finding]:
             # (1) Negation immediately BEFORE the match: "never say X", "Drop X", "NOT X".
             before = norm[max(lo, m.start() - LOOKBACK_CHARS):m.start()]
             # (2) A STRONG retirement verb just AFTER: "X is RETIRED", "X: superseded".
-            #     Generic "not" is deliberately excluded here: "HARD FILTER, not a preference"
-            #     negates *preference* and asserts the retired rule.
+            #     Generic "not" is deliberately excluded here: "official title, not a temporary
+            #     role" negates *temporary role* and asserts the retired claim.
             #
             #     🔴 The window STOPS at the first clause boundary, and that is not a nicety.
             #     A retirement verb 40 chars later can belong to a COMPLETELY DIFFERENT retired

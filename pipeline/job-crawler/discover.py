@@ -48,15 +48,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from http_util import read_url  # sibling module: gzip + retry on a cut-off read
+from http_util import read_url, UA, OutOfTime  # sibling module: gzip, retry, time budget
 import locations  # sibling module: the location rule crawl.py applies, shared so both agree
 import titles as title_rule  # sibling module: the title rule crawl.py applies, shared so both agree
 
 HERE = Path(__file__).resolve().parent
+TRACKER = HERE.parent / "tracker.html"   # present only in the full release, never in the crawler-only repo
 BOARDS = HERE / "boards.yaml"
 FILTERS = HERE / "filters.yaml"
 CACHE_DIR = HERE / "cache"
-UA = "Mozilla/5.0 (personal job-search crawler, board discovery; see pipeline/job-crawler/README.md)"
 
 ATSES = ("greenhouse", "lever", "ashby", "smartrecruiters", "workable", "workday")
 SWEEP_ATSES = ("greenhouse", "lever", "ashby", "smartrecruiters", "workable")
@@ -91,6 +91,7 @@ DEAD_RECHECK_DAYS = 45        # a board that 404'd or had no postings is skipped
 DEFAULT_SWEEP_LIMIT = 150
 DEFAULT_WORKERS = 4
 PAUSE_SECONDS = 0.3           # each worker pauses this long after each call
+SLOW_DOWN_SECONDS = 30        # wait at least this long after a 503 from the index (its FAQ: slow down)
 
 GH_RESERVED = {"embed", "v1", "api", "job_app", "job_board", "jobs"}
 WORKABLE_RESERVED = {"api", "j", "careers", "jobs"}
@@ -101,10 +102,6 @@ NAME_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "t
 # ============================================================================================
 # HTTP (one small class, so the selftest can swap in a fake with no network)
 # ============================================================================================
-class OutOfTime(Exception):
-    """The run's time budget is spent."""
-
-
 class IndexDown(Exception):
     """The index failed INDEX_MAX_5XX times in a row for one domain."""
 
@@ -117,12 +114,14 @@ class HttpStatus(Exception):
 
 
 class Http:
-    def __init__(self, timeout=20):
+    def __init__(self, timeout=20, clock=time.monotonic):
         self.timeout = timeout
+        self.clock = clock
+        self.deadline = None   # set by Ctx: every read, retry and curl fallback stops there
 
     def _open(self, req, timeout):
         try:
-            return read_url(req, timeout or self.timeout)
+            return read_url(req, timeout or self.timeout, deadline=self.deadline, clock=self.clock)
         except urllib.error.HTTPError as e:
             raise HttpStatus(e.code, req.full_url)
 
@@ -255,15 +254,19 @@ def _pretty(slug):
     return s.title() if s == s.lower() else s
 
 
-def probe(ats, slug, http, sleep=time.sleep, tries=3):
+def probe(ats, slug, http, sleep=time.sleep, tries=3, left=None):
     """{status: live|empty|dead|error, count, titles, jobs, name, error}. `jobs` holds each posting's
     title, location and remote flag, so the location rule can be applied. `name` is the company name when
     the API gives one, else None. A transient failure (a cut-off read, a timeout, HTTP 429 or 5xx)
-    is retried after a pause, so a flaky connection is not reported as a missing board."""
+    is retried after a pause, so a flaky connection is not reported as a missing board. `left`, a
+    function giving the seconds left in the run (None: no limit), stops the retries in time."""
     for k in range(tries):
         res = _probe_once(ats, slug, http)
         transient = res["status"] == "error" and not re.match(r"HTTP 4(?!29)", res["error"] or "")
         if not transient or k == tries - 1:
+            return res
+        lt = left() if left else None
+        if lt is not None and lt <= 2.0 * (k + 1):
             return res
         sleep(2.0 * (k + 1))
     return res
@@ -342,6 +345,36 @@ def board_name(ats, slug, http):
         return None
 
 
+def board_url(ats, slug):
+    """The public page a person opens to see this board."""
+    if ats == "workday":
+        tenant, host, site = slug.split("/")
+        return f"https://{tenant}.{host}.myworkdayjobs.com/{site}"
+    return {"greenhouse": "https://boards.greenhouse.io/{}", "lever": "https://jobs.lever.co/{}",
+            "ashby": "https://jobs.ashbyhq.com/{}", "smartrecruiters": "https://jobs.smartrecruiters.com/{}",
+            "workable": "https://apply.workable.com/{}"}[ats].format(slug)
+
+
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def page_name(ats, slug, http):
+    """The company name from the board page's <title>, for the ATSes whose API gives no name
+    (Lever: '<title>Acme Inc</title>'; Ashby: '<title>Acme Jobs</title>'). None if unreadable."""
+    if ats not in ("lever", "ashby"):
+        return None
+    try:
+        m = _TITLE.search(http.get_text(board_url(ats, slug)) or "")
+    except Exception:
+        return None
+    if not m:
+        return None
+    import html as _html
+    t = " ".join(_html.unescape(m.group(1)).split())
+    t = re.sub(r"^(jobs|careers)\s+at\s+|\s+(jobs|careers)$", "", t, flags=re.I).strip(" -|")
+    return t if t and t.lower() not in ("jobs", "careers", "lever", "ashby") else None
+
+
 def matching_titles(job_titles, F):
     want = F["include_titles"]
     return [t for t in job_titles if any(title_rule.term_hits(w, t) for w in want)]
@@ -380,9 +413,12 @@ def existing_keys(rows):
 
 
 def _row_line(r):
-    return ("  - {company: %s, ats: %s, slug: %s, source: %s, added: %s}"
+    line = ("  - {company: %s, ats: %s, slug: %s, source: %s, added: %s}"
             % (json.dumps(r["company"]), r["ats"], json.dumps(r["slug"]),
                json.dumps(r["source"]), json.dumps(r["added"])))
+    if r.get("note"):
+        line += "  # " + " ".join(str(r["note"]).split())
+    return line
 
 
 def append_rows(path, new_rows):
@@ -452,7 +488,7 @@ class Ctx:
     def __init__(self, boards=BOARDS, filters=FILTERS, cache=CACHE_DIR, http=None, sleep=time.sleep,
                  now=None, F=None, clock=time.monotonic):
         self.boards, self.filters, self.cache = Path(boards), Path(filters), Path(cache)
-        self.http = http or Http()
+        self.http = http or Http(clock=clock)
         self.sleep = sleep
         self.clock = clock
         self.deadline = None          # clock() value at which the whole run stops (None: no limit)
@@ -460,6 +496,21 @@ class Ctx:
         self.now = now or datetime.now(timezone.utc)
         self.F = F
         self.today = datetime.now().astimezone().date().isoformat()  # the user's own local date
+
+    @property
+    def deadline(self):
+        return self._deadline
+
+    @deadline.setter
+    def deadline(self, value):
+        """The run's deadline also bounds every HTTP read (http_util.read_url)."""
+        self._deadline = value
+        if hasattr(self.http, "deadline"):
+            self.http.deadline = value
+
+    def out_of_time(self):
+        left = self.left()
+        return left is not None and left <= 0
 
     def left(self, until=None):
         """Seconds left before `until` (default: the run's deadline), or None when unbounded."""
@@ -496,6 +547,8 @@ def _retry(ctx, fn, tries=3, waits=(5, 20), until=None, strikes=None):
             if strikes is not None:
                 strikes[0] = 0
             return r
+        except OutOfTime:
+            raise
         except HttpStatus as e:
             last = e
             if e.code not in (429, 500, 502, 503, 504):
@@ -508,7 +561,11 @@ def _retry(ctx, fn, tries=3, waits=(5, 20), until=None, strikes=None):
                 raise IndexDown(f"{last} ({strikes[0]} failures in a row)")
         if k < tries - 1:
             wait = waits[min(k, len(waits) - 1)]
+            if isinstance(last, HttpStatus) and last.code == 503:
+                wait = max(wait, SLOW_DOWN_SECONDS)  # Common Crawl: 503 means slow down
             left = ctx.left(until)
+            if left is not None and left <= wait:
+                raise OutOfTime()  # no time to wait and try again inside the budget
             ctx.sleep(wait if left is None else max(0.0, min(wait, left)))
     raise last
 
@@ -654,13 +711,18 @@ def _harvest_domain(ctx, cid, domain, want_ats, st, until, strikes, save):
 def run_pool(ctx, jobs, workers, label):
     """Probe (ats, slug) pairs with bounded concurrency; yields results as they finish. Once the
     run's deadline passes, the boards not yet started come back as status 'skipped' (unchecked)."""
+    def skipped(ats, slug):
+        return {"ats": ats, "slug": slug, "status": "skipped", "count": 0, "titles": [], "jobs": [],
+                "name": None, "error": "time budget spent"}
+
     def task(ats, slug):
-        left = ctx.left()
-        if left is not None and left <= 0:
-            return {"ats": ats, "slug": slug, "status": "skipped", "count": 0, "titles": [], "jobs": [],
-                    "name": None, "error": "time budget spent"}
-        r = probe(ats, slug, ctx.http, sleep=ctx.sleep)
-        ctx.sleep(PAUSE_SECONDS)
+        if ctx.out_of_time():
+            return skipped(ats, slug)
+        r = probe(ats, slug, ctx.http, sleep=ctx.sleep, left=ctx.left)
+        if r["status"] == "error" and ctx.out_of_time():
+            return skipped(ats, slug)  # cut off by the budget, not a real failure: due next run
+        if not ctx.out_of_time():
+            ctx.sleep(PAUSE_SECONDS)
         return r
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, min(workers, 8))) as ex:
@@ -743,7 +805,8 @@ def sweep(ctx, args):
 
     new_rows, skipped = [], []
     for h in sorted(hits, key=lambda x: (x["ats"], x["slug"].lower())):
-        name = h["name"] or board_name(h["ats"], h["slug"], ctx.http) or _pretty(h["slug"])
+        name = h["name"] or (None if ctx.out_of_time() else board_name(h["ats"], h["slug"], ctx.http)) \
+            or _pretty(h["slug"])
         if excluded_company(name, F):
             skipped.append(f"{name}: in your exclude_companies")
             continue
@@ -816,7 +879,7 @@ def _add_checked(ctx, args, candidates, mode, F):
             why = {"dead": "no board there", "empty": "board exists but has no open postings"}.get(r["status"], r["error"] or "error")
             misses.append({"origin": origin, "ats": ats, "slug": slug, "why": why})
             continue
-        name = r["name"] or board_name(ats, slug, ctx.http)
+        name = r["name"] or board_name(ats, slug, ctx.http) or page_name(ats, slug, ctx.http)
         if expect and name and not _same_company(expect, name):
             misses.append({"origin": origin, "ats": ats, "slug": slug,
                            "why": f"that board belongs to '{name}', not '{expect}'; not added"})
@@ -828,13 +891,16 @@ def _add_checked(ctx, args, candidates, mode, F):
         added.append({"company": " ".join(str(company).split())[:80], "ats": ats, "slug": slug,
                       "source": f"discover:{mode}", "added": ctx.today, "_open": r["count"],
                       "_matching": matching_jobs(r["jobs"], F)[0][:3] if F["include_titles"] else [],
-                      "_name_confirmed": bool(name)})
+                      "_name_confirmed": bool(name), "_url": board_url(ats, slug)})
+    for r in added:
+        if not r["_name_confirmed"]:
+            r["note"] = f"name not confirmed by the board: check {r['_url']}"
     write = (True, "dry run: boards.yaml not changed") if args.dry_run else \
         append_rows(ctx.boards, [{k: v for k, v in r.items() if not k.startswith("_")} for r in added])
     return {"mode": mode, "ok": write[0], "boards_yaml": write[1], "already_listed": already,
             "added": [{"company": r["company"], "ats": r["ats"], "slug": r["slug"], "open_postings": r["_open"],
-                       "matching_titles": r["_matching"],
-                       "name_confirmed_by_api": r["_name_confirmed"]} for r in added],
+                       "matching_titles": r["_matching"], "board_url": r["_url"],
+                       "name_confirmed": r["_name_confirmed"]} for r in added],
             "misses": misses,
             "summary": (f"{len(added)} board(s) {'would be' if args.dry_run else ''} added, "
                         f"{len(already)} already listed, {len(misses)} not added (see misses).").replace("  ", " ")}
@@ -890,8 +956,10 @@ def company_mode(ctx, args):
               and "belongs to" not in m["why"]]
     not_found = [n for n in args.company if " ".join(n.split())[:80].lower() not in found]
     unsure = sorted({m["origin"] for m in failed if m["origin"] in not_found})
-    rows = [{"company": r["company"], "ats": r["ats"], "slug": r["slug"], "source": "discover:company",
-             "added": ctx.today} for r in firsts]
+    rows = [dict({"company": r["company"], "ats": r["ats"], "slug": r["slug"], "source": "discover:company",
+                  "added": ctx.today},
+                 **({} if r["name_confirmed"] else
+                    {"note": f"name not confirmed by the board: check {r['board_url']}"})) for r in firsts]
     write = (True, "dry run: boards.yaml not changed") if args.dry_run else append_rows(ctx.boards, rows)
     wrong = [m for m in res["misses"] if "belongs to" in m["why"]]
     return {"mode": "company", "ok": write[0], "boards_yaml": write[1], "added": firsts,
@@ -907,6 +975,16 @@ def company_mode(ctx, args):
                            "URL to --urls."))}
 
 
+def off_ats_advice(tracker=None):
+    """What to do with a posting this crawler can't read: depends on whether a tracker exists."""
+    if (TRACKER if tracker is None else tracker).exists():
+        return ("nothing was added to boards.yaml, because this crawler reads only the six ATSes. The "
+                "posting is still worth applying to: record it as a lead row in pipeline/tracker.html "
+                "and apply there; the agent fills that form too.")
+    return ("nothing was added to boards.yaml, because this crawler reads only the six ATSes. The "
+            "posting is still worth applying to: open it and apply there.")
+
+
 def urls_mode(ctx, args):
     F = ctx.filters_loaded()
     text = sys.stdin.read() if args.urls == "-" else Path(args.urls).read_text()
@@ -920,6 +998,9 @@ def urls_mode(ctx, args):
     res = _add_checked(ctx, args, cands, "urls", F)
     res["unresolved"] = unresolved
     res["summary"] += f" {len(unresolved)} URL(s) were not on a supported ATS."
+    if unresolved:
+        res["what_to_do_with_unresolved"] = off_ats_advice()
+        res["summary"] += " For those, " + res["what_to_do_with_unresolved"]
     return res
 
 
@@ -930,18 +1011,40 @@ QUERY_SITES = ("boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.c
                "jobs.smartrecruiters.com", "apply.workable.com", "myworkdayjobs.com")
 
 
+def search_places(F):
+    """Where to point a plain web search: your home_metros when onsite work is limited to them,
+    else 'remote' when remote work is fine. Empty when neither says where."""
+    try:
+        remote_ok, onsite, metros = locations.settings(F)
+    except ValueError:
+        remote_ok, onsite, metros = True, "anywhere", ()
+    places = list(metros) if metros else []
+    if remote_ok:
+        places.append("remote")
+    return places
+
+
 def queries_mode(ctx, args):
     F = ctx.filters_loaded()
-    qs = []
+    qs, plain = [], []
+    places = search_places(F)
     for t in F["include_titles"]:
         qs += [f'site:{s} "{t}"' for s in QUERY_SITES]
         qs.append(f'"{t}" jobs careers greenhouse OR lever OR ashbyhq OR workable OR myworkdayjobs')
         qs += [f'"{t}" jobs {c} careers' for c in (args.company or [])]
-    note = ("Run these with your web search tool, collect every result URL, and pipe them in: "
-            "python3 pipeline/job-crawler/discover.py --urls - . Some search tools ignore `site:`; if "
-            "results come back off-site, run the plain '<title> jobs <company> careers' form instead "
-            "(pass company names with --company to --queries to get those lines).")
-    return {"mode": "queries", "note": note, "queries": qs}
+        for p in places:
+            plain += [f'{t} jobs {p}', f'{t} careers {p}']
+        if not places or places == ["remote"]:
+            plain.append(f"{t} jobs near me")
+    note = ("Run these with your web search tool. The site: lines find boards this crawler reads: "
+            "collect every result URL and pipe them in: python3 pipeline/job-crawler/discover.py "
+            "--urls - . Some search tools ignore `site:`; if results come back off-site, run the "
+            "plain '<title> jobs <company> careers' form instead (pass company names with --company "
+            "to --queries to get those lines). The plain lines at the end find jobs anywhere, "
+            "including employers whose systems this crawler can't read (many hospitals, schools, "
+            "governments and retailers). Feed those URLs to --urls too; for any it can't add, "
+            + off_ats_advice())
+    return {"mode": "queries", "note": note, "queries": qs + plain, "plain_queries": plain}
 
 
 # ============================================================================================
@@ -956,6 +1059,10 @@ def print_human(res):
     for r in res.get("added", []):
         extra = f", e.g. {r['matching_titles'][0]}" if r.get("matching_titles") else ""
         print(f"  + {r['company']} ({r['ats']}: {r['slug']}): {r['open_postings']} open{extra}")
+        if r.get("name_confirmed") is False:
+            print(f"    WARNING: name not confirmed. This board did not say which company it belongs to, "
+                  f"so it may be a different employer. Open {r['board_url']} and check; if it is not "
+                  f"{r['company']}, delete its line from boards.yaml.")
     shown = res.get("wrong_company_boards", []) + res.get("check_failed", []) if res["mode"] == "company" \
         else res.get("misses", [])
     for m in shown:
@@ -1100,7 +1207,7 @@ def _fixture_routes():
 
 
 def _selftest():
-    import tempfile
+    import contextlib, io, tempfile
     # never touch the network, even by mistake
     def _no_net(*a, **k):
         raise AssertionError("selftest tried to use the network")
@@ -1249,6 +1356,42 @@ def _selftest():
         q = queries_mode(ctx_for({}), ns(company=["Globex"]))
         assert any(x.startswith("site:jobs.lever.co") for x in q["queries"]) and "ignore" in q["note"]
         assert '"data analyst" jobs Globex careers' in q["queries"]
+        # 9) plain, location-aware searches for jobs anywhere, beside the site: ones
+        qctx = ctx_for({})
+        qctx.F.update(include_titles=["registered nurse"], remote_ok=False, onsite_ok="home_metros",
+                      home_metros=["columbus"])
+        q = queries_mode(qctx, ns())
+        assert "registered nurse jobs columbus" in q["queries"], q["queries"]
+        assert "registered nurse careers columbus" in q["plain_queries"]
+        assert "hospitals" in q["note"] and any(x.startswith("site:") for x in q["queries"])
+        # 10) a URL off the six ATSes says what to do, tracker or not
+        assert "open it and apply there" in off_ats_advice(tmp / "no-tracker.html")
+        (tmp / "tracker.html").write_text("<script></script>")
+        assert "lead row in pipeline/tracker.html" in off_ats_advice(tmp / "tracker.html")
+        res = urls_mode(ctx_for(_fixture_routes()), ns(urls=str(src)))
+        assert "apply there" in res["summary"] and res["what_to_do_with_unresolved"]
+        # 11) --company on Lever/Ashby: the board page's title confirms or rejects the name; an
+        #     unreadable one is added with a warning and a comment in boards.yaml
+        routes = _fixture_routes()
+        routes["api.lever.co/v0/postings/horizon"] = [{"text": "Data Analyst"}]
+        routes["jobs.lever.co/horizon"] = "<html><title>Horizon Research Lab</title></html>"
+        routes["api.lever.co/v0/postings/umbrella"] = [{"text": "Data Analyst"}]
+        routes["jobs.lever.co/umbrella"] = "<html><title>Hooli Systems</title></html>"
+        routes["api.ashbyhq.com/posting-api/job-board/initech"] = {"jobs": [{"title": "Data Analyst"}]}
+        routes["boards-api.greenhouse.io/v1/boards/initech/jobs"] = 404
+        ctx = ctx_for(routes)
+        res = company_mode(ctx, ns(company=["Horizon", "Umbrella", "Initech"]))
+        got = {r["slug"]: r for r in res["added"]}
+        assert got["horizon"]["name_confirmed"] is True, res
+        assert "umbrella" not in got and any("Hooli" in m["why"] for m in res["wrong_company_boards"]), res
+        assert got["initech"]["name_confirmed"] is False
+        text = ctx.boards.read_text()
+        assert "# name not confirmed by the board: check https://jobs.ashbyhq.com/initech" in text, text
+        assert len(read_boards(ctx.boards)[1]) == 1 + len(res["added"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_human(res)
+        assert "WARNING: name not confirmed" in out.getvalue() and "jobs.ashbyhq.com/initech" in out.getvalue()
     finally:
         urllib.request.urlopen = real_urlopen
     print("discover.py selftest: OK")

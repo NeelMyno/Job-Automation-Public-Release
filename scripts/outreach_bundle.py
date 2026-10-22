@@ -50,6 +50,15 @@ try:
 except ImportError:  # pragma: no cover
     config = None  # type: ignore[assignment]
 
+def _today() -> date:
+    """Today in your configured time zone (scripts/config.py TIMEZONE, via local_now()), else this
+    machine's date. A missing or broken config never breaks this script."""
+    try:
+        return config.local_now().date()  # type: ignore[union-attr]
+    except Exception:
+        return date.today()
+
+
 BIG = {re.sub(r"[^a-z0-9]", "", c.lower()) for c in (getattr(config, "BIG_COMPANIES", None) or [])}
 SMALL_CAP = getattr(config, "SMALL_BASKET_CAP", 3) if config else 3
 
@@ -336,7 +345,7 @@ def run(argv: list[str]) -> int:
     def opt(flag, default=None):
         return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else default
     try:
-        since = date.fromisoformat(opt("--since", (date.today() - timedelta(days=14)).isoformat()))
+        since = date.fromisoformat(opt("--since", (_today() - timedelta(days=14)).isoformat()))
     except ValueError:
         print("usage: --since YYYY-MM-DD", file=sys.stderr)
         return 2
@@ -346,7 +355,7 @@ def run(argv: list[str]) -> int:
             if a.startswith("-"):
                 break
             hold.add(a)
-    today = date.today().isoformat()
+    today = _today().isoformat()
     ledger_path = REPO / "pipeline" / "sent-ledger.md"
     ledger_text = ledger_path.read_text(encoding="utf-8", errors="replace") if ledger_path.exists() else ""
     ledger = ledger_kinds(ledger_text)
@@ -414,6 +423,20 @@ def selftest() -> int:
         else:
             failed += 1
         print(f"  {'PASS' if cond else 'FAIL'} {label}")
+
+    class _FakeCfg:
+        @staticmethod
+        def local_now():
+            from datetime import datetime as _dt
+            return _dt(2031, 7, 4, 23, 30)
+    global config
+    _saved_cfg = config
+    config = _FakeCfg()
+    try:
+        _zone_ok = _today() == date(2031, 7, 4)
+    finally:
+        config = _saved_cfg
+    want("today comes from the configured zone (config.local_now), not the machine clock", _zone_ok)
 
     doc = ("# Acme: Staff Engineer (req 4417) · referral pack\n\n## The messages\n\n"
            "### 1 · Pat Probe: Engineering Lead\n✅ SENT 2026-01-05 (connection note, by me). DM: send after accept.\n"

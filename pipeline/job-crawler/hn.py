@@ -14,7 +14,7 @@ no login, no scraping: the same public JSON the HN site itself reads.
 HONEST BY CONSTRUCTION (mirrors crawl.py): this module only SELECTS real comments and copies
 their real fields. It never invents a company, role, or location. HN comments are freeform, so
 a field that isn't cleanly present is returned empty (crawl.py renders that as an em-dash),
-not guessed. It filters CONSERVATIVELY: a comment is kept only if a title from your own
+never guessed. It filters CONSERVATIVELY: a comment is kept only if a title from your own
 `include_titles` list appears in its header (the role line), not merely because a related word
 shows up somewhere in the body.
 
@@ -23,12 +23,12 @@ by taking the loaded filters `F` as an argument (include_titles, us_markers, loc
 so all title/geography knowledge stays in the one place, filters.yaml.
 """
 import json, re, html, urllib.request, urllib.error
-from http_util import read_url  # sibling module: gzip + retry on a cut-off read
+from http_util import read_url, UA  # sibling module: gzip + retry on a cut-off read
+import locations  # sibling module: whole-word place matching, shared with crawl.py
 from datetime import datetime, timezone
 
 ALGOLIA = "https://hn.algolia.com/api/v1"
 HN_ITEM = "https://news.ycombinator.com/item?id={}"
-UA = "Mozilla/5.0 (personal job-search crawler; see pipeline/job-crawler/README.md)"
 
 # Header delimiters seen in real Who's-Hiring posts: pipes, bullets, and SPACED dashes
 # (em/en/hyphen). Spaced-only for the hyphen so intra-word hyphens survive ("Full-Stack",
@@ -171,11 +171,9 @@ def _looks_location(token, F):
     tl = token.lower()
     if _LOC_HINT.search(tl) or _CITY_ST.search(tl):
         return True
-    for g in list(F.get("us_markers", [])) + list(F.get("location_block", [])):
-        g = (g or "").strip()
-        if g and g in tl:
-            return True
-    return False
+    places = tuple(F.get("us_markers") or []) + tuple(F.get("location_block") or [])
+    rx = locations._block_re(places)  # whole words, so "us" never hits "Business"
+    return bool(rx and rx.search(tl))
 
 
 def _is_city_state(token):

@@ -32,7 +32,8 @@ sources:
     enabled: true
     # Remote jobs by keyword tag. https://jobicy.com/jobs-rss-feed
     # Terms (summary): one automated pass per hour at most; handle HTTP 429; credit Jobicy with a
-    # clickable link and keep the canonical Jobicy job URL.
+    # clickable link and keep the canonical Jobicy job URL. A title shorter than 3 characters
+    # (e.g. "rn") gets HTTP 400 from Jobicy, so the crawler does not send it here.
     geo: usa                  # "" for any region
     count: 50                 # jobs per query, 1 to 200
     max_queries: 5
@@ -43,7 +44,9 @@ sources:
     # Remote jobs. https://github.com/remotive-io/remote-jobs-api
     # Terms (summary): poll about 4 times a day at most (more than 2 calls a minute is blocked);
     # jobs appear 24 hours late; link back to the Remotive job URL and name Remotive; never
-    # resubmit the jobs to other job sites. The crawler makes one call per run here.
+    # resubmit the jobs to other job sites. The crawler makes one call per run here. With more
+    # than one title that call returns Remotive's default list, which is short (about 10 recent
+    # jobs when last checked), so Remotive is a small extra, not a full remote-jobs list.
     category: ""              # optional Remotive category slug, e.g. "data"
     min_interval_minutes: 360
 
@@ -70,8 +73,10 @@ sources:
   weworkremotely:
     enabled: false
     # Remote jobs RSS. https://weworkremotely.com/remote-jobs.rss
-    # OFF by default: its terms of service have not been read, so automated use is not known to
-    # be allowed. Read their terms yourself before turning this on. The feed's ttl is 60 minutes.
+    # OFF by default. Their API terms forbid storing their data, and sources.py keeps the jobs it
+    # fetches in a cache file on disk (cache/sources-state.json) to enforce the minimum interval.
+    # Read their terms yourself, and leave this off unless they allow your use. The feed's ttl is
+    # 60 minutes.
     min_interval_minutes: 60
 
   usajobs:

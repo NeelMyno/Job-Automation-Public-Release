@@ -2,6 +2,9 @@
 paths:
   - "pipeline/**"
   - "applications/**"
+  - "ops/DEBT.md"
+  - "ops/HANDOFF.md"
+  - "knowledge-base/11-preferences-and-conventions.md"
 ---
 <!--
 The one shape for every record surface. Claude Code loads this file by itself the moment a chat opens
@@ -31,6 +34,7 @@ as the surface's unknown marker below, never left out and never guessed. Check b
  source:"...", jd:"<url>", apply:"<url>", folder:"applications/<slug>"|"", refs:N, everify:"...", applied:"<applied>",
  next:"...", notes:"...", link:"..."},
 ```
+- `everify` is optional: leave it out if E-Verify does not matter to you. When present it is a string.
 - `status`: `lead`, `active`, `applied`, `interview`, `offer`, `rejected`, `passed` (the page's STATUS map).
 - `applied`, required on every `applied`, `interview`, `offer` and `rejected` row: `YYYY-MM-DD` (the submit
   date from a dated record, such as the confirmation email), `on or before YYYY-MM-DD` (no dated record; the
@@ -92,6 +96,10 @@ scripts/config.py and `scripts/cold.py` will flag a balance not counted since th
   a note may follow the date after a comma; or `## Exact form answers (not recorded)` for a submit whose
   answers no record holds. A prepared or intended block is not an as-filled block.
 - A row whose `applied` is `none on record` carries `## NO SUBMIT ON RECORD` instead, and no SUBMITTED heading.
+- Each work-authorization answer under the answers heading is one line: `- "<question exactly as printed>"
+  → Yes` (or `→ No`). A statement-style option: `- "<question>" → "<option text>" (= No)`.
+  `scripts/visa_gate.py` also reads `-> No`, `: Yes`, a trailing `? Yes` and `**Yes**`, and reports any
+  answer it cannot read as UNVERIFIED (exit 1).
 
 ## 7. `applications/<slug>/referrals.md`
 
@@ -103,3 +111,19 @@ lives in the sent-ledger alone.
 `YYYY-MM-DD-<lowercase-kebab-slug>.<ext>` (`2026-01-06-connection-note-to-jordan-sent.md`); a draft ends
 `-draft`, a sent copy `-sent`. No date on record: `undated-<slug>.<ext>`. The `TEMPLATE-` and `EXAMPLE-`
 folders are scaffolding, not records, and are not checked.
+
+## 9. `ops/DEBT.md` row
+
+`| YYYY-MM-DD | <owner> | <item> | OPEN |`, one row per item, inside the table. The owner is `agent` or
+`you` (or your name). Close a row by changing its status to `CLOSED YYYY-MM-DD: <what fixed it>`; never
+delete it. No item written as a heading.
+
+## 10. `knowledge-base/11` ratified-decisions row
+
+One row per decision in the table under `## Ratified decisions`: a `YYYY-MM-DD` date first, and the same
+number of cells as the table's header (`| Date | Decision | Why |` as shipped). Append only.
+
+## 11. `ops/HANDOFF.md`
+
+One block, the `/wave` close template (`.claude/commands/wave.md`), overwritten at each close. Never a
+second top-level `# ` block stacked under the first.

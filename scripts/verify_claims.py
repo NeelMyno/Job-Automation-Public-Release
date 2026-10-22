@@ -71,7 +71,8 @@ cover-letter body, the form answers):
   R10 LINK-CLAIM     Every portfolio link in a sendable block or a résumé entry is checked
                      against `projects/CLAIMS-MANIFEST.md`: a term from the slug's
                      `never-claim-here:` list in the same block/entry = RED; a work-claim
-                     noun near the link absent from its `shows:` = AMBER; an unknown slug
+                     noun (your own, from the manifest's `claim-nouns:` lines) near the
+                     link absent from its `shows:` = AMBER; an unknown slug
                      = RED. Exists because a claim can be true about your career and still
                      false about the specific link sitting next to it; every rule above
                      sails past that gap, because every clause in the sentence is
@@ -256,21 +257,22 @@ def get_link_re() -> re.Pattern | None:
     return _LINK_RE_CACHE
 
 
-# Work-claim nouns R10 verifies against a linked slug's `shows:` list. Deliberately
-# distinctive product nouns, not generic craft words ("research", "prototype" appear in
-# every honest sentence and would only make the gate cry wolf). Generic across any
-# product; not tied to any one person's work, so this list ships populated rather than
-# empty; trim or extend it for your own domain.
-WORK_CLAIM_NOUNS = [
-    "login", "onboarding", "checkout", "upi", "funnel", "cart abandonment",
-    "dispatcher", "theming layer", "multi-brand", "more than one brand", "second brand",
-    "recommender", "recommendation", "knowledge graph", "capstone",
-    "design system", "lint", "tokens", "operator console", "dashboard",
-    "tracking page", "alerts", "triage", "queue",
-    "downloads", "installs", "gmv", "adoption", "conversion",
-    "transactional emails", "notifications", "conversational",
-    "delivery date", "scheduler", "storefront",
-]
+# Work-claim nouns R10 verifies against a linked slug's `shows:` list. They are YOURS: the
+# distinctive nouns of your own work (a nurse might list "discharge checklist", "staff
+# schedule"; an accountant "month-end close", "audit"), so they are read from the
+# `claim-nouns:` lines at the top of projects/CLAIMS-MANIFEST.md, never hardcoded here.
+# Pick distinctive nouns, not everyday words ("research", "team" sit in every honest
+# sentence and would only make the gate cry wolf). The built-in default is EMPTY: with no
+# `claim-nouns:` line, R10 still checks unknown links and never-claim-here terms, and only
+# this noun check finds nothing to compare.
+WORK_CLAIM_NOUNS: list[str] = []
+
+
+def work_claim_nouns() -> list[str]:
+    """The manifest's `claim-nouns:` list, else the (empty) built-in default."""
+    manifest = load_manifest()
+    nouns = (manifest or {}).get("claim_nouns") or []
+    return nouns or list(WORK_CLAIM_NOUNS)
 
 _MANIFEST_CACHE: dict | None = None
 
@@ -290,6 +292,7 @@ def load_manifest() -> dict | None:
         return None
     sections: dict = {}
     domain: str | None = None
+    claim_nouns: list[str] = []
     cur = None
     for lineno, raw in enumerate(MANIFEST_PATH.read_text(encoding="utf-8").splitlines(), 1):
         if raw.startswith("## "):
@@ -306,7 +309,11 @@ def load_manifest() -> dict | None:
             if dm:
                 domain = dm.group(1).strip()
                 continue
+        # `claim-nouns:` header lines (repeatable, comma-separated), before any section.
         if cur is None:
+            cm = re.match(r"claim-nouns:\s*(.*)", raw.strip(), re.I)
+            if cm:
+                claim_nouns += [norm(n) for n in cm.group(1).split(",") if n.strip()]
             continue
         m = re.match(r"(aliases|scope-line|shows|never-claim-here|source-of-truth|check):\s*(.*)", raw)
         if not m:
@@ -333,7 +340,8 @@ def load_manifest() -> dict | None:
         aliases[slug] = slug
         for a in sec["aliases"]:
             aliases[a] = slug
-    _MANIFEST_CACHE = {"sections": sections, "aliases": aliases, "domain": domain}
+    _MANIFEST_CACHE = {"sections": sections, "aliases": aliases, "domain": domain,
+                       "claim_nouns": list(dict.fromkeys(claim_nouns))}
     return _MANIFEST_CACHE
 
 
@@ -391,7 +399,7 @@ def check_link_claims(where: str, block: str, findings: list, entry_scope: bool 
         else:
             scopes = [s for s in sentences if f"{domain}/{raw_slug}" in s]
         for scope in scopes:
-            for noun in WORK_CLAIM_NOUNS:
+            for noun in work_claim_nouns():
                 if noun in scope and noun not in sec["shows"] and noun not in never_hay:
                     findings.append(Finding(
                         "R10", where,
@@ -748,7 +756,7 @@ def person_name_tokens(heading: str) -> list[str] | None:
         ### 1 · A Person, "a role at a company" (1st°, viewed ~2w ago)
         ### 1. A Person, Head of Product (THE hiring node) · **url**
         ### A Person, SHORT variant (253 chars, fits LinkedIn's 300-char note)
-        ### 4. A B (Middle) Person, designer at a company · https://...
+        ### 4. A B (Middle) Person, nurse at a company · https://...
         ### 1. A Person (recruiter who owns the req)
     and must REFUSE, so ownership fails open rather than crying wolf:
         ### None drafted yet · ### Ruled out / honest gaps · ### Unified pack (pointer)
@@ -1793,13 +1801,13 @@ SELFTEST_CASES = [
     ("R1", "an invented quotation with no stored source",
      '> Hi Jordan, you told them "velocity is the only moat that compounds" and I agree.'),
     ("R2", "attribution with no quote and no operator flag",
-     '> Hi Sam, you lead the whole design org and I admire how you run it.'),
+     '> Hi Sam, you run the whole nursing department and I admire how you run it.'),
     ("R5", "over-confidence (voice_check's register, called from R5)",
      '> Hi Jordan, your team plans the launch before the build starts. That\'s exactly how I work.'),
     # Guards the hole the internal-record exemption could open: a SENT LOG in the same
     # section must NOT make the real outbound copy invisible.
     ("R1", "poison hiding BEHIND a SENT LOG block in the same section",
-     '> **SENT LOG (2024-01-02):** Sent the note; profile reads "founding designer @somewhere".\n'
+     '> **SENT LOG (2024-01-02):** Sent the note; profile reads "charge nurse @somewhere".\n'
      '\n'
      '> Hi Jordan, you told them "velocity is the only moat that compounds" and I agree.'),
     # R4 fires only on the exact label `**Connection note**` unless it is also taught
@@ -1814,18 +1822,18 @@ SELFTEST_CASES = [
     # never-claim-here terms sitting in the SAME block as the link, exactly the kind of
     # proximity laundering that reads fine sentence-by-sentence.
     ("R10", "career-plausible claims on a link that carries never-claim-here terms",
-     '> Closest thing I have is a design system where I was the sole engineer and solo '
-     'founder end to end, at example.com/example-case-study'),
+     '> Closest thing I have is a stockroom recount where I was the sole owner and ran '
+     'the whole warehouse alone, at example.com/example-case-study'),
     # A single work-claim noun near the link, absent from that slug's shows: list,
     # the AMBER path, distinct from the RED never-claim-here path above.
     ("R10", "a work-claim noun near the link that the manifest does not support",
-     '> I have spent the last year on an internal dashboard for admins; the case study '
+     '> I have spent the last year on a staff schedule for the night crew; the case study '
      'is at example.com/example-case-study'),
     # A retired overclaim resurfacing in a different wording than the first R3 case,
     # guarding that the registry catches a phrase, not just one exact sentence.
     ("R3", "the same retired overclaim in a different wording",
-     '> the review record is the real artifact, and a bot that auto-fixes on every save '
-     'so nobody has to check it by hand.'),
+     '> the count sheet is the real record, and a scanner that recounts the shelves every '
+     'night so nobody has to count by hand.'),
 
     # ── ATTRIBUTION-OWNERSHIP CASES. Each one exited 0 before ownership was checked. ──
     #
@@ -1853,16 +1861,16 @@ SELFTEST_CASES = [
     # HOLE 2, the metric alarm: a purged number behind the same prefix. R6 stays live
     # on a record for the same reason R3 does.
     ("R6", "a purged metric hiding behind a `SENT LOG:` prefix",
-     '> **SENT LOG (2024-01-02):** Hi Jordan, the redesign lifted conversion 300% and '
-     'cut support tickets 150%.'),
+     '> **SENT LOG (2024-01-02):** Hi Jordan, the new tutoring program lifted attendance '
+     '300% and cut late assignments 150%.'),
     # R6 in ordinary outbound copy.
     ("R6", "a retracted metric in an ordinary connection note",
-     '> Hi Jordan, at Globex I shipped a console that moved adoption 450% in a quarter.'),
+     '> Hi Jordan, at Globex I ran a sign-up drive that moved enrollment 450% in a quarter.'),
     # R12: a false framing of your OWN employer, anchored to it by name, mirroring the
     # exact shape a corrected framing takes: true individual words, false as a whole.
-    ("R12", "your own past employer mischaracterized as a developer-tools company",
-     '> At Globex I was the design lead at a developer-tools company that felt like a '
-     'terminal for engineers, so I already speak your language.'),
+    ("R12", "your own past employer mischaracterized as a pet-insurance company",
+     '> At Globex I was the office lead at a pet-insurance company that felt like an '
+     'insurer for families, so I already speak your language.'),
 ]
 
 
@@ -1955,25 +1963,25 @@ def _seed_fixture_registries() -> None:
         {"pattern": r"solved onboarding overnight",
          "why": "TEST FIXTURE: nobody said this; an earlier draft invented it as a compliment.",
          "instead": "Quote only what is verifiably sourced."},
-        {"pattern": r"auto-fixes on every save",
-         "why": "TEST FIXTURE: overclaims automated enforcement that does not exist.",
-         "instead": "Say the checks run when invoked, not that they run automatically."},
+        {"pattern": r"recounts the shelves every night",
+         "why": "TEST FIXTURE: overclaims an automatic count that does not exist.",
+         "instead": "Say the count runs when someone starts it, not that it runs by itself."},
     ])
     RETRACTED_NUMBERS.extend(["300%", "450%"])
     RESUME_RETIRED.update({
         "Ferrovia Labs": "TEST FIXTURE: never a real employer; retired from the résumé.",
-        "Assistant Product Designer": "TEST FIXTURE: retired title; the real title was Product Designer.",
+        "Assistant Store Manager": "TEST FIXTURE: retired title; the real title was Store Manager.",
     })
     CORE_FACTS.extend([
         {
             "id": "example-employer-true-nature",
             "truth": "TEST FIXTURE: Globex is a seed-stage veterinary-software startup, not a "
-                     "developer-tools company. Mirrors the real registry's shape and anchoring "
+                     "pet-insurance company. Mirrors the real registry's shape and anchoring "
                      "discipline; replace with your own facts once you have a framing worth "
                      "guarding.",
             "banned": [
-                (re.compile(r"\bglobex\b[^.\n]{0,80}\bdeveloper[- ]?tools?\b", re.I), "Globex called developer tools"),
-                (re.compile(r"\bglobex\b[^.\n]{0,80}\bterminal\b", re.I), "Globex called a terminal"),
+                (re.compile(r"\bglobex\b[^.\n]{0,80}\bpet[- ]?insurance\b", re.I), "Globex called pet insurance"),
+                (re.compile(r"\bglobex\b[^.\n]{0,80}\binsurer\b", re.I), "Globex called an insurer"),
             ],
         },
     ])
@@ -1985,9 +1993,9 @@ def _seed_fixture_registries() -> None:
     import canon as _canon_seed
     _canon_seed.RETIRED.append({
         "id": "example-retired-claim",
-        "pattern": r"runs itself with zero maintenance",
-        "why": "TEST FIXTURE: overclaims full automation with no human review; nothing in this "
-               "fixture runs itself with zero maintenance.",
+        "pattern": r"balances the drawer by itself",
+        "why": "TEST FIXTURE: overclaims a process with no human check; no tool in this "
+               "fixture balances the drawer by itself.",
         "instead": "Say what actually still requires a human step.",
     })
 
@@ -2114,7 +2122,39 @@ def _selftest_message_formats(h: _Harness) -> None:
                   any(x[0] == "DM" for x in b) and not any(x[0] == "connection note" for x in b))
 
 
+# The selftest's own claims manifest. The live projects/CLAIMS-MANIFEST.md is the USER's
+# file: they are told to replace its domain, nouns and placeholder route with their own, so
+# the selftest must never read it. This fixture matches the fixture dossier's links and copy.
+_SELFTEST_MANIFEST = """domain: example.com
+
+claim-nouns: stockroom recount, shelf labels, stockroom layout, staff schedule, budget, audit
+
+## example-case-study
+
+slug: example-case-study
+source-of-truth: projects/example-case-study/index.html
+scope-line: "A placeholder route used only by the selftest fixture."
+shows: stockroom recount, shelf labels, stockroom layout
+never-claim-here: sole owner, ran the whole warehouse alone, every store in the chain
+"""
+
+
 def selftest() -> int:
+    """Run the selftest against its own fixture manifest, then restore the live one."""
+    import tempfile
+    global MANIFEST_PATH, _MANIFEST_CACHE, _LINK_RE_CACHE, _LINK_RE_LOADED
+    saved = (MANIFEST_PATH, _MANIFEST_CACHE, _LINK_RE_CACHE, _LINK_RE_LOADED)
+    with tempfile.TemporaryDirectory() as md:
+        fixture = Path(md) / "CLAIMS-MANIFEST.md"
+        fixture.write_text(_SELFTEST_MANIFEST, encoding="utf-8")
+        MANIFEST_PATH, _MANIFEST_CACHE, _LINK_RE_CACHE, _LINK_RE_LOADED = fixture, None, None, False
+        try:
+            return _selftest_body()
+        finally:
+            MANIFEST_PATH, _MANIFEST_CACHE, _LINK_RE_CACHE, _LINK_RE_LOADED = saved
+
+
+def _selftest_body() -> int:
     import shutil, tempfile
     root = Path(__file__).resolve().parents[1]
     # The fixture must be a CLEAN, LIVE dossier: every rule below is tested by poisoning
@@ -2199,7 +2239,7 @@ def selftest() -> int:
         shutil.copytree(real, tmp)
         rdir = tmp / "resume"; rdir.mkdir(exist_ok=True)
         (rdir / "resume.html").write_text(
-            '<div class="job-title"><span class="co">Ferrovia Labs</span> · UI/UX Designer</div>',
+            '<div class="job-title"><span class="co">Ferrovia Labs</span> · Shift Supervisor</div>',
             encoding="utf-8")
         h.expect("R9", "a retired-from-resume employer in resume.html",
                  check_dossier(tmp), "The resume is outside the gate again.")
@@ -2227,8 +2267,8 @@ def selftest() -> int:
         ref = tmp / "referrals.md"
         t = ref.read_text(encoding="utf-8").replace(
             "## The messages",
-            "## The messages\n\n### Casey Nolan, Staff Designer\n\n"
-            "> Hi Casey, I applied to the Design Lead role and would value your read on it.\n", 1)
+            "## The messages\n\n### Casey Nolan, Nursing Director\n\n"
+            "> Hi Casey, I applied to the Clinical Educator role and would value your read on it.\n", 1)
         ref.write_text(t, encoding="utf-8")
         h.expect("R7", "a person section with a message, no sourced quote and no OPERATOR-VERIFY",
                  check_dossier(tmp))
@@ -2317,22 +2357,22 @@ def selftest() -> int:
                       bool(dm_hits), "the SENT line's 'DM: send after accept' must not read as a sent DM")
 
     # ── R12 NEGATIVES: the anchor is the whole point, so it is tested from both sides. ──
-    # A blanket ban on "developer tools" would red every honest dossier applying to an
-    # actual developer-tools company, get switched off, and catch nothing. These prove
+    # A blanket ban on "pet insurance" would red every honest dossier applying to an
+    # actual pet-insurance company, get switched off, and catch nothing. These prove
     # R12 fires ONLY on your own employer/domain, never on a TRUE statement about a
     # target or the corrected copy.
     core_facts_negatives = [
-        # 1. A TARGET truthfully called developer tools. The note describes THEM,
+        # 1. A TARGET truthfully called pet insurance. The note describes THEM,
         #    mentions no Globex, and must sail through.
-        ("R12", "a target company truthfully called a developer-tools product is NOT flagged",
-         '> Hi Jordan, Acme Corp\'s own product is exactly the kind of developer-tools platform '
-         'I want to design for.'),
+        ("R12", "a target company truthfully called a pet-insurance company is NOT flagged",
+         '> Hi Jordan, Acme Corp is exactly the kind of pet-insurance company '
+         'I want to work for.'),
         # 2. The CORRECTED framing. "Globex" is present, but next to its grounded
-        #    descriptor, not "terminal" or "developer tools": this is what the fix
+        #    descriptor, not "insurer" or "pet insurance": this is what the fix
         #    writes, so it must pass or the gate would block its own remedy.
         ("R12", "the corrected 'Globex, a seed-stage veterinary-software startup' framing is NOT flagged",
-         '> At Globex, a seed-stage veterinary-software startup, I was the design lead: I built the '
-         'design system in code and shipped my own front end.'),
+         '> At Globex, a seed-stage veterinary-software startup, I was the office lead: I ran the '
+         'front desk and rebuilt the appointment schedule.'),
     ]
     for rule, name, good in core_facts_negatives:
         with tempfile.TemporaryDirectory() as td:
@@ -2354,14 +2394,14 @@ def selftest() -> int:
         (tmp / "sources").mkdir(exist_ok=True)
         (tmp / "sources" / "company-team-page.md").write_text(
             "---\nurl: https://example.com/team\nfetched: 2024-01-02\n---\n\n" + pad +
-            "\n\nAda Whitfield, Staff Design Engineer, on how the team works: "
-            '"we ship the front end ourselves and hold the bar in code".\n',
+            "\n\nAda Whitfield, Head of Teaching, on how the team works: "
+            '"we plan every unit together and grade against one rubric".\n',
             encoding="utf-8")
         ref = tmp / "referrals.md"
         t = ref.read_text(encoding="utf-8").replace(
             "## The messages",
-            "## The messages\n\n### Ada Whitfield, Staff Design Engineer\n\n"
-            '> Hi Ada, you said "we ship the front end ourselves and hold the bar in code" '
+            "## The messages\n\n### Ada Whitfield, Head of Teaching\n\n"
+            '> Hi Ada, you said "we plan every unit together and grade against one rubric" '
             "and that is how I work too.\n", 1)
         ref.write_text(t, encoding="utf-8")
         h.refuse("R1", "a quote from a SHARED source resolves by the person's name beside "
@@ -2375,7 +2415,7 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = _poisoned(real, Path(td) / "dossier",
                         '> **SENT LOG (2024-01-02):** Sent it; his profile reads '
-                        '"founding designer at somewhere".')
+                        '"charge nurse at somewhere".')
         import io, contextlib
         buf, argv = io.StringIO(), sys.argv
         sys.argv = ["verify_claims.py", str(tmp)]
@@ -2402,10 +2442,10 @@ def selftest() -> int:
         if rh.exists():
             base = rh.read_text(encoding="utf-8")
             # (a) a retired claim on a LIVE dossier's résumé must FAIL
-            rh.write_text(base.replace("</body>", "<p>This tool runs itself with zero maintenance.</p></body>", 1)
-                          if "</body>" in base else base + "\n<p>This tool runs itself with zero maintenance.</p>",
+            rh.write_text(base.replace("</body>", "<p>This tool balances the drawer by itself.</p></body>", 1)
+                          if "</body>" in base else base + "\n<p>This tool balances the drawer by itself.</p>",
                           encoding="utf-8")
-            hits = [f for f in check_dossier(live) if f.rule == "R9" and "zero maintenance" in f.detail]
+            hits = [f for f in check_dossier(live) if f.rule == "R9" and "drawer by itself" in f.detail]
             h.assert_true("[R9b] a retired claim on a LIVE dossier's résumé is CAUGHT",
                           bool(hits),
                           "canon.py's registry is not reaching dossier résumés. This is exactly the "
@@ -2445,10 +2485,10 @@ def selftest() -> int:
                 for _p in (live / "resume").glob("*.pdf"):
                     _p.unlink()
                 _d = _fz.open(); _pg = _d.new_page(width=595, height=842)
-                _pg.insert_text((50, 80), "This tool runs itself with zero maintenance.", fontsize=10)
+                _pg.insert_text((50, 80), "This tool balances the drawer by itself.", fontsize=10)
                 _d.save(str(live / "resume" / "only.pdf"))
                 h.assert_true("[R9b] a retired claim in the rendered PDF alone is CAUGHT",
-                              any(f.rule == "R9" and "zero maintenance" in f.detail
+                              any(f.rule == "R9" and "drawer by itself" in f.detail
                                   for f in check_dossier(live)),
                               "Only the HTML was read, not the rendered artifact the employer "
                               "actually receives.")
@@ -2470,17 +2510,17 @@ def selftest() -> int:
             for _p in (live / "resume").glob("*"):
                 _p.unlink()
             (live / "resume" / "resume.html").write_text(
-                "This tool runs itself with zero maintenance. "
+                "This tool balances the drawer by itself. "
                 "<!-- canon:allow example-retired-claim - bypass attempt -->", encoding="utf-8")
             h.assert_true("[R9b] an embedded canon:allow in outbound copy does NOT silence the gate",
-                          any(f.rule == "R9" and "zero maintenance" in f.detail
+                          any(f.rule == "R9" and "drawer by itself" in f.detail
                               for f in check_dossier(live)),
                           "A dossier silenced its OWN outbound gate with a canon:allow comment.")
             # (h) application.md's free-text form answer is OUTBOUND copy: a retired claim there
             #     reaches a real person exactly like the résumé does.
             (live / "application.md").write_text(
                 '## Optional free-text ("Why us")\n'
-                "> This tool runs itself with zero maintenance, which is why I want to join.\n",
+                "> This tool balances the drawer by itself, which is why I want to join.\n",
                 encoding="utf-8")
             h.assert_true("[R9b] a retired claim in application.md's free-text answer is CAUGHT",
                           any(f.rule == "R9" and f.where == "application.md"
@@ -2493,19 +2533,19 @@ def selftest() -> int:
             (live / "application.md").write_text(
                 "## Exact form answers\n"
                 '> Corrected (ADR-0001): the free-text answer was rewritten. **What was originally '
-                'submitted said "this tool runs itself with zero maintenance."** Recover the '
+                'submitted said "this tool balances the drawer by itself."** Recover the '
                 "original from source control.\n", encoding="utf-8")
             h.assert_true("[R9b] a correction banner (correction + quoted old value on ONE line) "
                           "in application.md does NOT false-fire",
                           not any(f.rule == "R9" and f.where == "application.md"
-                                  and "zero maintenance" in f.detail.lower()
+                                  and "drawer by itself" in f.detail.lower()
                                   for f in check_dossier(live)),
                           "A documentation banner recording a CORRECTION was flagged as an "
                           "assertion. That false-red is how a real gate gets ignored.")
             # (j) correspondence/*.md are drafted recruiter emails: outbound copy, also scanned.
             (live / "correspondence").mkdir(exist_ok=True)
             (live / "correspondence" / "draft-email.md").write_text(
-                "Hi, the tool I'm proudest of runs itself with zero maintenance, end to end.\n",
+                "Hi, the tool I'm proudest of balances the drawer by itself, end to end.\n",
                 encoding="utf-8")
             h.assert_true("[R9b] a retired claim in correspondence/*.md is CAUGHT",
                           any(f.rule == "R9" and f.where.startswith("correspondence/")
@@ -2518,10 +2558,10 @@ def selftest() -> int:
             ref = live / "referrals.md"
             t = ref.read_text(encoding="utf-8").replace(
                 "## The messages",
-                "## The messages\n\n### Retired-Claim Person, Design Lead at Acme Corp\n\n"
-                "**Connection note**\n> Hi, would love to connect about the Design Lead role.\n\n"
-                "**Direct message (Use InMail: NO)**\n> This tool runs itself with zero "
-                "maintenance, and that is exactly the craft I want to bring to the team.\n", 1)
+                "## The messages\n\n### Retired-Claim Person, Payroll Lead at Acme Corp\n\n"
+                "**Connection note**\n> Hi, would love to connect about the Payroll Lead role.\n\n"
+                "**Direct message (Use InMail: NO)**\n> This tool balances the drawer "
+                "by itself, and that is exactly the craft I want to bring to the team.\n", 1)
             ref.write_text(t, encoding="utf-8")
             h.assert_true("[R9b] a retired claim (canon registry) in a referrals.md DM is CAUGHT",
                           any(f.rule == "R9" and f.where.startswith("referrals.md")
@@ -2535,17 +2575,39 @@ def selftest() -> int:
     r10_negatives = [
         # The claim matches the manifest's own shows: list, so R10 must stay quiet.
         ("a claim matching the manifest's shows: list is NOT flagged",
-         '> Hi Jordan, closest thing I have is a design system with real shared tokens '
+         '> Hi Jordan, closest thing I have is a stockroom recount with new shelf labels '
          'behind it, at example.com/example-case-study'),
         # A second true claim+link pair, phrased differently, to prove the negative
         # is not an accident of one specific sentence shape.
         ("a second true claim+link pair, differently phrased, is NOT flagged",
-         '> Hi Sam, my closest work is a design system I built, tokens and all, with '
+         '> Hi Sam, my closest work is a stockroom layout I redid, shelf labels and all, with '
          'the case study at example.com/example-case-study'),
     ]
     for name, good in r10_negatives:
         with tempfile.TemporaryDirectory() as td:
             h.refuse("R10", name, check_dossier(_poisoned(real, Path(td) / "dossier", good)))
+
+    # R10's work-claim nouns are the USER's, read from the manifest's `claim-nouns:` lines;
+    # the built-in default is empty, so no one person's nouns ride along in the script.
+    h.assert_true("[R10] the selftest reads its own fixture manifest, never the user's live file",
+                  MANIFEST_PATH != root / "projects" / "CLAIMS-MANIFEST.md",
+                  f"MANIFEST_PATH is {MANIFEST_PATH}")
+    h.assert_true("[R10] the built-in work-claim noun list ships empty",
+                  WORK_CLAIM_NOUNS == [])
+    h.assert_true("[R10] work-claim nouns are read from the manifest's claim-nouns: line",
+                  "staff schedule" in work_claim_nouns(),
+                  f"work_claim_nouns() returned {work_claim_nouns()!r}")
+    _m = load_manifest()
+    if _m is not None:
+        _saved_nouns = _m.get("claim_nouns")
+        _m["claim_nouns"] = []
+        try:
+            _amber = '> I spent the last year on a staff schedule for the night crew; the case study is at example.com/example-case-study'
+            with tempfile.TemporaryDirectory() as td:
+                h.refuse("R10", "with no claim-nouns: line, a noun near the link is not compared",
+                         check_dossier(_poisoned(real, Path(td) / "dossier", _amber)))
+        finally:
+            _m["claim_nouns"] = _saved_nouns
 
     # And the real dossier, unpoisoned, must be clean.
     live = check_dossier(real)
@@ -2569,7 +2631,7 @@ def selftest() -> int:
         ref = tmp / "referrals.md"
         t = ref.read_text(encoding="utf-8").replace(
             "## The messages",
-            "## The messages\n\n### Dana Reyes, Head of Design\n"
+            "## The messages\n\n### Dana Reyes, Head of Finance\n"
             "**Profile: https://example.com/in/dana**\n"
             "- **DM (Use InMail: NO):**\n\n### Next placeholder\n", 1)
         ref.write_text(t, encoding="utf-8")

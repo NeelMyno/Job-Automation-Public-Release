@@ -272,8 +272,19 @@ in this order:
 5. **Any other browser automation tool** the session has.
 
 All of them run on a profile that is not your own logged-in browser, except where you choose otherwise.
-If the session has no browser tool at all, the agent tells you the one command `doctor.py --fill`
-prints to enable one, and stops. It does not ask you to fill the form by hand.
+
+**If the session's tool list has no browser tool at all** (even when `doctor.py --fill` says all OK:
+it cannot see a server you said no to at the approval prompt), the agent gives you these steps,
+which `doctor.py --fill` also prints under "If your tool list has no browser tool":
+1. Install Node.js 20.19+ or 22.12+ and Google Chrome, then open a new terminal.
+2. Claude Code: type `/mcp`; if `chrome-devtools` shows as disabled, enable it there. If you said
+   no to the approval prompt earlier, quit, run `claude mcp reset-project-choices`, start `claude`
+   again and approve `chrome-devtools`. Codex: trust this folder, or run
+   `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1`.
+3. Restart the session.
+
+With no browser tool in its session at all, the agent gives you these steps and stops at the form;
+once you restart, it fills the form. It never asks you to fill the form by hand.
 
 **A paste kit is a last resort, for a named reason only.** The reasons: a CAPTCHA wall; a login only you
 may do and you decline to do it in the automation window; a site whose terms ban automated access; an

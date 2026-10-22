@@ -92,6 +92,16 @@ LOGGED_IN = ("mcp__Claude_Browser__", "mcp__claude-in-chrome__")
 OTHER_BROWSER = re.compile(r"(?i)^mcp__.*(chrome-devtools|playwright|puppeteer|browser|selenium|browserbase)")
 SCRAPER = re.compile(r"(?i)scrap|crawl|fetch|extract|dataset|browse|search_engine|web_data")
 
+# Bright Data's LinkedIn datasets, by ID (from the @brightdata/mcp server's web_data_linkedin_* tools and
+# its search_dataset values). A search_dataset or list_dataset_fields call carries only the ID, so neither
+# the tool-name check nor the host check sees LinkedIn in it. Any MCP tool whose input names one is refused.
+BD_LINKEDIN_DATASETS = ("gd_l1viktl72bvl7bjuj0",   # LinkedIn people profiles
+                        "gd_me5ppxjr2ge6icjuh0",   # LinkedIn people profiles (contact-enriched)
+                        "gd_l1vikfnt1wgvvqz95w",   # LinkedIn company information
+                        "gd_lpfll7v5hcqtkxl6l",    # LinkedIn job listings
+                        "gd_lyy3tktm25m4avu764",   # LinkedIn posts
+                        "gd_m8d03he47z8nwb5xc")    # LinkedIn people search
+
 # Page actions that never read or act on page content (always allowed; URL-bearing ones are URL-checked).
 SAFE_PAGELESS = {"tabs_context", "tabs_close", "tabs_create", "tabs_select", "preview_list", "preview_stop",
                  "preview_logs", "preview_start", "navigate", "resize_window",
@@ -171,11 +181,21 @@ def save_state(st):
         pass
 
 
+def _log_stamp():
+    """The time in your configured zone (scripts/config.py TIMEZONE), with its label. Falls back to
+    this machine's zone if config cannot be read: a log stamp must never break the guard."""
+    try:
+        from config import local_stamp
+        return local_stamp()
+    except Exception:
+        return time.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
 def log_block(session, tool, why):
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         with open(STATE_DIR / "blocks.log", "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{session}\t{tool}\t{why}\n")
+            f.write(f"{_log_stamp()}\t{session}\t{tool}\t{why}\n")
     except Exception:
         pass
 
@@ -218,6 +238,9 @@ def pre_decision(tool, tool_input, session="?", state=None):
             return f"{tool} is a LinkedIn tool. No LinkedIn data, by any route."
         scraper = bool(SCRAPER.search(name))
         for key, s in _walk(inp):
+            d = next((x for x in BD_LINKEDIN_DATASETS if x in s.lower()), None)
+            if d:
+                return f"{tool} input names a LinkedIn dataset ({d}). No LinkedIn data, by any route."
             if scraper or key in NAV_KEYS:
                 h = first_hit(s, TIER0)
                 if h:
@@ -396,6 +419,13 @@ def selftest():
         ("scraper MCP scraping a LinkedIn URL", "mcp__somescraper__scrape_as_markdown",
          {"url": "https://linkedin.com/in/a"}, seen, True),
         ("scraper MCP scraping elsewhere", "mcp__somescraper__scrape_as_markdown", {"url": "https://example.com"}, seen, False),
+        ("Bright Data search_dataset on its LinkedIn people dataset", "mcp__brightdata__search_dataset",
+         {"dataset_id": "gd_l1viktl72bvl7bjuj0",
+          "filter": {"name": "current_company_name", "operator": "=", "value": "Globex"}}, seen, True),
+        ("Bright Data list_dataset_fields on its LinkedIn company dataset", "mcp__brightdata__list_dataset_fields",
+         {"dataset_id": "gd_l1vikfnt1wgvvqz95w"}, seen, True),
+        ("Bright Data dataset that is not LinkedIn", "mcp__brightdata__search_dataset",
+         {"dataset_id": "gd_l1vijqt9jfj7olije"}, seen, False),
         ("notes MCP storing text that names linkedin.com", "mcp__notes__create_note",
          {"body": "follow up via linkedin.com/in/x"}, seen, False),
         ("curl linkedin.com", "Bash", {"command": "curl -sL https://www.linkedin.com/company/x -o a.html"}, seen, True),

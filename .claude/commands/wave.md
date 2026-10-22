@@ -49,6 +49,20 @@ page), passes any careers URLs it finds into `--urls -`, and still fills that em
 application form for the user like any other (stage 7). A job is never skipped because the crawler
 cannot read its board.
 
+**Postings found by web search go in the tracker.** Each live posting you find by web search that
+the crawler did not return (an iCIMS or Taleo page, a hospital or school district careers site, a
+city or state job portal, or a Workday posting `--urls -` could not add) gets an APPLICATIONS row
+with `status:"lead"`, its `jd:` and `apply:` URLs and `source:"web search"`, in the shape `.claude/rules/records-format.md` §1 owns.
+Step 2 ranks it with the crawled jobs, and stage 7 fills that employer's form like any other.
+`discover.py --urls -` says so for a link on a system it cannot read: record it as a lead row and
+apply there.
+
+**Many fields live mostly off the crawler's systems.** Nursing, teaching, trades, retail, public
+sector and many local employers hire through Workday, iCIMS, Taleo or their own sites, and the free
+feeds in `sources.yaml` are mostly remote jobs, heavy on tech. So a thin or empty crawl usually
+means "these employers are elsewhere", not "there are no jobs": web-search "<title> jobs <city>"
+and the employers' own career pages, and add every live posting as a lead row.
+
 Run steps 1 to 3 every wave, all of them. The web-search path in step 2 runs alongside the sweep,
 never only after the sweep fails. On a first sweep, tell the user up front, in one line, that it is
 the slowest step and may take a while. Start the sweep in the background if your tools allow, and do
@@ -97,8 +111,12 @@ which sources ran and how many jobs each returned. Report short and scannable:
 - **which sources ran and the job count from each, read off this run's JSON**, never a list from
   memory, plus how many boards discovery added this run;
 - `pipeline/job-feed.md` refreshed + how many new `lead` rows hit the tracker;
-- failed boards, with the slug fix offered; a zero-count is said plainly, with the next lever (widen
-  `filters.yaml` titles, `--hours 168`, name more companies).
+- failed boards, with the slug fix offered; a zero or thin count is said plainly, with the next
+  lever: for many fields the real cause is employers on systems the crawler cannot read and free
+  feeds that are mostly remote jobs, heavy on tech, so run the web search ("<title> jobs <city>",
+  employer career pages) and add each live posting as a lead row (above); also widen
+  `filters.yaml` titles, try `--hours 168`, name more companies.
+- how many lead rows the web search added this run.
 
 End with one plain line: "You can add any company or job board: name it and I'll find its board and
 add it." Commit the feed + tracker only per your own CLAUDE.md §10 preference. One run per wave; never
@@ -110,7 +128,8 @@ LinkedIn scraping, ever; the crawler surfaces and tracks, and you decide what to
 `pipeline/job-crawler/boards.yaml`, `filters.yaml`, `sources.yaml` (its own README).
 
 ### 2. Rank and pick N
-From tracker + feed, in §13.4's evidence order: node-path → JD fit → freshness → liveness →
+From tracker + feed (the tracker includes every lead row the web search added in step 1), in
+§13.4's evidence order: node-path → JD fit → freshness → liveness →
 work-authorization/location → comp. Name the N targets and their one-line why, then GO: invoking
 `/wave` is your standing GO; only a hard wall (a work-authorization mismatch, a location wall) waits
 for your call.
@@ -195,9 +214,16 @@ on. Never respond to a refusing gate by handing the user the form to fill.
    profile) → Playwright MCP → Claude in Chrome (on a profile or window the user chose for it) → the
    app's built-in browser → any other browser tool you have. Never the user's own logged-in browser
    profile unless they choose it. **If doctor says the configuration is missing but you have a browser
-   tool, proceed with that tool.** Only when your tool list has no browser tool at all: tell the user
-   the one command `doctor.py --fill` prints to enable one, and stop. Do not ask them to fill the form
-   by hand.
+   tool, proceed with that tool.** Doctor saying all OK does not prove the tool is loaded: a user who
+   said no at the approval prompt has a green config and no tool. Only when your tool list has no
+   browser tool at all, give the user these steps (`doctor.py --fill` prints them under "If your
+   tool list has no browser tool"): install Node.js 20.19+ or 22.12+ and Google Chrome; in Claude
+   Code type `/mcp` and enable `chrome-devtools` if it shows as disabled, or, if they said no at the
+   approval prompt, quit, run `claude mcp reset-project-choices`, start `claude` again and approve
+   it (Codex: trust the folder, or `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1`);
+   then restart the session. The rule, in the same words §14 and `doctor.py` use: "With no browser
+   tool in its session at all, the agent gives you these steps and stops at the form; once you
+   restart, it fills the form. It never asks you to fill the form by hand."
 0b. **Fit/seniority gate:** `python3 scripts/seniority_gate.py "applications/<dossier>"` (or
    `--all --unsubmitted` across the wave) checks the JD's stated years against your own
    `YOUR_YEARS_OF_EXPERIENCE` (`scripts/config.py`). **DROP** = a clear gap: don't fill it; say which

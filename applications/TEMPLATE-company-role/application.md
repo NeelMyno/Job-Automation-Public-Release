@@ -27,8 +27,12 @@ assumed. Anything sensitive (especially work-authorization) quoted CHARACTER-FOR
 - Cover letter: [exact filename] ([bytes])
 - [Long free-text field]: ([char count]) [one-line paraphrase; full text lives in cover-note.md]
 - 🔴 Work-authorization field(s), worded EXACTLY as the form printed them:
-  - "[exact printed question]" → [the answer knowledge-base/12-application-answers.md §3 gives for
-    that exact wording]
+  - "[exact printed question]" → [Yes or No: the answer knowledge-base/12-application-answers.md §3
+    gives for that exact wording]
+  - One question per line, in this shape: `- "<question exactly as printed>" → Yes` (or `→ No`). For
+    a statement-style option, quote the option and add the Yes/No it means:
+    `- "<question>" → "<option text>" (= No)`. `scripts/visa_gate.py` reads this shape and reports
+    any answer it cannot read as UNVERIFIED.
 - EEO/self-identification: [values used per §5b, or "not present on this form"]
 
 ## The single next action

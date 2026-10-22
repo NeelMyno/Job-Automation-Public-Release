@@ -56,6 +56,15 @@ try:
 except ImportError:  # pragma: no cover
     config = None  # type: ignore[assignment]
 
+def _today() -> date:
+    """Today in your configured time zone (scripts/config.py TIMEZONE, via local_now()), else this
+    machine's date. A missing or broken config never breaks this script."""
+    try:
+        return config.local_now().date()  # type: ignore[union-attr]
+    except Exception:
+        return date.today()
+
+
 
 def _knob(name: str, default):
     v = getattr(config, name, None) if config is not None else None
@@ -115,7 +124,7 @@ def build(repo: Path = REPO, today: date | None = None, q=None) -> list:
     import commitments as cm
     import outreach_queue as oq
     import records_check as rc
-    today = today or date.today()
+    today = today or _today()
     t = R.load_tracker(repo=repo)
     if q is None:
         q = oq.build(repo, today=today)
@@ -247,6 +256,20 @@ def selftest() -> int:
         nonlocal ok
         ok = ok and bool(cond)
         print(("  PASS " if cond else "  FAIL ") + label)
+
+    class _FakeCfg:
+        @staticmethod
+        def local_now():
+            from datetime import datetime as _dt
+            return _dt(2031, 7, 4, 23, 30)
+    global config
+    _saved_cfg = config
+    config = _FakeCfg()
+    try:
+        _zone_ok = _today() == date(2031, 7, 4)
+    finally:
+        config = _saved_cfg
+    check("today comes from the configured zone (config.local_now), not the machine clock", _zone_ok)
     print("cold.py selftest (synthetic records)\n")
     today = date(2026, 3, 23)
     d = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731

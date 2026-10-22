@@ -75,9 +75,10 @@ READ THESE FILES (they are real, on disk):
 - The master resume (the honest source of truth for every claim): ${repo}/knowledge-base/07-master-resume.md
 - The rules you are enforcing: ${repo}/CLAUDE.md §5 and ${repo}/.claude/rules/application-protocol.md (§13, §14)
 - Preferences: ${repo}/knowledge-base/11-preferences-and-conventions.md; how the candidate's writing sounds: ${repo}/knowledge-base/17-writing.md
-- If present, a personal blocklist of specific facts/numbers the operator has personally gotten
-  wrong before: ${repo}/knowledge-base/00-red-zone-facts.md; read it if it exists, skip silently
-  if it doesn't. Nothing in it should ever slip back into shipped copy.
+- Facts that must never be wrong: the two hard-stop categories in ${repo}/CLAUDE.md §5 (the operator
+  states them in knowledge-base/11-preferences-and-conventions.md), and every retired claim in the
+  registry of ${repo}/scripts/canon.py (list it with: python3 scripts/canon.py --list). Nothing
+  retired there may slip back into shipped copy.
 
 THE TRUTH DIAL (CLAUDE.md §13.2 is the only owner of this rule); you SURFACE, you never DECIDE:
 - GREEN: the strongest TRUE framing. Recommend freely.
@@ -160,8 +161,8 @@ proves it, and mark VERIFIED / UNSOURCED / FALSE.
   claim like "built the whole platform solo." Read every qualitative assertion and ask: is this literally true?
   Specifically check: any claim about who built what, what tool something was built in, solo vs co-built, shipped vs prototype,
   measured vs estimated, "led" vs "contributed to".
-- If ${repo}/knowledge-base/00-red-zone-facts.md exists, every string it blocklists must appear NOWHERE. Grep the rendered
-  PDF text, not just the HTML.
+- No retired claim from the ${repo}/scripts/canon.py registry (python3 scripts/canon.py --list) may appear anywhere. Grep the
+  rendered PDF text, not just the HTML.
 - Is every claim interview-defensible? For each, ask: if the interviewer says "tell me more," is there a real story?
 - Populate reachItems with anything that is a stretch. Do not fix a stretch silently; surface it.
 - Flag anything in the operator's two RED categories (CLAUDE.md §5) immediately as a BLOCKER.`,

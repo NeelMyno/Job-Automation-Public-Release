@@ -12,7 +12,7 @@ import liveness as L
 
 # A realistic single-line tracker row (single-quotes only inside values, like the real file).
 SAMPLE_ROW = (
-    '  {co:"Northwind", role:"Staff Brand Designer", loc:"SF, CA, US", comp:"\u2014", compK:null, '
+    '  {co:"Northwind", role:"Senior Staff Accountant", loc:"Columbus, OH, US", comp:"\u2014", compK:null, '
     'status:"lead", fit:"watch", spon:"ask", posted:"2026-06-29", source:"crawl-jobs", '
     'jd:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", '
     'apply:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", folder:null, refs:0, '
@@ -21,14 +21,14 @@ SAMPLE_ROW = (
     'notes:"Found by the crawler. Fresh ATS pull."},')
 
 LIVE_JD_BODY = (
-    "<html><body><h1>Senior Product Designer</h1>"
-    "<h2>About the role</h2><p>You will own end-to-end design for our core product surface, "
-    "partnering closely with engineering and product to ship polished experiences.</p>"
-    "<h2>Responsibilities</h2><ul><li>Lead design for major initiatives</li>"
-    "<li>Build and maintain the design system</li></ul>"
-    "<h2>Qualifications</h2><ul><li>5+ years of product design experience</li>"
-    "<li>Strong portfolio of shipped work</li></ul>"
-    "<h2>Benefits</h2><p>Health, dental, equity.</p>"
+    "<html><body><h1>Registered Nurse, Medical-Surgical</h1>"
+    "<h2>About the role</h2><p>You will provide direct patient care on a busy 32-bed unit, "
+    "working closely with physicians, therapists and pharmacists to plan and deliver safe care.</p>"
+    "<h2>Responsibilities</h2><ul><li>Assess, monitor and document patient condition</li>"
+    "<li>Coordinate care plans and patient education</li></ul>"
+    "<h2>Qualifications</h2><ul><li>2+ years of acute care nursing experience</li>"
+    "<li>Active RN license in the state of practice</li></ul>"
+    "<h2>Benefits</h2><p>Health, dental, tuition support.</p>"
     "<a href='/apply'>Apply for this job</a></body></html>")
 
 MINI_TRACKER = (
@@ -36,11 +36,11 @@ MINI_TRACKER = (
     'const UPDATED = "2026-07-14";\n'
     "\n"
     "const APPLICATIONS = [\n"
-    '  {co:"Alpha", role:"Designer", loc:"SF", status:"lead", jd:"https://jobs.ashbyhq.com/alpha/1", '
+    '  {co:"Alpha", role:"Warehouse Supervisor", loc:"Reno, NV", status:"lead", jd:"https://jobs.ashbyhq.com/alpha/1", '
     'apply:"https://jobs.ashbyhq.com/alpha/1", link:"https://jobs.ashbyhq.com/alpha/1", notes:"x"},\n'
-    '  {co:"Beta", role:"PD", loc:"NY", status:"applied", jd:null, apply:null, '
+    '  {co:"Beta", role:"Math Teacher", loc:"NY", status:"applied", jd:null, apply:null, '
     'link:"https://x.com/b", notes:"y"},\n'
-    '  {co:"Delta", role:"Brand", loc:"\u2014", status:"lead", jd:null, apply:null, notes:"z"}\n'
+    '  {co:"Delta", role:"Sales Associate", loc:"\u2014", status:"lead", jd:null, apply:null, notes:"z"}\n'
     "];\n"
     "\n"
     "const NETWORK = [\n"
@@ -83,7 +83,7 @@ class TestClassify(unittest.TestCase):
     def test_redirect_to_careers_index_is_dead(self):
         v, r = L.classify(200, "https://acme.com/careers",
                           "<html><body>Explore roles at Acme</body></html>",
-                          original_url="https://acme.com/careers/senior-designer-req")
+                          original_url="https://acme.com/careers/senior-accountant-req")
         self.assertEqual(v, "dead")
         self.assertIn("careers index", r)
 
@@ -180,7 +180,7 @@ class TestResolution(unittest.TestCase):
         self.assertFalse(L._has_job_id("https://x.com/careers"))
         self.assertTrue(L._looks_like_index("https://x.com/careers"))
         self.assertTrue(L._looks_like_index("https://x.com/"))
-        self.assertFalse(L._looks_like_index("https://x.com/careers/senior-designer-req"))
+        self.assertFalse(L._looks_like_index("https://x.com/careers/senior-accountant-req"))
 
     def test_check_url_linkedin_is_uncertain_no_network(self):
         v, r = L.check_url("https://www.linkedin.com/jobs/view/4426522138/")

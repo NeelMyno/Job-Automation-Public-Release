@@ -13,6 +13,11 @@ Politeness, enforced here rather than left to good intentions:
     inside the interval does NOT call the source again. It reuses the jobs cached from the last
     successful fetch and says so in the crawl report, so frequent runs stay polite.
   * Search sources are queried one title at a time, a few seconds apart, capped by `max_queries`.
+    A title a source cannot search (Jobicy answers HTTP 400 to a tag shorter than 3 characters,
+    such as "rn") is skipped for that source only.
+  * One failed query does not lose the others: the results that came back are kept, and the source
+    counts as failed only when every query failed. A rate limit (HTTP 429) stops that source's
+    queries for this run at once.
   * A failed or rate-limited call still counts as an attempt, so a broken source is not hammered.
 
 HONEST BY CONSTRUCTION (same as crawl.py): this module only copies real fields from real postings.
@@ -29,12 +34,11 @@ from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from http_util import read_url  # sibling module: gzip + retry on a cut-off read
+from http_util import read_url, UA  # sibling module: gzip + retry on a cut-off read
 
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = HERE / "cache"
 STATE_NAME = "sources-state.json"
-UA = "Mozilla/5.0 (personal job-search crawler; see pipeline/job-crawler/README.md)"
 
 # Display name and home page of each source, for attribution in the feed.
 LABELS = {
@@ -72,6 +76,18 @@ DESC_MAX = 4000
 
 class SourceSkip(Exception):
     """Raised by a fetcher that cannot run for a reason the user should see (e.g. a missing key)."""
+
+
+class Partial(list):
+    """A fetcher's jobs when some of its queries failed: the list of jobs, plus `errors`, one short
+    line per failed query, for the crawl report."""
+    def __init__(self, jobs=(), errors=()):
+        super().__init__(jobs)
+        self.errors = list(errors)
+
+
+# Shortest search term each source accepts. Jobicy answers HTTP 400 to a shorter tag.
+MIN_QUERY_CHARS = {"jobicy": 3}
 
 
 # ---- small helpers ----
@@ -119,22 +135,48 @@ def _job(source, company, title, location, url, posted_at, remote, description):
                 remote=remote, description=_clean(description), source=source)
 
 
-def _queries(titles, cfg):
+def _queries(titles, cfg, source=None):
     n = int(cfg.get("max_queries") or 5)
-    return [t for t in titles if t][:max(1, n)]
+    shortest = MIN_QUERY_CHARS.get(source, 1)
+    usable = [t for t in titles if t and len(t.strip()) >= shortest]
+    if titles and [t for t in titles if t] and not usable:
+        raise SourceSkip(f"every title is shorter than {shortest} characters, and this source's "
+                         f"search does not accept a term that short")
+    return usable[:max(1, n)]
+
+
+def _per_query(queries, sleep, run):
+    """Run `run(query) -> [job]` for each query, a few seconds apart. One failed query keeps the
+    others' jobs; only when no query succeeded is the last error raised. HTTP 429 stops at once."""
+    out, errors, last, ok = [], [], None, 0
+    for i, t in enumerate(queries):
+        if i:
+            sleep(QUERY_GAP_SECONDS)
+        try:
+            out.extend(run(t))
+            ok += 1
+        except urllib.error.HTTPError as e:
+            last = e
+            errors.append(f"'{t}': HTTP {e.code}")
+            if e.code == 429:
+                break
+        except Exception as e:
+            last = e
+            errors.append(f"'{t}': {type(e).__name__} {str(e)[:60]}")
+    if last is not None and not ok:
+        raise last
+    return Partial(out, errors) if errors else out
 
 
 # ---- one fetcher per source: (cfg, titles, get, sleep) -> [normalized job] ----
 def fetch_himalayas(cfg, titles, get, sleep):
     """Himalayas search API (https://himalayas.app/api): `q` + `country`, 20 results a page."""
-    out = []
-    for i, t in enumerate(_queries(titles, cfg)):
-        if i:
-            sleep(QUERY_GAP_SECONDS)
+    def one(t):
         q = {"q": t}
         if cfg.get("country"):
             q["country"] = cfg["country"]
         d = get("https://himalayas.app/jobs/api/search?" + urllib.parse.urlencode(q))
+        out = []
         for j in (d.get("jobs") or []) if isinstance(d, dict) else []:
             where = ", ".join(j.get("locationRestrictions") or [])
             out.append(_job("himalayas", j.get("companyName"), j.get("title"),
@@ -142,32 +184,34 @@ def fetch_himalayas(cfg, titles, get, sleep):
                             # Terms: use applicationLink unchanged.
                             j.get("applicationLink") or j.get("guid"),
                             to_dt(j.get("pubDate")), True, j.get("description") or j.get("excerpt")))
-    return out
+        return out
+    return _per_query(_queries(titles, cfg, "himalayas"), sleep, one)
 
 
 def fetch_jobicy(cfg, titles, get, sleep):
-    """Jobicy remote-jobs API v2 (https://jobicy.com/jobs-rss-feed): `geo`, `tag`, `count`."""
-    out = []
-    for i, t in enumerate(_queries(titles, cfg)):
-        if i:
-            sleep(QUERY_GAP_SECONDS)
+    """Jobicy remote-jobs API v2 (https://jobicy.com/jobs-rss-feed): `geo`, `tag`, `count`. A tag
+    shorter than 3 characters gets HTTP 400, so such a title is not sent here."""
+    def one(t):
         q = {"count": int(cfg.get("count") or 50), "tag": t}
         if cfg.get("geo"):
             q["geo"] = cfg["geo"]
         d = get("https://jobicy.com/api/v2/remote-jobs?" + urllib.parse.urlencode(q))
+        out = []
         for j in (d.get("jobs") or []) if isinstance(d, dict) else []:
             geo = j.get("jobGeo") or ""
             out.append(_job("jobicy", j.get("companyName"), html.unescape(j.get("jobTitle") or ""),
                             f"Remote ({geo})" if geo else "Remote",
                             j.get("url"),  # Terms: keep the canonical Jobicy URL.
                             to_dt(j.get("pubDate")), True, j.get("jobDescription") or j.get("jobExcerpt")))
-    return out
+        return out
+    return _per_query(_queries(titles, cfg, "jobicy"), sleep, one)
 
 
 def fetch_remotive(cfg, titles, get, sleep):
     """Remotive (https://github.com/remotive-io/remote-jobs-api). Its terms block more than 2 calls a
     minute, so this makes ONE call a run: a `search` for your title when you have exactly one, else
-    the whole remote list, filtered locally by crawl.py like every other source."""
+    Remotive's default list, filtered locally by crawl.py like every other source. That default
+    list is short (about 10 recent jobs when last checked), so treat Remotive as a small extra."""
     q = {}
     real = [t for t in titles if t]
     if len(real) == 1:
@@ -254,22 +298,22 @@ def fetch_usajobs(cfg, titles, get, sleep):
         raise SourceSkip("needs a free key: set USAJOBS_API_KEY and USAJOBS_EMAIL in your environment "
                          "(request one at https://developer.usajobs.gov)")
     headers = {"Host": "data.usajobs.gov", "User-Agent": email, "Authorization-Key": key}
-    out = []
-    for i, t in enumerate(_queries(titles, cfg)):
-        if i:
-            sleep(QUERY_GAP_SECONDS)
+
+    def one(t):
         q = {"Keyword": t, "ResultsPerPage": 100}
         if cfg.get("location"):
             q["LocationName"] = cfg["location"]
         d = get("https://data.usajobs.gov/api/Search?" + urllib.parse.urlencode(q), headers=headers)
         items = (((d or {}).get("SearchResult") or {}).get("SearchResultItems") or []) if isinstance(d, dict) else []
+        out = []
         for it in items:
             m = it.get("MatchedObjectDescriptor") or {}
             summary = ((m.get("UserArea") or {}).get("Details") or {}).get("JobSummary") or ""
             out.append(_job("usajobs", m.get("OrganizationName"), m.get("PositionTitle"),
                             m.get("PositionLocationDisplay"), m.get("PositionURI"),
                             to_dt(m.get("PublicationStartDate")), None, summary))
-    return out
+        return out
+    return _per_query(_queries(titles, cfg, "usajobs"), sleep, one)
 
 
 FETCHERS = {"himalayas": fetch_himalayas, "jobicy": fetch_jobicy, "remotive": fetch_remotive,
@@ -364,11 +408,15 @@ def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep
             entry.update(status="error", reason=f"{type(e).__name__} {str(e)[:80]}")
             state[name] = dict(st, last_attempt=now.isoformat(), last_error=entry["reason"])
             continue
+        failed = list(getattr(got, "errors", []))
         got = [j for j in got if j["title"] and j["url"]]
         jobs.extend(got)
         state[name] = {"last_attempt": now.isoformat(), "last_success": now.isoformat(),
                        "jobs": [_ser(j) for j in got]}
         entry.update(status="ran", jobs=len(got))
+        if failed:
+            entry["reason"] = (f"{len(failed)} quer{'y' if len(failed) == 1 else 'ies'} failed and the "
+                               f"rest were kept: " + "; ".join(failed))
     if not _save_state(cache_dir, state):
         report.append({"name": "cache", "label": "cache", "status": "error", "jobs": 0,
                        "reason": f"could not write {Path(cache_dir) / STATE_NAME}; minimum intervals "
@@ -439,6 +487,36 @@ def _selftest():
         assert {r["name"]: r["status"] for r in rep4}["usajobs"] == "ran"
         assert any(j["company"] == "Fathom Agency" for j in jobs4)
         assert to_dt("Tue, 20 Oct 2026 10:00:00 +0000").day == 20 and to_dt(1792000000000).year == 2026
+        # a too-short title is never sent to Jobicy, and the other titles still are
+        jc = []
+        def jget(url, headers=None, raw=False):
+            jc.append(url)
+            if "tag=rn" in url:
+                raise urllib.error.HTTPError(url, 400, "bad tag", {}, None)
+            return fixtures["jobicy.com"]
+        got = fetch_jobicy({}, ["rn", "registered nurse"], jget, lambda s: None)
+        assert len(got) == 1 and not [u for u in jc if "tag=rn&" in u or u.endswith("tag=rn")], jc
+        try:
+            fetch_jobicy({}, ["rn", "pa"], jget, lambda s: None)
+            raise AssertionError("only too-short titles must skip Jobicy")
+        except SourceSkip as e:
+            assert "shorter than 3" in str(e)
+        # one failed query keeps the rest; the source fails only when every query failed
+        def hget(url, headers=None, raw=False):
+            if "q=accountant" in url:
+                raise urllib.error.HTTPError(url, 500, "boom", {}, None)
+            return fixtures["himalayas.app"]
+        part = fetch_himalayas({}, ["accountant", "bookkeeper"], hget, lambda s: None)
+        assert len(part) == 1 and part.errors and "HTTP 500" in part.errors[0], part
+        try:
+            fetch_himalayas({}, ["accountant"], hget, lambda s: None)
+            raise AssertionError("every query failed: the error must reach collect()")
+        except urllib.error.HTTPError:
+            pass
+        rep5 = collect(["accountant", "bookkeeper"], {"himalayas": {"enabled": True}},
+                       Path(tempfile.mkdtemp()), now, hget, lambda s: None)[1]
+        h5 = {r["name"]: r for r in rep5}["himalayas"]
+        assert h5["status"] == "ran" and h5["jobs"] == 1 and "1 query failed" in h5["reason"], h5
     finally:
         os.environ.clear()
         os.environ.update(old)

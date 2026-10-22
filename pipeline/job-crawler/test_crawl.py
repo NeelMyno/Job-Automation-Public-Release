@@ -68,6 +68,79 @@ class TestLocations(NoNetwork):
         self.assertIn("home_metros", err)
 
 
+class TestShippedRegionLists(NoNetwork):
+    """The region gate with the filters.yaml that ships: whole words, every state, US wins."""
+    def setUp(self):
+        super().setUp()
+        import yaml
+        self.F = yaml.safe_load((Path(C.__file__).parent / "filters.yaml").read_text())
+
+    def ok(self, where):
+        return L.region_ok({"location": where}, self.F)
+
+    def test_foreign_places_dropped(self):
+        for where in ("Toronto, Canada", "Makati, Manila, Philippines", "Lagos, Nigeria",
+                      "Remote (Europe)", "Remote - EMEA", "London, United Kingdom", "Mexico City, Mexico"):
+            self.assertFalse(self.ok(where), where)
+
+    def test_us_towns_with_foreign_names_kept(self):
+        for where in ("Dublin, OH", "London, OH", "Berlin, NH", "Lisbon, OH", "Toronto, OH",
+                      "Columbus, OH", "Paris, TX", "Albuquerque, New Mexico", "Indianapolis, IN",
+                      "Remote (United States)", "Remote, US"):
+            self.assertTrue(self.ok(where), where)
+
+
+class TestFilterLists(NoNetwork):
+    """exclude_patterns, flag_patterns and exclude_companies match whatever case you typed, and a
+    null list is read as empty instead of crashing."""
+    def test_mixed_case_entries_match(self):
+        walled = job("Security Engineer", "Remote (United States)", company="Initech")
+        walled["description"] = "Must be a US Citizen."
+        flagged = job("Security Engineer", "Remote (United States)", company="Hooli")
+        flagged["description"] = "We are Unable To Sponsor visas."
+        api = [walled, flagged, job("Security Engineer", "Remote (United States)", company="Acme Corp"),
+               job("Security Engineer", "Remote (United States)", company="Globex")]
+        F = dict(BASE, exclude_patterns=["US Citizen"], flag_patterns=["Unable to Sponsor"],
+                 exclude_companies=["ACME"])
+        code, out, _ = run_crawl([], F, {"boards": []}, api=api)
+        d = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(m["company"] for m in d["matches"]), ["Globex", "Hooli"])
+        self.assertEqual(d["dropped"]["wall"], 2)
+        self.assertEqual([m["company"] for m in d["matches"] if m["no_sponsor_flag"]], ["Hooli"])
+
+    def test_null_lists_do_not_crash(self):
+        F = dict(BASE, exclude_patterns=None, flag_patterns=None, exclude_companies=None,
+                 include_keywords=None)
+        code, out, _ = run_crawl([], F, {"boards": []},
+                                 api=[job("Security Engineer", "Remote (United States)")])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["count"], 1)
+
+    def test_blank_entry_is_dropped(self):
+        self.assertEqual(C.normalize_filters({"exclude_patterns": ["", "  ", "X"]})["exclude_patterns"], ["x"])
+
+
+class TestFewMatchesHint(NoNetwork):
+    def test_zero_matches_points_beyond_the_feeds(self):
+        F = dict(BASE, include_titles=["registered nurse"], remote_ok=False, onsite_ok="home_metros",
+                 home_metros=["columbus"])
+        code, out, _ = run_crawl([], F, {"boards": []}, api=[job("Data Analyst")])
+        d = json.loads(out)
+        self.assertEqual(d["count"], 0)
+        hint = [h for h in d["hints"] if "can't read" in h]
+        self.assertEqual(len(hint), 1, d["hints"])
+        self.assertIn('"registered nurse jobs columbus"', hint[0])
+        self.assertIn("hospitals", hint[0])
+        self.assertIn("discover.py --queries", hint[0])
+
+    def test_no_hint_when_plenty(self):
+        api = [job("Security Engineer", "Remote (United States)", company=c)
+               for c in ("Acme", "Globex", "Initech", "Hooli", "Umbrella")]
+        d = json.loads(run_crawl([], dict(BASE), {"boards": []}, api=api)[1])
+        self.assertFalse([h for h in d["hints"] if "can't read" in h])
+
+
 class TestRanking(NoNetwork):
     def test_title_fit_levels(self):
         F = {"include_titles": ["security engineer"]}

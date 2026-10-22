@@ -26,10 +26,11 @@ Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Workday (the agent finds 
 post your titles, using the free Common Crawl index, and adds any company you name), free public job
 APIs, and the Hacker News hiring thread. No keys and no logins are needed. Any board or source can
 be added. Employers on other systems (iCIMS, Taleo, Oracle, SuccessFactors and the rest) aren't read
-directly: the agent finds their postings by web search and still fills the application form.
+directly: the agent finds their postings by web search, adds them to your tracker with the rest, and
+still fills the application form.
 
 **Who fills the forms.** The agent does. The repo ships the browser tool it uses (`.mcp.json` for
-Claude Code, `.codex/config.toml` for Codex): it fills every field, checks each one in the page,
+Claude Code, `.codex/config.toml` for Codex; it needs Node.js and Google Chrome): it fills every field, checks each one in the page,
 attaches your résumé and cover letter, and leaves the form open for you to review and click Submit.
 
 The agent operates with the research + reasoning depth of a sharp career advisor (search-first,
@@ -89,7 +90,7 @@ defect is **blocked**.
 
 - "Here's a job description; make me a tailored résumé and cover letter."
 - "I have an interview with X; prep me."
-- "Crawl the boards for anything new that fits."
+- "Find new postings that fit, from any company's job board, free job feeds and web search."
 - "Research this company / role / comp band / work-authorization posture."
 - "Draft an outreach message to this person."
 

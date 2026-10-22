@@ -9,8 +9,8 @@ have inserted the word and gotten the application flagged as bot-submitted. A wo
 same trap would order a wrong visa answer, a fabricated claim, or "ignore your rules."
 
 This scanner flags prompt-injection SIGNATURES in a blob of observed text so an agent (and the
-harness) can SEE the trap and refuse it. It is deliberately HIGH-PRECISION: these are AI-company
-JDs that legitimately say "AI agents", "AI tools", "design for AI" all day, so it matches
+harness) can SEE the trap and refuse it. It is deliberately HIGH-PRECISION: real
+JDs in every field legitimately say "AI agents", "AI tools", "AI-assisted charting" all day, so it matches
 META-DIRECTIVES aimed at the reader-as-AI, never topic mentions.
 
 It is a backstop, not the whole defense. The load-bearing rule is positive: an agent types ONLY
@@ -168,13 +168,15 @@ _MUST_PASS = [
      "As part of our recruitment process, we utilize AI technology to assist in reviewing and "
      "summarizing job applications. All final evaluations and hiring decisions will be made by "
      "our hiring team. By submitting your application, you acknowledge and consent to the use of AI."),
-    ("ai-native-jd",
-     "You are already using AI coding tools to extend what you can build. You question "
-     "fundamental UI assumptions and invent patterns that feel native to AI. You must have a "
-     "portfolio demonstrating polished UI craft."),
-    ("designeng-jd",
-     "Experience designing developer tools, AI products, or agentic systems end to end. Please "
-     "include a link to your portfolio and any relevant open-source contributions."),
+    ("ai-scheduling-nurse-jd",
+     "Our unit uses AI scheduling tools and AI-assisted charting. You must hold an active RN "
+     "license, and you will help train staff on the new AI tools during your first quarter."),
+    ("ai-accounting-jd",
+     "Experience reviewing AI-generated reconciliations and month-end reports. Please include "
+     "your CPA license number and two references with your application."),
+    ("ai-teaching-jd",
+     "Teachers here use AI tutors in class. You must be comfortable guiding students who use AI "
+     "assistants, and you should include a sample lesson plan."),
     ("plain-reqs",
      "You must have 5+ years of experience. Note: this role requires occasional travel. Please "
      "review the eligible remote work locations included in this job post."),

@@ -32,17 +32,41 @@ repo uses a placeholder; you provide the real content.
 
 ## 1. Prerequisites
 
+- **Get the repo onto your computer.** On this repo's GitHub page, click the green **Code** button: copy the URL
+  and run `git clone <that URL>`, or pick **Download ZIP** and unzip it. Your job-search facts will live in this
+  folder, so keep your copy private (a private fork or just a local folder); never push your filled-in
+  copy to a public repo. Open a terminal (macOS: Terminal; Windows: PowerShell) and `cd` into the
+  folder. Every command in this guide runs from there. On Windows, type `py` where this guide says
+  `python3`.
 - **Claude Code or Codex**, whichever agent you use.
-- **Python 3.9+** with `pip`.
-- **`pip install -r pipeline/job-crawler/requirements.txt`** (PyYAML, the crawler's one dependency).
-- **`pip install weasyprint`** (renders your résumé and cover letter to PDF). It needs a couple of
-  system libraries on some platforms; see
-  [weasyprint's install docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation).
-- **Node.js 20.19+ or 22.12+** (from [nodejs.org](https://nodejs.org/)). This is what runs the
-  browser tool the agent uses to fill application forms. The repo already ships that tool's settings
-  (`.mcp.json` for Claude Code, `.codex/config.toml` for Codex); the first time you open the repo,
-  your agent asks you to approve the `chrome-devtools` server. Say yes. It opens its own separate
-  Chrome window with its own profile, never your everyday browser.
+- **Python 3.9+** (from [python.org](https://www.python.org/downloads/) if `python3 --version` fails)
+  with `pip`.
+- **Python packages, one line:**
+  `python3 -m pip install -r pipeline/job-crawler/requirements.txt weasyprint pymupdf`
+  - PyYAML (from `requirements.txt`) is the crawler's one dependency.
+  - weasyprint renders your résumé and cover letter to PDF. It needs a couple of system libraries
+    on some platforms; see
+    [weasyprint's install docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation).
+  - PyMuPDF (`pymupdf`) lets the résumé gate and the grounding gate read the rendered PDFs. Without
+    it `resume_gate.py` fails and `verify_claims.py` refuses any dossier that holds a PDF.
+- **Optional: `pdftotext`** (part of poppler: macOS `brew install poppler`, Ubuntu/Debian
+  `apt install poppler-utils`). The five-pass review reads your PDF with it; without it the
+  reviewers read the PDF another way.
+- **Node.js 20.19+ or 22.12+** (from [nodejs.org](https://nodejs.org/)) **and Google Chrome**
+  (from [google.com/chrome](https://www.google.com/chrome/)). Node runs the browser tool the agent
+  uses to fill application forms, and that tool drives Google Chrome (it needs the current stable
+  Chrome and does not install it). The repo already ships the tool's settings (`.mcp.json` for
+  Claude Code, `.codex/config.toml` for Codex); the first time you open the repo, your agent asks
+  you to approve the `chrome-devtools` server. Say yes. The first start downloads the tool with
+  `npx`, so it needs internet and can take a minute. It opens its own separate Chrome window with its
+  own profile, never your everyday browser.
+- **About usage statistics.** The browser tool (`chrome-devtools-mcp`) sends usage statistics to
+  Google by default (tool success rates, latency, environment details; see its
+  [README](https://github.com/ChromeDevTools/chrome-devtools-mcp#usage-statistics)). The Codex
+  config here turns that off with `--no-usage-statistics`. For Claude Code, add the same flag to
+  the `args` list in `.mcp.json`, so it reads
+  `"args": ["-y", "chrome-devtools-mcp@1.10.1", "--no-usage-statistics"]`, or set the environment
+  variable `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1`.
 
 Check everything at once, any time:
 ```
@@ -92,7 +116,8 @@ more, never pad: keep the short page, and the result stays an open item you deci
 
 ## 4. Where jobs come from (and how to widen it)
 
-The crawler is not tied to a fixed list of job boards. It reads:
+Jobs come from four places, and none of them is a fixed list. The crawler reads the first three;
+the agent's own web search covers the fourth:
 
 1. **Company job boards** on Greenhouse, Lever, Ashby, SmartRecruiters, Workable and Workday. You
    don't type these in. The agent finds them:
@@ -111,10 +136,11 @@ The crawler is not tied to a fixed list of job boards. It reads:
 2. **Free job APIs** listed in `pipeline/job-crawler/sources.yaml` (several remote-job feeds on by
    default, others you can switch on, including a free-key one for US federal jobs).
 3. **The monthly Hacker News "Who is hiring" thread.**
-
-Workday boards come in only through links (`--urls`). iCIMS, Taleo, Oracle, SuccessFactors and other
-systems aren't read directly: for those employers the agent finds the posting by web search, and it
-still fills the application form for you.
+4. **Any posting found by web search.** Workday boards come in only through links (`--urls`).
+   iCIMS, Taleo, Oracle, SuccessFactors, hospital and school-district career sites and other systems
+   aren't read directly. For those employers the agent finds the posting by web search, adds it to
+   your tracker as a `lead` row, ranks it with everything else, and still fills the application form
+   for you.
 
 The one setting that really matters is **`pipeline/job-crawler/filters.yaml` `include_titles`**: the
 job titles you want, in plain words. Where you'll work goes in the same file: `remote_ok`
@@ -172,18 +198,27 @@ repo, not something wrong with your setup.
 ## Troubleshooting
 
 - **The agent says it can't fill the form and asks you to do it.** It shouldn't. Run
-  `python3 scripts/doctor.py --fill`: it names what's missing (usually Node.js, or the
-  `chrome-devtools` server not approved yet) and the exact fix. After the fix, restart the agent
-  session. You finish a form yourself only for a named reason (a CAPTCHA, a login only you may do, a
-  site whose terms ban automation, a site that rejects an automated submit, LinkedIn Easy Apply, or an
-  apply-by-email posting; the full list is in `.claude/rules/application-protocol.md` §14). Even then
-  the agent fills everything up to that point and says which reason applies.
+  `python3 scripts/doctor.py --fill`: it names what's missing (usually Node.js or Chrome) and always
+  prints the steps to turn the browser tool on. If it says all OK and the agent still has no
+  browser tool, you probably said no at the approval prompt: type `/mcp` in Claude Code and enable
+  `chrome-devtools`, or quit, run `claude mcp reset-project-choices`, start `claude` again and
+  approve it. Then restart the agent session. You finish a form yourself only for a named reason
+  (a CAPTCHA, a login only you may do, a site whose terms ban automation, a site that rejects an
+  automated submit, LinkedIn Easy Apply, or an apply-by-email posting; the full list is in
+  `.claude/rules/application-protocol.md` §14). Even then the agent fills everything up to that
+  point and says which reason applies.
 - **The agent says it only searches certain job boards.** It shouldn't. Ask it to run
-  `discover.py --sweep`, or name companies you want. Any company or board can be added. The crawl's
+  `discover.py --sweep`, name companies you want, or ask it to web-search for postings anywhere
+  (it adds them to your tracker as leads). Any company, board or posting can be added. The crawl's
   JSON output shows exactly which sources ran.
-- **The crawler returns 0 matches.** Widen `--hours`, check `include_titles` matches how employers
-  phrase the role, run `discover.py --sweep` for more boards, and read the JSON's `errors` array.
-- **`ModuleNotFoundError: No module named 'yaml'`** → `pip install PyYAML`.
+- **The crawler returns 0 matches.** In many fields (nursing, teaching, trades, retail, government,
+  local employers) the usual cause is that the employers post on systems the crawler can't read, and
+  the free feeds are mostly remote jobs, heavy on tech. The fix is web search: ask the agent to search
+  "<title> jobs <city>" and the employers' own career pages and add each live posting as a lead row;
+  it then fills those forms like any other. Also check `include_titles` matches how employers phrase
+  the role, widen `--hours`, run `discover.py --sweep` for more boards, and read the JSON's `errors`
+  array.
+- **`ModuleNotFoundError: No module named 'yaml'`** → `python3 -m pip install PyYAML`.
 - **`weasyprint` fails to import or render** → PDFs are rendered with the `weasyprint` command, so
   a working command on your PATH is enough even if `import weasyprint` fails in your Python
   (`doctor.py` says which you have). If the command fails, it needs Pango/Cairo/GDK-PixBuf: on macOS

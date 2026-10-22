@@ -52,6 +52,15 @@ except ImportError:
         FOLLOWUP_DAYS = 4
         SMALL_BASKET_CAP = 3
 
+def _today() -> date:
+    """Today in your configured time zone (scripts/config.py TIMEZONE, via local_now()), else this
+    machine's date. A missing or broken config never breaks this script."""
+    try:
+        return config.local_now().date()  # type: ignore[union-attr]
+    except Exception:
+        return date.today()
+
+
 FOLLOWUP_DAYS = config.FOLLOWUP_DAYS      # silence threshold before the single permitted nudge
 SMALL_BASKET_CAP = config.SMALL_BASKET_CAP  # sends/company/day when company is small/unknown
 LIVE = {"applied", "interview", "offer", "active"}
@@ -215,7 +224,7 @@ class Queue:
 
 
 def build(repo: Path = REPO, today: date | None = None) -> Queue:
-    today = today or date.today()
+    today = today or _today()
     q = Queue()
     tracker = (repo / "pipeline" / "tracker.html").read_text(errors="ignore")
     apps, net = tracker_rows(tracker)
@@ -421,12 +430,39 @@ def report(q: Queue) -> str:
 
 # ── selftest: every protection gets a case, built from the real failure shapes ──────────
 def selftest() -> int:
+    """The fixture's messages link example.com, so the fixture carries its own portfolio value.
+    The live knowledge-base/01 is the user's file and must never decide this selftest."""
+    saved = outreach_format.portfolio_url
+    outreach_format.portfolio_url = lambda: "example.com"
+    try:
+        return _selftest_body()
+    finally:
+        outreach_format.portfolio_url = saved
+
+
+def _selftest_body() -> int:
     import tempfile
     ok = True
     def check(label, cond):
         nonlocal ok
         print(("  ✓ " if cond else "  ✗ ") + label)
         ok = ok and cond
+
+    class _FakeCfg:
+        @staticmethod
+        def local_now():
+            from datetime import datetime as _dt
+            return _dt(2031, 7, 4, 23, 30)
+    global config
+    _saved_cfg = config
+    config = _FakeCfg()
+    try:
+        _zone_ok = _today() == date(2031, 7, 4)
+    finally:
+        config = _saved_cfg
+    check("today comes from the configured zone (config.local_now), not the machine clock", _zone_ok)
+    check("the fixture's portfolio value is its own, never the user's knowledge-base/01",
+          outreach_format.portfolio_url() == "example.com")
     with tempfile.TemporaryDirectory() as td:
         r = Path(td)
         (r / "pipeline").mkdir(); (r / "applications" / "acme-analyst" / ".").mkdir(parents=True)

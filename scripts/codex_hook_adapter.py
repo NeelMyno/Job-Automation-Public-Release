@@ -57,11 +57,28 @@ FORCE_PUSH = re.compile(
 SENSITIVE = re.compile(
     # re.I: a case-insensitive filesystem serves `cat .MCP.JSON` as the real `.mcp.json`. A
     # case-sensitive guard let every upper/mixed-case spelling through.
-    r"(?:^|[\s/\"'=])(?:\.mcp\.json|\.env(?:\.[^\s/\"']+)?)", re.I
+    r"(?:^|[\s/\"'=:])(?:\.mcp\.json|\.env(?:\.[^\s/\"']+)?)", re.I
 )
 SAFE_SECRET_METADATA = re.compile(
     r"^\s*(?:git\s+(?:status|check-ignore)|grep\s+-l|wc\s+-c|shasum\b)", re.I
 )
+# The repo ships its own `.mcp.json` (the browser tool config, no keys in it), and doctor.py tells a
+# user to restore it with `git checkout -- .mcp.json`. So a segment that names ONLY `.mcp.json` (never
+# an .env file) may read it or restore it from git. Any write (a redirect, sed -i, rm, an editor) is
+# still denied, and so is every .env command that is not metadata-only.
+ENV_FILE = re.compile(r"(?:^|[\s/\"'=:])\.env(?:\.[^\s/\"']+)?", re.I)
+SAFE_SHIPPED_MCP = re.compile(
+    r"^\s*(?:git\s+(?:checkout\s+(?:HEAD\s+)?--|restore\b|show\b|diff\b|log\b)|cat\b|head\b|tail\b|less\b)",
+    re.I,
+)
+
+
+def _segment_allowed(seg: str) -> bool:
+    """A shell segment that touches a secret-looking file is allowed only when it is metadata-only,
+    or when it reads or restores the shipped .mcp.json and names no .env file."""
+    if SAFE_SECRET_METADATA.search(seg):
+        return True
+    return (not ENV_FILE.search(seg) and ">" not in seg and bool(SAFE_SHIPPED_MCP.search(seg)))
 
 
 def read_payload() -> dict:
@@ -191,21 +208,22 @@ def pre_tool(data: dict) -> dict | None:
             return deny("Force-push is forbidden in this repo. Pull with rebase and push normally.")
     if tool_name in {"Bash", "apply_patch"} and SENSITIVE.search(command):
         _secret_deny = deny(
-            "Do not read or modify .mcp.json or .env files. Check only presence or metadata "
-            "with git status, git check-ignore, grep -l, wc -c, or shasum."
+            "Do not read or modify .env files, and do not modify .mcp.json. Check .env only for "
+            "presence or metadata with git status, git check-ignore, grep -l, wc -c, or shasum. "
+            "The shipped .mcp.json may be read or restored (git checkout -- .mcp.json)."
         )
         if tool_name == "apply_patch":
             return _secret_deny
         # Per-SEGMENT, not per-command. SAFE_SECRET_METADATA is `^`-anchored, so the old check let
         # a safe LEADING verb whitelist the WHOLE compound command: `git status && cat .env` would
         # dump the secret. Split on the shell separators AND treat the inside of a
-        # $(...)/backtick command substitution as its own segment: `wc -c $(cat .mcp.json)` has a
-        # safe leading verb but RUNS `cat .mcp.json` inside the substitution, leaking the secret.
+        # $(...)/backtick command substitution as its own segment: `wc -c $(cat .env)` has a
+        # safe leading verb but RUNS `cat .env` inside the substitution, leaking the secret.
         # Deny if ANY segment that touches a secret file is not itself metadata-only.
         segs = re.split(r"&&|\|\||[;&|\n]", command)
         segs += [g for mm in re.finditer(r"\$\(([^)]*)\)|`([^`]*)`", command) for g in mm.groups() if g]
         for seg in segs:
-            if SENSITIVE.search(seg) and not SAFE_SECRET_METADATA.search(seg):
+            if SENSITIVE.search(seg) and not _segment_allowed(seg):
                 return _secret_deny
     return None
 
@@ -338,15 +356,30 @@ def selftest() -> int:
     checks.append(("🔴 a secret read behind a safe prefix is denied (git status && cat .env)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git status && cat .env"}}))))
     checks.append(("🔴 metadata-then-read compound is denied (wc -c .env && cat .env)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c .env && cat .env"}}))))
     # Three more bypasses of the two guards above, all closed the same pass.
-    checks.append(("🔴 secret read via command substitution is denied (wc -c $(cat .mcp.json))", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(cat .mcp.json)"}}))))
+    checks.append(("🔴 secret read via command substitution is denied (wc -c $(cat .env))", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(cat .env)"}}))))
     checks.append(("🔴 secret read via backtick substitution is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c `cat .env`"}}))))
-    checks.append(("🔴 UPPER-case secret spelling is denied (cat .MCP.JSON on a case-insensitive filesystem)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "cat .MCP.JSON"}}))))
+    checks.append(("🔴 UPPER-case secret spelling is denied (cat .ENV on a case-insensitive filesystem)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "cat .ENV"}}))))
+    checks.append(("🔴 UPPER-case .mcp.json write is denied (echo x > .MCP.JSON)", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "echo x > .MCP.JSON"}}))))
     checks.append(("🔴 quoted +refspec force-push is denied (git push origin \"+main\")", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": 'git push origin "+main"'}}))))
     checks.append(("🔴 leading-whitespace +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "   git push origin +main"}}))))
     checks.append(("🔴 env-prefixed +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "GIT_SSH_COMMAND='ssh -i k' git push origin +main"}}))))
     checks.append(("safe commands remain allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "git status --short"}}) is None))
     checks.append(("a real metadata-only secret check is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c .env"}}) is None))
     checks.append(("a metadata check with an unrelated substitution is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(ls) .env"}}) is None))
+    # The shipped .mcp.json: doctor.py's own fix command used to be denied.
+    def _allowed(cmd):
+        return pre_tool({"tool_name": "Bash", "tool_input": {"command": cmd}}) is None
+    checks.append(("doctor.py's fix `git checkout -- .mcp.json` is allowed", _allowed("git checkout -- .mcp.json")))
+    checks.append(("restoring the shipped .mcp.json with git restore is allowed", _allowed("git restore .mcp.json")))
+    checks.append(("reading the shipped .mcp.json (cat, git show, git diff) is allowed",
+                   _allowed("cat .mcp.json") and _allowed("git show HEAD:.mcp.json") and _allowed("git diff -- .mcp.json")))
+    checks.append(("🔴 writing .mcp.json is still denied (redirect, sed -i, rm)",
+                   not any(_allowed(c) for c in ("echo x > .mcp.json", "sed -i '' s/a/b/ .mcp.json", "rm .mcp.json"))))
+    checks.append(("🔴 .env stays denied even beside .mcp.json (cat .mcp.json .env, git show HEAD:.env)",
+                   not _allowed("cat .mcp.json .env") and not _allowed("git show HEAD:.env")
+                   and not _allowed("git checkout -- .env")))
+    checks.append(("🔴 a patch to .mcp.json is still denied",
+                   bool(pre_tool({"tool_name": "apply_patch", "tool_input": {"command": "*** Update File: .mcp.json"}}))))
     for label, ok in checks:
         print(f"  {'✓' if ok else '✗'} {label}")
     passed = all(ok for _, ok in checks)

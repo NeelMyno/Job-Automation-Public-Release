@@ -48,6 +48,21 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import config  # optional user knobs (scripts/config.py)
+except Exception:  # pragma: no cover
+    config = None  # type: ignore[assignment]
+
+
+def _today() -> date:
+    """Today in your configured time zone (scripts/config.py TIMEZONE, via local_now()), else this
+    machine's date. A missing or broken config never breaks this script."""
+    try:
+        return config.local_now().date()  # type: ignore[union-attr]
+    except Exception:
+        return date.today()
+
 REPO = Path(__file__).resolve().parent.parent
 TRACKER = REPO / "pipeline" / "tracker.html"
 
@@ -157,7 +172,7 @@ def build(html: str = None, today: date = None, check_calls: bool = True) -> Res
     if html is None:
         html = TRACKER.read_text(errors="ignore") if TRACKER.exists() else ""
     if today is None:
-        today = date.today()
+        today = _today()
     r = Result()
 
     # APPLICATIONS array (its rows carry status + next:)
@@ -218,7 +233,7 @@ def deadlines(html: str = None, today: date = None, window: int = DEADLINE_WINDO
     if html is None:
         html = TRACKER.read_text(errors="ignore") if TRACKER.exists() else ""
     if today is None:
-        today = date.today()
+        today = _today()
     am = re.search(r"APPLICATIONS\s*=\s*\[(.*?)\n\s*\];", html, re.S) or \
         re.search(r"APPLICATIONS\s*=\s*\[(.*)\]", html, re.S)
     body = am.group(1) if am else ""
@@ -257,7 +272,7 @@ def session_lines(today: date = None) -> list:
         r = build(today=today)
     except Exception as e:  # noqa: BLE001 -- a bug here must never block a session from starting
         return [f"  ⚠ commitments unavailable ({type(e).__name__}: {e}) -- run scripts/commitments.py by hand."]
-    t = today or date.today()
+    t = today or _today()
     out = []
     if r.interviews:
         out.append("")
@@ -310,6 +325,20 @@ def selftest() -> int:
         good = got == want
         ok = ok and good
         print(f"  {'PASS' if good else 'FAIL'} {desc}: got {got!r} want {want!r}")
+
+    class _FakeCfg:
+        @staticmethod
+        def local_now():
+            from datetime import datetime as _dt
+            return _dt(2031, 7, 4, 23, 30)
+    global config
+    _saved_cfg = config
+    config = _FakeCfg()
+    try:
+        _zone_ok = _today() == date(2031, 7, 4)
+    finally:
+        config = _saved_cfg
+    c("today comes from the configured zone (config.local_now)", _zone_ok, True)
 
     T = date(2026, 1, 15)
 
@@ -389,7 +418,7 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(selftest())
     r = build()
-    t = date.today()
+    t = _today()
     lines = session_lines(t)
     if lines:
         print("\n".join(l for l in lines if l.strip()))

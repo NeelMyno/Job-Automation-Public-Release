@@ -9,6 +9,8 @@
     "files the session actually touched, so pre-existing debt never holds a session hostage."
   ],
 
+  "attribution": { "commit": "", "pr": "" },
+
   "hooks": {
     "SessionStart": [
       {

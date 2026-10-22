@@ -13,8 +13,8 @@ already how I work.
 
 I build internal tools and ship them myself, in production code. At Globex, a
 seed-stage veterinary-software startup, I mentored 4 junior analysts while owning the internal
-tooling end to end, and the part I am proudest of is turning the review bar into checks that
-catch a regression before a person has to.
+tooling end to end, and the part I am proudest of is a weekly handoff check that
+catches a missed step before a customer does.
 
 Work sample: example.com/example-case-study
 

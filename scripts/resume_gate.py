@@ -178,8 +178,8 @@ def accepted_short_floor(facts: dict) -> float | None:
 def _loose(token: str) -> str:
     """A regex for `token` that tolerates true spellings of the same fact.
 
-    "1070" (no thousands comma), "April 2025" (month spelled out), and "Apr 2025 - Current" are
-    all the same fact as "1,070" / "Apr 2025" / "Apr 2025 - Present". A gate that fails honest
+    "2315" (no thousands comma), "November 2018" (month spelled out), and "Nov 2018 - Current" are
+    all the same fact as "2,315" / "Nov 2018" / "Nov 2018 - Present". A gate that fails honest
     copy trains people to ignore it, which costs more than the defect it was meant to catch.
     """
     MONTHS = {"Jan": "Jan(?:uary)?", "Feb": "Feb(?:ruary)?", "Mar": "Mar(?:ch)?",
@@ -191,9 +191,29 @@ def _loose(token: str) -> str:
         return rf"\b{MONTHS[m.group(1)]}\.?\s+{m.group(2)}\b"
     if token.lower() == "present":
         return r"\b(?:Present|Current|Now|Ongoing)\b"
-    if re.fullmatch(r"[\d,]+", token):                      # 1,070 == 1070
+    if re.fullmatch(r"[\d,]+", token):                      # 2,315 == 2315
         return r"\b" + re.escape(token).replace(",", "[,\\s]?") + r"\b"
     return re.escape(token).replace(r"\ ", r"\s+")
+
+
+# A bare domain in any top-level domain (.org, .net, .edu, .nyc, ...), never a fixed short list.
+# (?<![\w.@-]) keeps the DOMAIN half of an email ("example.com" in "you@example.com") from counting
+# as a portfolio, and the trailing lookahead keeps the LOCAL half ("sam.lee" in
+# "sam.lee@acme.example") out too. The suffix must be written in lowercase (a domain on a page almost always is),
+# so "ASP.NET" or a sentence glued to the next one ("system.Led") is not read as a domain, and a
+# short list of file and code suffixes ("Node.js", "notes.pdf") is never one either.
+_NOT_A_TLD = ("js", "ts", "jsx", "tsx", "py", "rb", "md", "pdf", "htm", "html", "css", "json",
+              "yaml", "yml", "txt", "doc", "docx", "xls", "xlsx", "csv", "png", "jpg", "jpeg",
+              "gif", "svg", "exe", "sh")
+_PORTFOLIO_SHAPE = re.compile(
+    r"(?<![\w.@-])[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:" + "|".join(_NOT_A_TLD) + r")\b)"
+    r"[a-z]{2,24}\b(?!/)(?![\w.+-]*@)")
+
+
+def _portfolio_candidates(flat: str) -> list[str]:
+    """Every bare domain on the page that could be a portfolio (emails and LinkedIn excluded)."""
+    return [m.group(0) for m in _PORTFOLIO_SHAPE.finditer(flat)
+            if "@" not in m.group(0) and "linkedin" not in m.group(0).lower()]
 
 
 def _near(flat: str, employer: str, token: str, span: int = 200) -> bool:
@@ -367,11 +387,7 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
         # match one specific title pattern and silently do nothing for anyone else's.)
         _EXACT_SHAPE = {
             "email":     r"[\w.+-]+@[\w.-]+\.\w+",
-            # (?<!@) and the negative lookbehind on the leading token stop this from matching the
-            # DOMAIN half of an email address (e.g. "example.com" inside "you@example.com") as if
-            # it were a portfolio URL: an email and a portfolio are usually different domains, and
-            # without this a résumé's own contact line produces a false "wrong portfolio" finding.
-            "portfolio": r"(?<![\w.@-])[\w-]+\.(?:in|com|dev|design|io)\b(?!/)",
+            # "portfolio" is matched by _PORTFOLIO_SHAPE (any top-level domain), see below.
             "linkedin":  r"linkedin\.com/in/[\w-]+",
         }
         for label, want in facts["exact"]:
@@ -391,12 +407,13 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
                         f"(knowledge-base/07-master-resume.md → canonical-facts)."
                     )
                 continue
-            pat = _EXACT_SHAPE.get(label)
-            if not pat:
-                continue
-            found = [m.group(0) for m in re.finditer(pat, _flat, re.I)]
             if label == "portfolio":
-                found = [x for x in found if "@" not in x and "linkedin" not in x.lower()]
+                found = _portfolio_candidates(_flat)
+            else:
+                pat = _EXACT_SHAPE.get(label)
+                if not pat:
+                    continue
+                found = [m.group(0) for m in re.finditer(pat, _flat, re.I)]
             if found and not any(want.lower() in x.lower() or x.lower() in want.lower() for x in found):
                 problems.append(
                     f"the {label} on this résumé is {found[0]!r}, but the canonical value is "
@@ -582,11 +599,11 @@ def targets(args: list[str]) -> list[Path]:
 FIXTURE_KB = """
 ### WORK EXPERIENCE
 
-**Acme Robotics - Staff Engineer** - Mar 2024 - Present
-- Led the rebuild of the fleet-ops console end to end.
+**Acme Health - Nurse Manager** - Oct 2022 - Present
+- Ran the move of a 32-bed surgical unit to a new wing.
 
-**Globex Analytics - Senior Engineer** - Jun 2021 - Feb 2024
-- Shipped a self-serve dashboard used by every enterprise account.
+**Globex Clinics - Charge Nurse** - Nov 2018 - Sep 2022
+- Led the night shift on a busy outpatient floor.
 
 ## 🔴 CANONICAL FACTS
 
@@ -594,8 +611,8 @@ FIXTURE_KB = """
 exact: email | jordan.rivera@example.com
 exact: portfolio | jordanrivera.example
 exact: linkedin | linkedin.com/in/jordanrivera
-exact: title | Staff Engineer
-number: alert rules | 1,070 | the live alert-rule count
+exact: title | Nurse Manager
+number: patient charts | 2,315 | the audited chart count
 ```
 """
 FIXTURE_EDUCATION_DECOY = "State University"  # same name as an employer that must never exist here
@@ -609,9 +626,9 @@ def selftest() -> int:
     # not be taken for the block itself.
     _mention_first = ("<!--\n  1. The fenced block that opens with the literal line ```canonical-facts\n"
                       "     holds the facts below.\n-->\n\n# Master resume\n\n"
-                      "```canonical-facts\nexact: Jordan Rivera | name\nnumber: 1,070 | alert rules shipped\n```\n")
+                      "```canonical-facts\nexact: Jordan Rivera | name\nnumber: 2,315 | patient charts audited\n```\n")
     _pf = _parse_canonical_facts(_mention_first)
-    _good = _pf["exact"] == [("Jordan Rivera", "name")] and _pf["number"] == [("1,070", "alert rules shipped")]
+    _good = _pf["exact"] == [("Jordan Rivera", "name")] and _pf["number"] == [("2,315", "patient charts audited")]
     ok &= _good
     print(f"  {'✓' if _good else '✗✗'} a comment that mentions ```canonical-facts before the real block "
           f"does not hide the real block")
@@ -631,17 +648,30 @@ def selftest() -> int:
               _exact_only["found"] and not _exact_only["never"] and not _exact_only["number"])
     # S2: the KB-07 template's employer shape and the older shape both parse, and agree.
     _new = _parse_required_employment(
-        "### WORK EXPERIENCE\n\n**Initech, Security Engineer** (Mar 2024 - Present)\n- x\n\n"
-        "**Globex Corp, Analyst** (June 2021 - Feb 2024)\n### KEY PROJECTS\n")
+        "### WORK EXPERIENCE\n\n**Initech, Store Manager** (Oct 2022 - Present)\n- x\n\n"
+        "**Globex Corp, Analyst** (November 2018 - Sep 2022)\n### KEY PROJECTS\n")
     _old = _parse_required_employment(
-        "### WORK EXPERIENCE\n\n**Initech - Security Engineer** - Mar 2024 - Present\n\n"
-        "**Globex Corp - Analyst** \u2014 Jun 2021 \u2013 Feb 2024\n")
-    _want = [("Initech", "Mar 2024", True), ("Globex Corp", "Jun 2021", False)]
+        "### WORK EXPERIENCE\n\n**Initech - Store Manager** - Oct 2022 - Present\n\n"
+        "**Globex Corp - Analyst** \u2014 Nov 2018 \u2013 Sep 2022\n")
+    _want = [("Initech", "Oct 2022", True), ("Globex Corp", "Nov 2018", False)]
     ok &= _t0("[S2] the template shape `**Employer, Title** (Mon YYYY - Present)` parses", _new == _want)
     ok &= _t0("[S2] the older shape `**Employer - Title** - Mon YYYY` still parses the same", _old == _want)
     ok &= _t0("[S2] the unfilled template line parses to nothing (so the gate says EMPTY, loudly)",
               _parse_required_employment("### WORK EXPERIENCE\n**[Employer Name], [Your Title]** "
                                          "([Mon YYYY] - Present)\n") == [])
+    # S5: a portfolio domain in ANY top-level domain is read; code and file names are not.
+    _pc = lambda t: _portfolio_candidates(t)
+    ok &= _t0("[S5] a .org portfolio is read", _pc("Sam Lee · sam@acme.example · samlee.org") == ["samlee.org"])
+    ok &= _t0("[S5] a .net and a .edu portfolio are read",
+              _pc("samlee.net and portfolio.cs.stateu.edu") == ["samlee.net", "portfolio.cs.stateu.edu"])
+    ok &= _t0("[S5] a long new TLD (.nyc) is read", _pc("Visit samlee.nyc for more") == ["samlee.nyc"])
+    ok &= _t0("[S5] an email's domain, Node.js, ASP.NET and notes.pdf are not portfolios",
+              _pc("sam@samlee.org · Node.js · ASP.NET · notes.pdf · system.Led") == [])
+    ok &= _t0("[S5] the name half of an email (sam.lee@...) is not a portfolio",
+              _pc("sam.lee@acme.example · sam.lee+jobs@acme.example") == [])
+    ok &= _t0("[S5] a domain with a path after it is not read as a bare portfolio",
+              _pc("samlee.org/rn") == [])
+
     # S3: only résumé artifacts are graded; a cover letter never is.
     _ra = [
         (Path("applications/acme-x/resume/Jordan Rivera.pdf"), True),
@@ -709,15 +739,15 @@ def selftest() -> int:
                 for e, start, cur in required:
                     if e not in emps:
                         continue
-                    end = "Present" if cur else "Feb 2024"
-                    page.insert_text((50, y), f"{e} - Staff Engineer  {start} - {end}", fontsize=8); y += 13
+                    end = "Present" if cur else "Sep 2022"
+                    page.insert_text((50, y), f"{e} - Nurse Manager  {start} - {end}", fontsize=8); y += 13
                 for i in range(lines):
                     page.insert_text((50, y), f"a line of resume content number {i}", fontsize=9); y += 14
                 page.insert_text((50, y), "SELECTED PROJECTS", fontsize=11); y += 18
-                page.insert_text((50, y), "Fleet console v2, solo build", fontsize=9); y += 16
+                page.insert_text((50, y), "Community flu clinic, volunteer lead", fontsize=9); y += 16
                 if education_name:
                     page.insert_text((50, y), "EDUCATION", fontsize=11); y += 16
-                    page.insert_text((50, y), f"{education_name} - MS Computer Science  Aug 2019 - May 2021", fontsize=8)
+                    page.insert_text((50, y), f"{education_name} - MS Nursing  Aug 2014 - May 2016", fontsize=8)
         f = Path(tempfile.mkstemp(suffix=".pdf")[1]); d.save(f); return f
 
     current = [e for e, _, c in required if c]
@@ -819,35 +849,33 @@ def selftest() -> int:
 <h1>Jordan Rivera</h1>
 <p>jordan.rivera@example.com · linkedin.com/in/jordanrivera · jordanrivera.example</p>
 <h2>SKILLS</h2>
-<p>Distributed systems, observability, incident response, cross-functional work,
-system architecture, load testing, stakeholder communication.</p>
+<p>Surgical and post-op care, staff scheduling, chart audits, infection control, family
+education, budget planning, new-hire training.</p>
 <h2>EXPERIENCE</h2>
-<div class="job"><b>{current[0]} - Staff Engineer</b> - Mar 2024 - Present
-<p>Shipped the fleet-ops console rebuild, moving 1,070 alert rules into one system.
-Led the cross-functional discovery process, ran field testing with 12 operators, and
-partnered with engineering to ship the rebuild in three phases. Reduced the average
-time-to-complete a dispatch task by rebuilding the console's data flow around
-real operator workflows rather than the underlying data model. Established a weekly code
-review that raised the team's shipped-quality bar and cut rework by consolidating early
-feedback before engineering handoff.</p></div>
-<div class="job"><b>{past[0]} - Senior Engineer</b> - Jun 2021 - Feb 2024
-<p>Shipped a self-serve dashboard used across every enterprise account. Owned the shared toolkit
-that kept the product consistent as the team scaled from 3 to 11 engineers. Ran quarterly architecture
-reviews and mentored two junior engineers through their first shipped features. Partnered
-directly with sales engineering to turn recurring customer feedback into a prioritized,
-quarterly roadmap that closed the team's three largest reliability gaps.</p></div>
+<div class="job"><b>{current[0]} - Nurse Manager</b> - Oct 2022 - Present
+<p>Led the chart audit for the surgical unit, moving 2,315 patient charts into one records system.
+Ran the move of the 32-bed unit to a new wing over two weekends with no missed medication rounds.
+Built a shift handoff checklist with the night team that cut late handoffs on most weeks. Set up
+a monthly case review with the charge nurses that caught charting gaps before the state survey,
+and trained nine new graduates through their first ninety days on the floor. Worked with the
+pharmacy lead on a cleaner process for returning unused doses.</p></div>
+<div class="job"><b>{past[0]} - Charge Nurse</b> - Nov 2018 - Sep 2022
+<p>Led the night shift on a busy outpatient floor with a team that grew from 4 to 10 nurses.
+Owned the shift schedule and the supply order. Ran quarterly safety drills and mentored two new
+nurses through their first year. Worked with the front desk to turn recurring patient complaints
+into a short list of fixes that closed the floor's three longest wait-time gaps.</p></div>
 <h2>SELECTED PROJECTS</h2>
-<p>Fleet console v2, solo build. A side project exploring real-time collaborative
-editing patterns for operational dashboards, built end to end over six weekends, from initial
-research through a working prototype tested with five real operators.</p>
+<p>Community flu clinic, volunteer lead. A yearly free clinic at a public library, planned end to
+end over six weekends, from booking the space and recruiting volunteers to giving the shots and
+reporting the counts to the county health office.</p>
 <h2>EDUCATION</h2>
-<p>State University, B.S. Economics, 2017-2021.</p>
+<p>State University, B.S. Nursing, 2010-2014.</p>
 <h2>CERTIFICATIONS</h2>
-<p>Example Certification Body, Advanced Project Management, 2023. Second Certification Body,
-Accessibility Fundamentals, 2022.</p>
+<p>Registered Nurse, state board license, 2014. Basic Life Support and Advanced Cardiac Life
+Support, renewed 2023.</p>
 <h2>ADDITIONAL</h2>
-<p>Conference speaker, regional engineering meetup (2023, 2024). Volunteer coding mentor, community
-bootcamp program (2022-present).</p>
+<p>Speaker, regional nursing association meeting (2023, 2024). Volunteer health educator, community
+center program (2019-present).</p>
 </body></html>"""
     # A regex-bounded removal of the WHOLE current-employer <div class="job">...</div> block, so
     # this stays correct even as the bullet text above changes. A fragile exact-string .replace()
@@ -856,12 +884,12 @@ bootcamp program (2022-present).</p>
     project_credit_html = re.sub(
         rf'<div class="job"><b>{re.escape(current[0])}.*?</div>\s*', "", FIXTURE_HTML, count=1, flags=re.S
     ).replace(
-        "<p>Fleet console v2, solo build.",
-        f'<p>Fleet console v2 · {current[0]} · Mar 2024 &ndash; Present · solo build.',
+        "<p>Community flu clinic, volunteer lead.",
+        f'<p>Community flu clinic · {current[0]} · Oct 2022 &ndash; Present · volunteer lead.',
     )
     e2e = [
         ("[e2e] a WRONG canonical number is CAUGHT",
-         FIXTURE_HTML.replace("1,070 alert rules", "900 alert rules", 1)),
+         FIXTURE_HTML.replace("2,315 patient charts", "900 patient charts", 1)),
         ("[e2e] a WRONG exact value (email) is CAUGHT",
          FIXTURE_HTML.replace("jordan.rivera@example.com", "someone.else@example.org", 1)),
         ("[e2e] current job only as a dated PROJECT credit is CAUGHT",
@@ -907,8 +935,8 @@ bootcamp program (2022-present).</p>
                 def _synth(w, h, emps, pad_to=0.93):
                     d2 = _fz.open(); pg2 = d2.new_page(width=w, height=h); yy = 50
                     for _e, _s2, _c in emps:
-                        pg2.insert_text((40, yy), f"{_e} - Engineer  {_s2} - "
-                                        f"{'Present' if _c else 'Feb 2024'}", fontsize=8); yy += 12
+                        pg2.insert_text((40, yy), f"{_e} - Nurse  {_s2} - "
+                                        f"{'Present' if _c else 'Sep 2022'}", fontsize=8); yy += 12
                     while yy < h * pad_to:
                         pg2.insert_text((40, yy), "body content line", fontsize=8); yy += 12
                     f2 = tdp / f"s{w}x{h}{len(emps)}.pdf"; d2.save(str(f2)); return f2
@@ -923,8 +951,8 @@ bootcamp program (2022-present).</p>
                 def _footer_trick():
                     d4 = _fz.open(); pg4 = d4.new_page(width=595, height=842); yy = 50
                     for _e, _s4, _c in required:
-                        pg4.insert_text((40, yy), f"{_e} - Engineer  {_s4} - "
-                                        f"{'Present' if _c else 'Feb 2024'}", fontsize=8); yy += 12
+                        pg4.insert_text((40, yy), f"{_e} - Nurse  {_s4} - "
+                                        f"{'Present' if _c else 'Sep 2022'}", fontsize=8); yy += 12
                     while yy < 842 * 0.65:
                         pg4.insert_text((40, yy), "body content line", fontsize=8); yy += 12
                     pg4.insert_text((40, 828), "References available on request", fontsize=7)
@@ -940,13 +968,13 @@ bootcamp program (2022-present).</p>
                     for _e, _s3, _c in required:
                         if _c:
                             continue
-                        pg3.insert_text((40, yy), f"{_e} - Engineer  {_s3} - Feb 2024", fontsize=8); yy += 12
+                        pg3.insert_text((40, yy), f"{_e} - Nurse  {_s3} - Sep 2022", fontsize=8); yy += 12
                     while yy < 842 * 0.80:
                         pg3.insert_text((40, yy), "body content line", fontsize=8); yy += 12
                     pg3.insert_text((40, yy), "SELECTED PROJECTS", fontsize=10); yy += 14
                     cur = next((x for x in required if x[2]), None)
                     if cur:
-                        pg3.insert_text((40, yy), f"Fleet console · {cur[0]} · {cur[1]} - Present · solo build",
+                        pg3.insert_text((40, yy), f"Community flu clinic · {cur[0]} · {cur[1]} - Present · volunteer lead",
                                         fontsize=8); yy += 12
                     while yy < 842 * 0.93:
                         pg3.insert_text((40, yy), "more project detail", fontsize=8); yy += 12

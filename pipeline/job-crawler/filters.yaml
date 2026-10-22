@@ -7,7 +7,8 @@
 # Keep only postings published/updated within this window.
 lookback_hours: 72
 
-# TITLE gate: keep only if the job title contains one of these (case-insensitive substring).
+# TITLE gate: keep only if the job title contains one of these (case-insensitive substring;
+# a term of 3 characters or fewer, like "rn" or "cna", must match as a whole word).
 # THIS IS THE FIELD THAT ACTUALLY TARGETS THE CRAWLER: put your own role titles here, for any
 # role in any industry. It ships empty, and crawl.py refuses to run until it has at least one
 # title (an empty list would match nothing). discover.py uses the same titles to decide which
@@ -72,13 +73,15 @@ flag_patterns: []
 exclude_companies: []
 
 # LOCATION gate: keep only if the posting doesn't clearly name a place outside your target
-# region AND doesn't already carry a rescuing marker. Remote/unknown locations are always
+# region AND doesn't already carry a rescuing US marker. Remote/unknown locations are always
 # kept. Set require_us: false to disable this gate entirely (e.g. if you're not US-based, or
-# you want every location). The two lists below are matched on WORD BOUNDARIES, not bare
-# substrings: this is what stops a blocked term like "india" from also matching the
-# unrelated US city "Indianapolis," or "mexico" from matching "New Mexico." They're generic
-# US-geography data, not tied to any specific role, so they're left filled in as a starting
-# point; trim or extend them for your own target region.
+# you want every location). Every term in the two lists below matches as a WHOLE word or
+# phrase, never a bare substring: "india" does not match "Indianapolis", and "mexico" does not
+# match "New Mexico". The 50 states and DC are built into locations.py, by full name and by
+# code ("Dublin, OH" is kept), so you don't list them here; a code counts only right after a
+# comma. A US marker beats a blocked place, so "London, OH" is kept and "London, UK" is not.
+# They're generic geography data, not tied to any role, so they're left filled in as a starting
+# point. Trim or extend them for your own target region.
 require_us: true
 
 # WORK-MODE gate: where you can actually work. The same rule decides which company boards
@@ -99,25 +102,11 @@ remote_ok: true
 onsite_ok: anywhere
 home_metros: []
 
-us_markers:
+us_markers:          # US places beyond the built-in states (whole words)
   - united states
   - usa
   - "u.s."
-  - " us"
-  - "us,"
-  - "us/"
-  - "us "
-  - ", ca"
-  - ", ny"
-  - ", wa"
-  - ", tx"
-  - ", ma"
-  - ", il"
-  - ", co"
-  - ", ga"
-  - ", fl"
-  - ", nm"          # New Mexico (state abbrev), pairs with 'new mexico' to beat the 'mexico' block
-  - new mexico      # US state; overrides the whole-word 'mexico' location_block match
+  - us
   - san francisco
   - new york
   - seattle
@@ -131,53 +120,144 @@ us_markers:
   - miami
   - bay area
   - nyc
-location_block:
-  - london
+location_block:       # places outside the US (whole words); a US marker in the same text wins
+  # regions
+  - canada
+  - europe
+  - eu
+  - emea
+  - apac
+  - latam
+  - asia
+  - africa
+  - middle east
+  - oceania
+  # Europe
   - united kingdom
-  - " uk"
+  - uk
+  - england
+  - scotland
+  - london
+  - manchester
+  - edinburgh
   - ireland
   - dublin
-  - berlin
   - germany
+  - berlin
   - munich
+  - hamburg
   - france
   - paris
   - spain
   - madrid
   - barcelona
+  - portugal
+  - lisbon
   - netherlands
   - amsterdam
-  - tel aviv
-  - israel
+  - belgium
+  - brussels
+  - switzerland
+  - zurich
+  - austria
+  - vienna
+  - italy
+  - milan
+  - rome
+  - poland
+  - warsaw
+  - krakow
+  - czech republic
+  - prague
+  - romania
+  - bucharest
+  - hungary
+  - budapest
+  - ukraine
+  - kyiv
+  - greece
+  - athens
+  - sweden
+  - stockholm
+  - norway
+  - oslo
+  - denmark
+  - copenhagen
+  - finland
+  - helsinki
+  - turkey
+  - istanbul
+  # Canada and Latin America
+  - toronto
+  - vancouver
+  - montreal
+  - ottawa
+  - calgary
+  - ontario
+  - quebec
+  - british columbia
+  - alberta
+  - mexico
+  - mexico city
+  - brazil
+  - sao paulo
+  - argentina
+  - buenos aires
+  - colombia
+  - bogota
+  - chile
+  - peru
+  - lima
+  # Asia and Oceania
   - india
   - bangalore
   - bengaluru
+  - hyderabad
+  - pune
+  - mumbai
+  - delhi
+  - chennai
+  - pakistan
+  - bangladesh
   - singapore
-  - tokyo
-  - japan
-  - sydney
-  - australia
-  - melbourne
-  - toronto
-  - vancouver
-  - mexico
-  - brazil
-  - poland
-  - warsaw
-  - romania
-  - portugal
-  - lisbon
-  - sweden
-  - stockholm
-  - zurich
-  - switzerland
-  - dubai
-  - hong kong
-  - seoul
-  - korea
-  - taiwan
+  - malaysia
+  - kuala lumpur
+  - indonesia
+  - jakarta
+  - vietnam
+  - thailand
+  - bangkok
   - philippines
   - manila
-  - emea
-  - apac
-  - latam
+  - china
+  - beijing
+  - shanghai
+  - shenzhen
+  - hong kong
+  - taiwan
+  - japan
+  - tokyo
+  - korea
+  - seoul
+  - australia
+  - sydney
+  - melbourne
+  - new zealand
+  - auckland
+  # Middle East and Africa
+  - israel
+  - tel aviv
+  - uae
+  - dubai
+  - abu dhabi
+  - saudi arabia
+  - riyadh
+  - qatar
+  - egypt
+  - cairo
+  - nigeria
+  - lagos
+  - kenya
+  - nairobi
+  - south africa
+  - cape town
