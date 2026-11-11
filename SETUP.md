@@ -196,7 +196,9 @@ why. `pipeline/job-crawler/README.md` has the full detail.
 ```
 It picks the best matches from what the crawler found, researches each one, tailors your résumé and
 cover letter, runs the five-pass review, then **fills each application form in its browser window
-and hands it to you to check and submit.** See `.claude/commands/wave.md` for the procedure and
+and hands it to you to check and submit.** Before it builds anything for a posting that asks for more
+years than you have, it shows you that line and your years and asks whether to skip it; nothing is
+skipped without your yes. See `.claude/commands/wave.md` for the procedure and
 `.claude/rules/application-protocol.md` for the rules it follows.
 
 For outreach (referrals, follow-ups), run `/outreach` in a **separate** session; see

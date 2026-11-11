@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1301" role="img" aria-label="Detailed flow diagram of the job-search engine. The /setup command fills in the knowledge base once; ops holds session memory, read at the start of every session and written at the end. A knowledge base of four minimum files feeds a discovery track (a crawler reading any company's job board on the supported systems, free job APIs and the Hacker News hiring thread, plus postings found by web search) and a build track (dossier, resume plus cover letter, outreach drafts, each showing its real sub-parts), both converging on a grounding gate with two rows: five checks on this one dossier's content, and three checks that run repo-wide every session regardless of dossier, also enforced automatically from the harness. A passing draft goes to two human-approval steps, filling the real form via an isolated browser tool and sending outreach via LinkedIn, that the person themselves submits or sends. A failing draft loops back to Build. The outcome, status, sponsorship, and next action, feeds back into the tracker.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1301" role="img" aria-label="Detailed flow diagram of the job-search engine. The /setup command fills in the knowledge base once; ops holds session memory, read at the start of every session and written at the end. A knowledge base of four minimum files feeds a discovery track (a crawler reading any company's job board on the supported systems, free job APIs and the Hacker News hiring thread, plus postings found by web search) and a build track (dossier, resume plus cover letter, outreach drafts, each showing its real sub-parts), both converging on a grounding gate with two rows: five checks on this one dossier's content, and three checks that run repo-wide every session regardless of dossier, also enforced automatically from the harness. A passing draft goes to two human-approval steps, filling the real form via an isolated browser tool and sending outreach by LinkedIn note, direct message or email, that the person themselves submits or sends. Before a dossier is built, a seniority check compares the years the posting asks for with yours and asks you before a job is skipped. A failing draft loops back to Build. The outcome, status, sponsorship, and next action, feeds back into the tracker.">
   <defs>
     <pattern id="haz" width="26" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
       <rect width="26" height="12" fill="#16130E"/><rect width="13" height="12" fill="#E4002B"/>
@@ -103,6 +103,7 @@
   <!-- connector: tracker picks the next target for Build -->
   <path class="flow" d="M468,320 L700,320 L700,178 L858,178" marker-end="url(#arrow)"/>
   <text class="edgeLabel mono" x="704" y="242">RANKED TARGET</text>
+  <text class="edgeLabel mono" x="704" y="258">SENIORITY ASKS YOU</text>
 
   <!-- BUILD column -->
   <rect class="boxAlt" x="860" y="146" width="368" height="68"/>
@@ -187,7 +188,7 @@
   <text class="disp nodeTitle" x="950" y="812" text-anchor="middle">SEND OUTREACH</text>
   <text class="nodeSub" x="950" y="834" text-anchor="middle">personalized notes</text>
   <text class="nodeSub" x="950" y="852" text-anchor="middle">gated the same way as the r&#233;sum&#233;</text>
-  <text class="tag mono" x="950" y="872" text-anchor="middle">LINKEDIN NOTE + DM</text>
+  <text class="tag mono" x="950" y="872" text-anchor="middle">LINKEDIN NOTE, DM OR EMAIL</text>
 
   <rect x="574" y="908" width="172" height="30" fill="#16130E"/>
   <text x="660" y="928" text-anchor="middle" class="mono onDark" style="font-size:12px; font-weight:700">YOU DECIDE</text>

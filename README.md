@@ -63,6 +63,7 @@ python3 scripts/doctor.py           # is everything set up? each problem comes w
 python3 scripts/verify_claims.py "applications/<company>-<role>"   # outbound copy
 python3 scripts/canon.py            # the knowledge base: no retired claim may be asserted
 python3 scripts/visa_gate.py        # work-authorization answers (the highest-stakes surface)
+python3 scripts/seniority_gate.py --all --unsubmitted   # postings asking for more years than you have
 python3 scripts/check_law.py        # the rules themselves: one owner per rule, no dangling refs
 python3 scripts/slop_check.py "applications/<company>-<role>"      # sentences that read as machine-made
 python3 scripts/throughput.py       # the goal itself: finished work sitting unsent, a dossier
@@ -75,6 +76,14 @@ next-step, is printed at session start, every file written is checked, and a tur
 defect is **blocked**. A company still silent 14 days past its chase date is marked ghosted on its
 own (`GHOST_DAYS` in `scripts/config.py`), and a git hook local to your copy checks your records
 each time you commit.
+
+Two gates read the posting and the form in plain English, so they are strict by design: anything
+they can't read with confidence goes to you instead of passing. `visa_gate.py` accepts a
+work-authorization answer only as a bare Yes or No, one marked option, or wording you recorded in
+`knowledge-base/12-application-answers.md`; anything else is UNVERIFIED. `seniority_gate.py` compares
+the years a posting asks for with yours (`YOUR_YEARS_OF_EXPERIENCE`): a plain bar above your years is
+a DROP, which `/wave` shows you and skips only on your yes, and every other count of years is flagged
+for you to read.
 
 ## Layout
 
