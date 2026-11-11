@@ -34,15 +34,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:  # a throwaway copy that holds none of your files
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parent.parent
 VOICE_CHECK = REPO / "scripts" / "voice_check.py"
 
 # Cover source notes are named a few ways across a dossier tree; the largest markdown
 # file in cover-letter/ is treated as the sendable body when none of these match.
-# "waas-message.md" is an example of a board-specific convention (originally named for
-# a "Work at a Startup"-style job board). It is optional, not load-bearing; add or
-# remove filenames here to match your own dossier naming.
-NOTE_NAMES = ("cover-note.md", "cover-letter.md", "waas-message.md", "message.md")
+# Add or remove filenames here to match your own dossier naming; a note under any other name
+# is still found by that fallback.
+NOTE_NAMES = ("cover-note.md", "cover-letter.md", "message.md")
 
 
 def find_cover_note(cover_dir: Path):
@@ -211,6 +214,18 @@ def selftest() -> int:
             mark = "ok " if good else "FAIL"
             print(f"  [{mark}] got {got}, want {verdict}: {label}"
                   + ("" if good else f"  <-- fails={fails}"))
+        # Which file is the note: a listed name beats a bigger file, and any other name still falls
+        # back to the largest markdown file, so no board-specific name needs listing.
+        for name, files, want in (("listed", {"message.md": "a", "scratch-notes.md": "b" * 400}, "message.md"),
+                                  ("unlisted", {"reply-to-board.md": "a"}, "reply-to-board.md")):
+            cov = root / name
+            cov.mkdir()
+            for fn, body in files.items():
+                (cov / fn).write_text(body, encoding="utf-8")
+            found = find_cover_note(cov)
+            good = found is not None and found.name == want
+            ok = ok and good
+            print(f"  [{'ok ' if good else 'FAIL'}] the {name} note name resolves to {want}: got {found}")
         # Agreement (S6): this gate and `voice_check.py --sendable` read the same note the same way.
         import subprocess as _sp
         for name in ("fenced", "stale", "clean"):

@@ -31,7 +31,7 @@ guesses, and the posting itself says where the job is. Stdlib only, no network.
 
 Run:  python3 locations.py --selftest
 """
-import functools, re, sys
+import functools, re, sys, unicodedata
 
 ONSITE_CHOICES = ("anywhere", "home_metros", "none")
 _REMOTE = re.compile(r"(?<![a-z0-9])(remote|anywhere|distributed|work from home|wfh)(?![a-z0-9])")
@@ -60,10 +60,16 @@ _STATE_NAME = re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(n) for n in so
     set(US_STATES.values()) | {"washington dc", "washington d.c."}, key=len, reverse=True)) + r")(?![a-z0-9])")
 
 
+def _fold(text):
+    """Lowercase with accents removed, so "San José" and "San Jose" are the same place."""
+    t = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(c for c in t if not unicodedata.combining(c)).lower()
+
+
 def _norm_term(t):
     """A filters.yaml place term as plain lowercase text. A term that is only a comma and a state
     code (", tx", the old shape) is dropped: the built-in state codes cover it, matched safely."""
-    t = str(t).strip().lower()
+    t = _fold(t).strip()
     return "" if re.fullmatch(r",\s*[a-z]{2}", t) else t
 
 
@@ -88,7 +94,7 @@ def settings(F):
     onsite = str(onsite).strip().lower().replace("-", "_").replace(" ", "_")
     if onsite not in ONSITE_CHOICES:
         raise ValueError("filters.yaml: onsite_ok must be one of anywhere, home_metros, none.")
-    metros = tuple(str(m).strip().lower() for m in (F.get("home_metros") or []) if str(m).strip())
+    metros = tuple(_fold(m).strip() for m in (F.get("home_metros") or []) if str(m).strip())
     if onsite == "home_metros" and not metros:
         raise ValueError("filters.yaml: onsite_ok is home_metros, so list at least one place under "
                          "home_metros (for example: home_metros: [\"denver\"]).")
@@ -112,7 +118,7 @@ def region_ok(job, F):
     """Region gate. Off unless require_us is true. An empty location is kept."""
     if not F.get("require_us"):
         return True
-    ll = (job.get("location") or "").lower()
+    ll = _fold(job.get("location"))
     if not ll.strip():
         return True
     br = _block_re(tuple(F.get("location_block") or []))
@@ -124,7 +130,7 @@ def region_ok(job, F):
 def us_hit(text, F=None):
     """Does this location text name a US place: a built-in state (code or name) or one of
     filters.yaml's us_markers, each matched as a whole word?"""
-    ll = (text or "").lower()
+    ll = _fold(text)
     if _STATE_CODE.search(ll) or _STATE_NAME.search(ll):
         return True
     ur = _block_re(tuple((F or {}).get("us_markers") or []))
@@ -133,7 +139,7 @@ def us_hit(text, F=None):
 
 def work_mode(job):
     """'remote', 'onsite' (hybrid counts as onsite: you have to be there) or 'unknown'."""
-    ll = (job.get("location") or "").lower()
+    ll = _fold(job.get("location"))
     if _ONSITE.search(ll):
         return "onsite"
     if job.get("remote") is True or _REMOTE.search(ll):
@@ -145,7 +151,7 @@ def work_mode(job):
 
 def in_home_metro(job, metros):
     br = _block_re(tuple(metros))
-    return bool(br and br.search((job.get("location") or "").lower()))
+    return bool(br and br.search(_fold(job.get("location"))))
 
 
 def work_mode_ok(job, F):
@@ -231,6 +237,9 @@ def _selftest():
             pass
     assert "onsite or hybrid in denver" in describe(jr)
     assert settings_key(jr) != settings_key(dict(jr, home_metros=["austin"]))
+    # an accent typed on either side is the same place: "San José" matches "San Jose, CA"
+    assert in_home_metro(J("San Jose, CA"), ("San José",)) and in_home_metro(J("San José, CA"), ("san jose",))
+    assert not in_home_metro(J("Denver, CO"), ("San José",))
     print("locations.py selftest: OK")
     return 0
 

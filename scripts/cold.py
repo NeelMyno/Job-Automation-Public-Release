@@ -2,7 +2,6 @@
 """cold.py: every class of item that can go cold, listed BY NAME, oldest first.
 
 WHY THIS EXISTS
----------------
 Ask a session to "surface everything I have let go cold" and it will find the items that already have
 a loud, dated, by-name surface (an @OWED with a chase date) and miss almost everything else: the
 follow-ups that are only a count ("78 follow-ups due"), the applications with no submit date, the
@@ -22,6 +21,7 @@ THE CLASSES (thresholds live in scripts/config.py, with the defaults below):
   owed-undated       an @OWED dated '?'
   interview-untracked  a live interview with no @OWED (commitments.py's CRITICAL)
   takehome-untracked   a take-home, assessment or exercise in a live row's next: with no @OWED naming it
+                       (one already finished, or one accounted for by a closed @OWED, is history)
   nudge-due          outreach quiet FOLLOWUP_DAYS+ days, nudge not sent (from outreach_queue)
   accept-stale       a connection note not accepted after COLD_ACCEPT_DAYS (default 14): try another
                      channel once, or close the thread
@@ -41,11 +41,17 @@ is truly cold is your call.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import re
 import sys
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -53,7 +59,14 @@ import records as R  # noqa: E402
 
 try:
     import config  # optional user knobs (scripts/config.py)
-except ImportError:  # pragma: no cover
+except Exception as _e:  # a missing file is fine; a file that will not load is named, never a traceback
+    if not (isinstance(_e, ModuleNotFoundError) and _e.name == "config"):
+        import traceback as _tb
+        _line = _e.lineno if isinstance(_e, SyntaxError) else next(
+            (f.lineno for f in reversed(_tb.extract_tb(_e.__traceback__)) if Path(f.filename).name == "config.py"), "?")
+        _why = _e.msg if isinstance(_e, SyntaxError) else f"{type(_e).__name__}: {_e}"
+        print(f"cold: not checked, scripts/config.py line {_line}: {_why}. Fix that line and run this again.")
+        sys.exit(3)
     config = None  # type: ignore[assignment]
 
 def _today() -> date:
@@ -77,6 +90,42 @@ N_REST = int(_knob("COLD_REST_DAYS", 30))       # a parked thread comes back aft
 N_LEAD = int(_knob("COLD_LEAD_DAYS", 21))       # a lead older than this has had its decision window
 REFILL_DAY = _knob("INMAIL_REFILL_DAY", None)   # day of month paid-message credits refill; None = class off
 ASSIGN_RE = re.compile(r"take[- ]home|assignment|assessment|exercise|challenge|work sample|case study task", re.I)
+# A take-home already DONE is history, not an untracked commitment. Done = a done-word in the same clause as
+# the mention, or a closed @OWED that names it. A mention inside a URL or file name is a link, not a commitment.
+DONE_RE = re.compile(r"\b(?:completed?|passed|submitted|done|finished|returned|graded)\b", re.I)
+# "sent" is direction-sensitive: "they sent a take-home" opens one, "take-home sent" or "I sent my take-home" ends it.
+_SENT_AFTER = re.compile(r"\bsent\b(?!\s+(?:to\s+me|me|over|by)\b)", re.I)
+_SENT_BEFORE = re.compile(r"\b(?:i|we|already)\s+sent\b|\bsent\s+(?:my|our|in|back|off)\b", re.I)
+_NOT_YET = re.compile(r"\b(?:not|never|yet\s+to|to\s+be|must\s+be|needs?\s+to|to\s+get|when|once|until|if|after)(?:\s+\w+)?\s*$", re.I)
+CLOSED_OWED_RE = re.compile(r"@OWED-closed\[[^\]]*\]")
+_LINK_TOKEN = re.compile(r"://|^www\.|_|/.*/|\.\w+/|\.[a-z0-9]{2,5}$", re.I)
+
+
+def _done_in(clause: str) -> bool:
+    """A done-word in this clause that is not negated or conditional ("not done", "to be completed", "when done")."""
+    return any(not _NOT_YET.search(clause[:m.start()]) for m in DONE_RE.finditer(clause))
+
+
+def _takehome_open(nxt: str, owed) -> bool:
+    """True when next: names a take-home or assessment that no @OWED (open or closed) accounts for and no
+    done-word marks finished."""
+    if any(ASSIGN_RE.search(o.what) for o in owed):
+        return False
+    if any(ASSIGN_RE.search(c) for c in CLOSED_OWED_RE.findall(nxt)):
+        return False
+    t = CLOSED_OWED_RE.sub(" ", nxt)
+    for m in ASSIGN_RE.finditer(t):
+        a = max(t.rfind(" ", 0, m.start()), t.rfind("\n", 0, m.start())) + 1
+        z = re.search(r"\s|$", t[m.end():]).start() + m.end()
+        if _LINK_TOKEN.search(t[a:z].strip("()[]<>,;:\"'").rstrip(".")):
+            continue  # part of a URL or a file name
+        # the same clause only: "Passed the phone screen, take-home next" is an open take-home
+        before = re.split(r"[,;.]", t[:m.start()])[-1][-40:]
+        after = re.split(r"[,;.]", re.sub(r"^[\s:,\-]+", "", t[m.end():]))[0][:40]
+        if _done_in(before) or _done_in(after) or _SENT_BEFORE.search(before) or _SENT_AFTER.search(after):
+            continue
+        return True
+    return False
 
 
 @dataclass
@@ -162,7 +211,7 @@ def build(repo: Path = REPO, today: date | None = None, q=None) -> list:
                                                       + d.isoformat(), a))
             elif kind in ("unknown", "missing", "bad"):
                 C["app-undated"].items.append(Item(f"{co}: {role}", f"applied {r.get('applied')!r}", None))
-        if st not in R.DEAD_APP and ASSIGN_RE.search(nxt) and not any(ASSIGN_RE.search(o.what) for o in owed):
+        if st not in R.DEAD_APP and _takehome_open(nxt, owed):
             C["takehome-untracked"].items.append(Item(f"{co}: {role}", nxt[:120], None))
         if st == "lead":
             p = _iso(R.s(r.get("posted")))
@@ -246,6 +295,27 @@ def report(classes: list) -> str:
     return "\n".join(L)
 
 
+def _config_guard_cases() -> list:
+    """Run a copy of this script beside a config.py that will not load: plain words, its line, exit 3."""
+    import shutil
+    import subprocess
+    import tempfile
+    here = Path(__file__).resolve()
+    out = []
+    for kind, body, word in (("a syntax error", "X = 1\nX = = 2\n", "invalid syntax"),
+                             ("a raise at import", "X = 1\nraise RuntimeError('boom')\n", "boom")):
+        with tempfile.TemporaryDirectory() as td:
+            for p in here.parent.glob("*.py"):
+                if p.name != "config.py":
+                    shutil.copy(p, td)
+            (Path(td) / "config.py").write_text(body, encoding="utf-8")
+            r = subprocess.run([sys.executable, str(Path(td) / here.name)], capture_output=True, text=True, timeout=60)
+        out.append((f"broken config.py ({kind}): names the line, exit 3, no traceback",
+                    r.returncode == 3 and "scripts/config.py line 2" in r.stdout and word in r.stdout
+                    and "Traceback" not in r.stdout + r.stderr))
+    return out
+
+
 def selftest() -> int:
     import tempfile
     from datetime import timedelta
@@ -274,7 +344,7 @@ def selftest() -> int:
     today = date(2026, 3, 23)
     d = lambda n: (today - timedelta(days=n)).isoformat()  # noqa: E731
     row = ('  {{co:"{co}", role:"{role}", status:"{st}", posted:"{posted}", source:"s", jd:"", apply:"", folder:"{folder}", '
-           'refs:0, everify:"?",{applied} next:"{next}"}},\n')
+           'refs:0,{applied} next:"{next}"}},\n')
 
     def app(co, st="applied", applied=None, nxt="x", posted="unknown", role="Analyst", folder=""):
         return row.format(co=co, role=role, st=st, posted=posted, folder=folder,
@@ -288,35 +358,45 @@ def selftest() -> int:
             (r / "applications" / "mirror-analyst").mkdir(parents=True)
             (r / "applications" / "fathom-analyst").mkdir(parents=True)
             (r / "applications" / "fathom-analyst" / "referrals.md").write_text(
-                "## The messages\n\n### 2 · sam B. (Ads design)\n"
-                "**Ask:** would you be open to referring me?\n\n**Connection note (241 chars):**\n> Hi Sam, a note.\n")
+                "## The messages\n\n### 2 · sam B. (Night charge nurse)\n"
+                "**Ask:** would you be open to referring me?\n\n**Connection note (187 chars):**\n> Hi Sam, a note.\n")
             html = ('<script>const APPLICATIONS = [\n'
-                    + app("Acme", applied=d(63), nxt="waiting")
-                    + app("Globex", applied=f"on or before {d(34)}")
-                    + app("Fresh", applied=d(5))
-                    + app("Owedco", applied=d(60), nxt=f"@OWED[them|{d(1)}|recruiter call]")
+                    + app("Acme", applied=d(72), nxt="waiting")
+                    + app("Globex", applied=f"on or before {d(41)}")
+                    + app("Fresh", applied=d(6))
+                    + app("Owedco", applied=d(66), nxt=f"@OWED[them|{d(1)}|recruiter call]")
                     + app("Initech", st="interview", applied=d(20),
-                          nxt=f"Riley will send a take-home @OWED[them|{d(-3)}|Riley: send the next round]")
+                          nxt=f"Clinic will email a take-home exercise @OWED[them|{d(-3)}|clinic: confirm the panel slot]")
                     + app("Mirror", applied=d(3), folder="applications/mirror-analyst")
-                    + app("OldLead", st="lead", posted=d(40))
+                    + app("OldLead", st="lead", posted=d(44))
                     + app("Edge21", applied=d(21))
                     + app("Edge20", applied=d(20))
-                    + '  {co:"NoDate", role:"Analyst", status:"applied", posted:"unknown", source:"s", jd:"", apply:"", folder:"", refs:0, everify:"?", next:"x"},\n'
+                    + '  {co:"NoDate", role:"Analyst", status:"applied", posted:"unknown", source:"s", jd:"", apply:"", folder:"", refs:0, next:"x"},\n'
                     + app("UnknownDate", applied="unknown")
                     + app("Northwind", st="active", posted=d(30), nxt="sent the DM @OWED[them|2026-03-01|reply to the DM]")
                     + app("Undatedco", st="lead", nxt="@OWED[you|?|decide whether to apply]")
                     + app("Panelco", st="interview", applied="2026-03-01", nxt="panel done, waiting")
                     + app("Fathom", applied=d(3), folder="applications/fathom-analyst")
                     + app("TakeHomeCo", st="applied", applied=d(2), nxt="they sent a take-home assignment, due Friday")
+                    + app("DoneA", st="interview", applied=d(2), nxt="@OWED[them|2030-01-01|panel] TAKE-HOME PASSED, panel next")
+                    + app("DoneB", st="applied", applied=d(2), nxt="Skills assessment completed yesterday")
+                    + app("DoneC", st="applied", applied=d(2), nxt="I sent my take-home back on Monday")
+                    + app("ClosedTok", st="applied", applied=d(2), nxt="@OWED-closed[you|2026-03-01|finish the nursing assessment; passed 2026-03-02]")
+                    + app("LinkCo", st="applied", applied=d(2), nxt="brief at https://example.com/careers/take-home-brief and notes in applications/x/assessment.md")
+                    + app("StillOpen", st="interview", applied=d(2), nxt="@OWED[them|2030-01-01|panel] Passed the phone screen, take-home next")
+                    + app("NotDone", st="applied", applied=d(2), nxt="assessment not done yet")
+                    + app("ToBeDone", st="applied", applied=d(2), nxt="Assessment must be completed by Friday.")
+                    + app("EndsSentence", st="applied", applied=d(2), nxt="Recruiter mentioned a work sample.")
+                    + app("GhostCo", st="ghosted", applied=d(44), nxt="GHOSTED: silent, take-home never arrived")
                     + '];\nconst NETWORK = [\n'
-                    f'  {{name:"Quinn Quiet", company:"Acme", role:"r", status:"active", note:"x", fu:"them|{d(63)}|DM sent, no reply recorded"}},\n'
-                    f'  {{name:"Nadia Note", company:"Acme", role:"r", status:"active", note:"x", fu:"them|{d(15)}|connection note sent, waiting on accept"}},\n'
-                    f'  {{name:"Kai Parked", company:"Globex", role:"r", status:"active", note:"x", fu:"rest|{d(58)}|one nudge sent, no reply recorded"}},\n'
-                    f'  {{name:"Jordan Rivera", company:"Initech", role:"r", status:"active", note:"x", fu:"me|{d(9)}|reply about the referral"}},\n'
-                    f'  {{name:"Clara Closed", company:"Acme", role:"r", status:"active", note:"x", fu:"closed|{d(90)}|role closed"}},\n'
+                    f'  {{name:"Quinn Quiet", company:"Acme", role:"r", status:"active", note:"x", fu:"them|{d(52)}|DM sent, no reply recorded"}},\n'
+                    f'  {{name:"Nadia Note", company:"Acme", role:"r", status:"active", note:"x", fu:"them|{d(17)}|connection note sent, waiting on accept"}},\n'
+                    f'  {{name:"Kai Parked", company:"Globex", role:"r", status:"active", note:"x", fu:"rest|{d(47)}|one nudge sent, no reply recorded"}},\n'
+                    f'  {{name:"Jordan Rivera", company:"Initech", role:"r", status:"active", note:"x", fu:"me|{d(11)}|reply about the referral"}},\n'
+                    f'  {{name:"Clara Closed", company:"Acme", role:"r", status:"active", note:"x", fu:"closed|{d(95)}|role closed"}},\n'
                     '  {name:"Rene Nofu", company:"Northwind", role:"r", status:"active", note:"Connection note sent"},\n'
                     '  {name:"Bea Replied", event:"meetup", role:"Analyst at Globex", status:"active", notes:"REPLIED with a good-luck note"},\n'
-                    '];\nconst STATUS = {lead:{}, active:{}, applied:{}, interview:{}, offer:{}, rejected:{}, passed:{}};\n'
+                    '];\nconst STATUS = {lead:{}, active:{}, applied:{}, interview:{}, offer:{}, rejected:{}, passed:{}, ghosted:{}};\n'
                     'const NET_STATUS = {lead:{}, active:{}, passed:{}};\nlet view="apps";</script>')
             (r / "pipeline" / "tracker.html").write_text(html)
             (r / "pipeline" / "sent-ledger.md").write_text(
@@ -331,22 +411,34 @@ def selftest() -> int:
             cl = {c.key: c for c in build(r, today)}
             names = {k: [i.name for i in c.items] for k, c in cl.items()}
             has = lambda k, s: any(s in n for n in names[k])  # noqa: E731
-            check("app-silent: applied 63 days ago, no @OWED", has("app-silent", "Acme"))
-            check("app-silent: an 'on or before' date ages the row (34 d)", has("app-silent", "Globex"))
-            check("a 5-day application and an @OWED application are not cold",
+            check("app-silent: applied 72 days ago, no @OWED", has("app-silent", "Acme"))
+            check("app-silent: an 'on or before' date ages the row (41 d)", has("app-silent", "Globex"))
+            check("a 6-day application and an @OWED application are not cold",
                   not has("app-silent", "Fresh") and not has("app-silent", "Owedco"))
             check("app-silent: exactly day 21 is cold, day 20 is not", has("app-silent", "Edge21") and not has("app-silent", "Edge20"))
             check("app-undated: no `applied` key, and applied 'unknown'", has("app-undated", "NoDate") and has("app-undated", "UnknownDate"))
-            check("nudge-due: a DM silent 63 days", has("nudge-due", "Quinn Quiet"))
-            check("accept-stale: a connection note not accepted after 15 days", has("accept-stale", "Nadia Note"))
-            check("parked: fu=rest at 58 days comes back", has("parked", "Kai Parked"))
+            check("nudge-due: a DM silent 52 days", has("nudge-due", "Quinn Quiet"))
+            check("accept-stale: a connection note not accepted after 17 days", has("accept-stale", "Nadia Note"))
+            check("parked: fu=rest at 47 days comes back", has("parked", "Kai Parked"))
             check("owed-reply: fu=me", has("owed-reply", "Jordan Rivera"))
             check("contacted-no-fu: ledgered, NETWORK row without fu", has("contacted-no-fu", "Rene Nofu"))
             check("contacted-no-fu: ledgered, no NETWORK row at all", has("contacted-no-fu", "Holly Ledger"))
             check("a closed thread never surfaces", not any("Clara Closed" in n for v in names.values() for n in v))
             check("takehome-untracked: a take-home in next: with no @OWED naming it",
                   has("takehome-untracked", "Initech") and has("takehome-untracked", "TakeHomeCo"))
-            check("lead-stale: a lead posted 40 days ago", has("lead-stale", "OldLead"))
+            check("takehome: a finished one (passed / completed / I sent mine back) is history",
+                  not any(has("takehome-untracked", x) for x in ("DoneA", "DoneB", "DoneC")))
+            check("takehome: a closed @OWED naming it accounts for it", not has("takehome-untracked", "ClosedTok"))
+            check("takehome: a mention inside a URL or a file name is a link", not has("takehome-untracked", "LinkCo"))
+            check("takehome: a done-word in another clause does not hide an open one",
+                  has("takehome-untracked", "StillOpen"))
+            check("takehome: 'not done' and 'must be completed' stay open",
+                  has("takehome-untracked", "NotDone") and has("takehome-untracked", "ToBeDone"))
+            check("takehome: a mention that ends a sentence is not read as a file name",
+                  has("takehome-untracked", "EndsSentence"))
+            check("a ghosted row is dead for the cold classes",
+                  not any("GhostCo" in n for v in names.values() for n in v))
+            check("lead-stale: a lead posted 44 days ago", has("lead-stale", "OldLead"))
             check("lead-undated: a lead with posted unknown", has("lead-undated", "Undatedco"))
             check("owed-undated: an @OWED dated '?'", has("owed-undated", "Undatedco"))
             check("owed-overdue: a chase date in the past", has("owed-overdue", "Northwind"))
@@ -380,20 +472,33 @@ def selftest() -> int:
             empty = build(r, today)
             check("an empty tracker with no ledger yields nothing cold", not any(c.items for c in empty)
                   and session_lines(empty)[0].endswith("nothing (scripts/cold.py)"))
+            (r / "pipeline" / "tracker.html").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main([], repo=r)
+            check("no tracker: says not checked and exits 3, no traceback", (rc, buf.getvalue().strip()) == (3, NO_TRACKER))
     finally:
         REFILL_DAY = saved
+    for _label, _ok in _config_guard_cases():
+        check(_label, _ok)
     print("\nSELFTEST", "OK" if ok else "FAILED")
     return 0 if ok else 1
 
 
-def main(argv: list) -> int:
+NO_TRACKER = "cold: no tracker yet: not checked (pipeline/tracker.html is missing)"
+
+
+def main(argv: list, repo: Path = REPO) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--brief", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
         return selftest()
-    classes = build()
+    if not (repo / "pipeline" / "tracker.html").is_file():
+        print(NO_TRACKER)
+        return 3
+    classes = build(repo)
     print("\n".join(session_lines(classes)) if a.brief else report(classes))
     return 0
 

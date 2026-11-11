@@ -2,7 +2,6 @@
 """tracker_check.py -- verify pipeline/tracker.html actually RENDERS (its embedded JS parses).
 
 ROOT CAUSE THIS CLOSES
------------------------
 A stray unescaped double-quote inside a row's `next:` field (e.g. an already-escaped quote pair
 immediately followed by a bare, un-escaped one) terminates that JS string early and throws a
 SyntaxError that kills the whole <script>, so the tracker renders BLANK -- not "missing a row", the
@@ -12,8 +11,10 @@ TOLERANT regex / brace parsers that shrug off a JS syntax error. The browser doe
 runs the real embedded JS through `node --check` -- the same thing the browser's parser does.
 
 Usage:  tracker_check.py [--selftest]
-Exit 0 = valid (or node unavailable -- reported, never a false fail). 2 = broken (prints the line).
+Exit 0 = valid. 2 = broken (prints the line). 3 = not checked (node is not installed); 3 is never a pass.
 """
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -31,10 +32,11 @@ def extract_js(html: str) -> str:
 
 
 def check_js(js: str):
-    """(ok, message). Uses `node --check`, the authoritative syntax check, when node exists."""
+    """(ok, message). Uses `node --check`, the authoritative syntax check. ok is None when node
+    is missing: nothing was checked, so it is neither a pass nor a failure."""
     node = shutil.which("node")
     if not node:
-        return (True, "node not found -- skipped (install node to enable render checking)")
+        return (None, "node not found (install Node.js from nodejs.org to enable this check)")
     path = None
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
@@ -60,10 +62,26 @@ def selftest() -> int:
         ok = ok and good
         print(f"  {'PASS' if good else 'FAIL'} {desc}: got {got} want {want}")
 
+    # Runs with or without node: pretend node is gone and read what the gate says.
+    with tempfile.TemporaryDirectory() as td:
+        page = Path(td) / "tracker.html"
+        page.write_text("<script>var A=[];</script>")
+        real_which, shutil.which = shutil.which, lambda _name: None
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = run(page)
+        finally:
+            shutil.which = real_which
+    said = out.getvalue()
+    c("no node: exit 3, never a pass", code, 3)
+    c("no node: says not checked", "not checked: node not found" in said, True)
+    c("no node: no checkmark, no 'valid'", "\u2705" in said or "valid" in said, False)
+
     if not shutil.which("node"):
-        print("  (node not on PATH -- cannot run selftest assertions; the gate degrades to a no-op)")
-        print("\nSELFTEST OK (skipped, node absent)")
-        return 0
+        print("\nSELFTEST OK (only the no-node path ran: node not found, so the two JavaScript syntax "
+              "cases did not run)" if ok else "\nSELFTEST FAILED")
+        return 0 if ok else 1
 
     # A valid row with properly escaped quotes must pass.
     good = 'var A=[{co:"Acme Corp", next:"APPLIED, said \\"hello\\" and moved on"}];'
@@ -78,12 +96,19 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def run(tracker: Path) -> int:
+    if not tracker.exists():
+        print("❌ no pipeline/tracker.html")
+        return 2
+    ok, msg = check_js(extract_js(tracker.read_text(errors="ignore")))
+    if ok is None:
+        print(f"tracker_check: not checked: {msg}")
+        return 3
+    print(("✅ tracker JS valid -- " if ok else "❌ tracker JS BROKEN (renders blank in the browser) -- ") + msg)
+    return 0 if ok else 2
+
+
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(selftest())
-    if not TRACKER.exists():
-        print("❌ no pipeline/tracker.html")
-        sys.exit(2)
-    ok, msg = check_js(extract_js(TRACKER.read_text(errors="ignore")))
-    print(("✅ tracker JS valid -- " if ok else "❌ tracker JS BROKEN (renders blank in the browser) -- ") + msg)
-    sys.exit(0 if ok else 2)
+    sys.exit(run(TRACKER))

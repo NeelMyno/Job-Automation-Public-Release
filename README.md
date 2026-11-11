@@ -54,7 +54,7 @@ browser to fill (never submit) real forms. It never touches LinkedIn or your log
 Everything an employer sees is checked by a script, not by an agent remembering to be careful.
 The diagram above shows the checks a single dossier's résumé, cover letter, and outreach draft
 must clear before a human ever sees them. The full repo-wide gate suite is wider than that and
-includes the rules, your records and the goal itself, not just one dossier's content. Every script
+includes the rules, your records and the goal itself, not just one dossier's content. Every check
 in `scripts/` ships its own `--selftest`, green out of the box on a fresh clone. The ones you'll run
 by hand most often:
 
@@ -64,6 +64,7 @@ python3 scripts/verify_claims.py "applications/<company>-<role>"   # outbound co
 python3 scripts/canon.py            # the knowledge base: no retired claim may be asserted
 python3 scripts/visa_gate.py        # work-authorization answers (the highest-stakes surface)
 python3 scripts/check_law.py        # the rules themselves: one owner per rule, no dangling refs
+python3 scripts/slop_check.py "applications/<company>-<role>"      # sentences that read as machine-made
 python3 scripts/throughput.py       # the goal itself: finished work sitting unsent, a dossier
                                     # contradicting itself, commits held back
 ```
@@ -71,7 +72,9 @@ python3 scripts/throughput.py       # the goal itself: finished work sitting uns
 They also run from the harness (`.claude/settings.json` for Claude Code, `.codex/hooks.json` for
 Codex): true state, including every live-interview
 next-step, is printed at session start, every file written is checked, and a turn that introduces a
-defect is **blocked**.
+defect is **blocked**. A company still silent 14 days past its chase date is marked ghosted on its
+own (`GHOST_DAYS` in `scripts/config.py`), and a git hook local to your copy checks your records
+each time you commit.
 
 ## Layout
 
@@ -84,8 +87,10 @@ defect is **blocked**.
 - `.mcp.json`: the one browser tool form filling needs (no keys).
 - `STRUCTURE.md`: where every file goes and how things are named.
 - `knowledge-base/`: canonical knowledge about *you*. `INDEX.md` maps it. Ships empty.
-- `scripts/`: the gates above, the session hooks, the account guard, `doctor.py`, and `config.py`
-  (your optional settings).
+- `scripts/`: the gates above, the session hooks, the account guard, `doctor.py`, `config.py` (your
+  optional settings), `render_cover.py` (cover letter PDF), checks on form answers (`why_check.py`,
+  `work_history_check.py`), `ghost.py`, `commit_guard.py`, and small `form_*.js` helpers that read a
+  live form.
 - `.claude/`: the commands (`/setup` to get started, `/wave` for applications, `/outreach` for
   networking), `rules/` (the application protocol and the record formats), the five-pass review
   workflow, and `settings.json` (the hooks).

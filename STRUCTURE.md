@@ -17,7 +17,7 @@ file has no obvious home below, it is not dropped in a folder root; find its hom
 | `applications/` | **Active** per-job dossiers: one folder per job, `<company>-<role>/`. Copy `TEMPLATE-company-role/` to start one. | constantly |
 | `resume/` | The current résumé: `resume.html` (source) → the built PDF, `fonts/`. | per application |
 | `pipeline/` | Engine output + live SSOT: `tracker.html` (the whole picture of your search), `sent-ledger.md`, `inmail-ledger.md`, `job-feed.md`, `job-crawler/` (crawl, discover, sources). | when crawling |
-| `scripts/` | Repo tooling: the gates (`verify_claims.py` is the grounding gate, §0.1 of `CLAUDE.md`), the session hooks, `account_guard.py` (§0.2), `doctor.py` (the health check), and `config.py` (your optional settings, the one place your own values live). | rarely |
+| `scripts/` | Repo tooling: the gates (`verify_claims.py` is the grounding gate, §0.1 of `CLAUDE.md`), the session hooks, `account_guard.py` (§0.2), `doctor.py` (the health check), `config.py` (your optional settings, the one place your own values live), `ghost.py` (marks silent companies ghosted), `commit_guard.py` (record gates at commit time), `why_check.py`, `work_history_check.py` and `slop_check.py` (form answers and letters), `render_cover.py` (cover letter PDF), `open_tab_sweep.py` (labels open form tabs), and `form_blanks.js`, `form_persist.js`, `form_answers.js` (read a live form through the browser tool). | rarely |
 | `docs/` | This document set: design notes for anything the repo renders (e.g. the tracker dashboard). | rarely |
 | root files | `CLAUDE.md` (operating manual, read first), `SETUP.md` (onboarding by hand; `/setup` does it for you), `README.md` (human overview), `STRUCTURE.md` (this), `.mcp.json` (the browser tool form filling uses; no keys, shared with everyone, so personal servers never go in it). | n/a |
 
@@ -57,6 +57,7 @@ The two exceptions, because each earns its scheme:
 | A job board or job source you want searched | `pipeline/job-crawler/boards.yaml` or `sources.yaml` (the agent adds them with `discover.py`) |
 | A preference or convention you stated | `knowledge-base/11-preferences-and-conventions.md` |
 | How you write, a voice sample, a phrase you never use | `knowledge-base/17-writing.md` |
+| A story, opinion or reason of yours, in your own words | `knowledge-base/18-in-your-own-words.md` |
 | A temp / scratch / probe file | the session scratchpad, NOT the repo. If it must live here, use **`.claude/tmp/`**, the gitignored path. |
 | Codex project configuration, hooks, or command policy | `.codex/`, tracked; keep transient state outside the repo |
 | A Codex adapter for an existing workflow | `.agents/skills/<skill-name>/SKILL.md`: point to the canonical owner instead of copying it |
@@ -94,7 +95,7 @@ Loose emails, screenshots, and call notes NEVER sit in the dossier root; they go
 1. **Every file has a home; nothing loose accumulates in a folder root.**
 2. **Supersede → archive or delete, in the same change.** A stale doc beside current work is worse
    than a missing one.
-3. **Gitignore what must never publish or bloat git:** secrets (`.env`, `.mcp.json`), `ops/STATE.md`,
+3. **Gitignore what must never publish or bloat git:** secrets (`.env`, `.mcp.local.json`), `ops/STATE.md`,
    `.DS_Store`, large binaries. Never `git add -A` blind; stage only what belongs.
 4. **Leave every folder tidier than you found it.**
 5. **Moving or renaming files:** use `git mv` (preserves history). In the SAME commit, grep every live

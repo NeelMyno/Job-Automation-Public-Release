@@ -2,7 +2,6 @@
 """records.py: ONE reader for the record surfaces (the tracker, the sent-ledger).
 
 WHY THIS EXISTS
----------------
 A tracker read by three different parsers (a status regex in one script, a regex that needed `{co:`
 first and the `applications/` folder prefix in another, a brace walker in a third) tolerates three
 different sets of defects. A row in a shape one parser did not know is neither surfaced nor counted,
@@ -31,6 +30,10 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
@@ -38,10 +41,13 @@ ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EM_DASH = "\u2014"
 
 # APPLICATIONS
-APP_STATUSES = ("lead", "active", "applied", "interview", "offer", "rejected", "passed")
-SUBMITTED = frozenset({"applied", "interview", "offer", "rejected"})
+APP_STATUSES = ("lead", "active", "applied", "interview", "offer", "rejected", "passed", "ghosted")
+# ghosted: the company stopped answering after you applied. Submitted (the `applied` date stays required),
+# not live, not rejected, dead for outreach and the cold classes. scripts/ghost.py sets it by itself after
+# GHOST_DAYS of silence past the newest chase date; a reply reopens it (records-format.md section 1).
+SUBMITTED = frozenset({"applied", "interview", "offer", "rejected", "ghosted"})
 LIVE_APP = frozenset({"applied", "interview", "offer", "active"})
-DEAD_APP = frozenset({"rejected", "passed"})
+DEAD_APP = frozenset({"rejected", "passed", "ghosted"})
 PRE_SUBMIT = frozenset({"lead", "active"})
 UNKNOWN = "unknown"
 # applied: the submit date. Exact, or an upper bound ("on or before": the submit happened that day or
@@ -329,6 +335,23 @@ def norm(x: str) -> str:
     return re.sub(r"\s+", " ", (x or "").strip()).casefold()
 
 
+_CO_SUFFIX = re.compile(r"[,.]?\s+(?:inc|llc|ltd|corp|corporation|co|company)\.?$", re.I)
+
+
+def co_key(name: str) -> str:
+    """One key per company: the name before any bracketed aside, without a legal suffix, letters and
+    digits only ('Acme (Series B)' and 'Acme', 'Globex, Inc.' and 'globex' are one company). The
+    bracket's contents are never a key on their own: 'Series B' would join unrelated companies."""
+    base = re.sub(r"\s*[(\[].*$", "", (name or "").strip())
+    base = _CO_SUFFIX.sub("", base.strip())
+    return re.sub(r"[^a-z0-9]+", "", base.casefold())
+
+
+def same_company(a: str, b: str) -> bool:
+    ka, kb = co_key(a), co_key(b)
+    return bool(ka) and ka == kb
+
+
 CREDENTIAL = re.compile(r"^(?:PhD|MBA|MD|MS|MFA|Jr\.?|Sr\.?|II|III|CPA|PMP)$")
 
 
@@ -399,6 +422,14 @@ def selftest() -> int:
     c("ledger: the application row type is recognised", [r.kind for r in rows] == ["send", "application"])
     c("person_key strips a bracketed role and a credential",
       person_key("Jordan Rivera (CEO)") == person_key("Jordan Rivera") == person_key("Jordan Rivera, PhD"))
+    c("ghosted is a known status: submitted, dead, not live",
+      "ghosted" in APP_STATUSES and "ghosted" in SUBMITTED and "ghosted" in DEAD_APP and "ghosted" not in LIVE_APP)
+    c("co_key folds a bracketed aside and a legal suffix",
+      same_company("Acme (Series B)", "Acme") and same_company("Globex, Inc.", "globex")
+      and same_company("Initech LLC", "Initech") and same_company("Northwind (Northwind Health Co.)", "Northwind"))
+    c("co_key: a bracket alone never joins two companies, and empty names never match",
+      not same_company("Hooli (Series B)", "Umbrella (Series B)") and not same_company("", "")
+      and not same_company("Acme", "Acme Northwind"))
     c("@OWED is read through commitments.py",
       [(o.owner, o.what) for o in owed("Acme", "@OWED[them|2026-01-09|send the take-home]", "next")]
       == [("them", "send the take-home")])

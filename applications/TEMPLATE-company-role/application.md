@@ -14,7 +14,9 @@
 ## Form questions
 
 <!-- Filled in once you've actually opened the form. Every field the form asks, fetched live, not
-assumed. Anything sensitive (especially work-authorization) quoted CHARACTER-FOR-CHARACTER. -->
+assumed. Anything sensitive (especially work-authorization) quoted CHARACTER-FOR-CHARACTER.
+One field per line: `- <question as printed> (required; options: Yes, No)`. This list holds no
+answers; they go in the next section. -->
 
 - [ ]
 
@@ -26,13 +28,16 @@ assumed. Anything sensitive (especially work-authorization) quoted CHARACTER-FOR
 - Resume: [exact filename] ([bytes])
 - Cover letter: [exact filename] ([bytes])
 - [Long free-text field]: ([char count]) [one-line paraphrase; full text lives in cover-note.md]
+- [Work-history entry, if the form has them]: [title, employer, dates as the résumé prints them; description = that role's bullets]
 - 🔴 Work-authorization field(s), worded EXACTLY as the form printed them:
   - "[exact printed question]" → [Yes or No: the answer knowledge-base/12-application-answers.md §3
     gives for that exact wording]
-  - One question per line, in this shape: `- "<question exactly as printed>" → Yes` (or `→ No`). For
-    a statement-style option, quote the option and add the Yes/No it means:
-    `- "<question>" → "<option text>" (= No)`. `scripts/visa_gate.py` reads this shape and reports
-    any answer it cannot read as UNVERIFIED.
+  - One question per line, in this shape: `- "<question exactly as printed>" → Yes` (or `→ No`). The
+    value is a bare Yes or No, or the exact wording recorded in §3. For a statement-style option,
+    quote the statement and write what it means for you: `- "<statement as printed>" → No`.
+    `scripts/visa_gate.py` reports anything else as UNVERIFIED, so a person looks at it.
+  - A form that asked nothing about work authorization gets this one line, exactly:
+    `- No work-authorization question on this form.`
 - EEO/self-identification: [values used per §5b, or "not present on this form"]
 
 ## The single next action

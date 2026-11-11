@@ -24,6 +24,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

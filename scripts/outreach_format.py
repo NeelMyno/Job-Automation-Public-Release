@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""outreach_format.py: every person you are handed comes with all three parts. No exceptions.
+"""outreach_format.py: every person you are handed comes with every part that applies to them.
 
 WHY THIS EXISTS
----------------
 A half-finished handover (a name with a note but no message, or a message with no way to send it)
 is what makes you have to ask an agent for the same format again and again. Prose instructions
 don't execute reliably on their own; a check does.
 
 THE THREE PARTS, and why each one is load-bearing
---------------------------------------------------
-1. **The LinkedIn profile URL.** Without it you have to go find the person before you can act. The
-   handover stops being actionable and becomes homework.
+1. **The person's profile.** Without it you have to go find the person before you can act. The
+   handover stops being actionable and becomes homework. A LinkedIn URL is the usual form. Plenty of
+   people have none (an office manager at a small practice), so a `Profile:` line holding any other
+   profile or staff-page URL counts, and so does `Profile: none found (where you looked)`. For
+   those people the connection note and the InMail verdict do not apply, and this script names the
+   LinkedIn gap so the handover says it out loud.
 2. **The connection note** (under 300 chars). The free, always-available channel. Connection state
    is unknowable in advance, so this always ships.
 3. **The direct message**, with an explicit `Use InMail: YES/NO` verdict. If you're already
@@ -18,7 +20,6 @@ THE THREE PARTS, and why each one is load-bearing
    and accounted (`pipeline/inmail-ledger.md`), so the verdict travels with the copy.
 
 THE REFERENCE SHAPE
---------------------
 Per person, on disk, inside `## The messages`:
 
     ### N · Full Name: why them, in a few words
@@ -31,12 +32,11 @@ Per person, on disk, inside `## The messages`:
 and in chat, grouped by company, read verbatim off that file:
 
     ## COMPANY: Role
-    **Name**, why · https://www.linkedin.com/in/handle · *ask = be considered*
+    **Name**, why · https://www.linkedin.com/in/handle · *ask = a referral*
     - **Note:** ...
     - **DM:**   ...
 
 WHAT THIS DOES NOT CHECK, said out loud
-----------------------------------------
 It cannot read what an agent types into chat. It gates the FILE the chat is supposed to be read off.
 If an agent invents copy in chat that is not on disk, that is a grounding failure and
 `verify_claims.py`'s problem, not this one. It also does not judge whether the copy is any good;
@@ -59,9 +59,23 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parents[1]
 
 PROFILE = re.compile(r"linkedin\.com/in/[A-Za-z0-9\-_%]+", re.I)
+# A person with no LinkedIn: any other URL on a `Profile:` line, or an explicit `Profile: none found`.
+PROFILE_LINE = re.compile(r"\bProfile\*{0,2}\s*:\s*\*{0,2}\s*(?P<value>[^\n]*)", re.I)
+PROFILE_NONE = re.compile(r"none found\b", re.I)
+# A template slot such as [linkedin.com/in/... URL] is not a URL; a markdown link [text](url) is.
+UNFILLED_SLOT = re.compile(r"\[[^\]]*\](?!\()")
+# The posting has no req or job ID (a small employer's own site), recorded on its own line.
+REQ_NONE = re.compile(r"^\s*[-*]?\s*\*{0,2}Req(?:/job ID)?\*{0,2}\s*:\s*\*{0,2}\s*none on posting\b", re.I | re.M)
+PROFILE_PART = "the person's profile (a LinkedIn or other profile URL on a `Profile:` line, or `Profile: none found`)"
+# A heading still holding the template's own slot, such as "[Name], [Role] at [Company]", is nobody.
+PLACEHOLDER_HEADING = re.compile(r"^\[[^\]]*\]")
 # An ordinal prefix is a real, common dossier convention ("**#1 Connection note (272 chars):**",
 # "**#2 Direct message · Use InMail: NO**"). Without accounting for it these regexes go blind to a
 # whole block, reporting "missing the connection note" while the note sits two lines below.
@@ -82,7 +96,7 @@ NOT_A_PERSON = re.compile(
 NOT_DRAFTED = re.compile(r"NOT[ -]DRAFTED|no messages? (?:yet|drafted)|research(?:-| )stage|"
                          r"deliberately not drafted|do not send|skip\b", re.I)
 
-# ── ALREADY SENT is not "about to be handed over". ────────────────────────────
+# ALREADY SENT is not "about to be handed over".
 # This gate exists to stop a HALF-FINISHED HANDOVER reaching you. Copy that already went to a real
 # human cannot be fixed, and rewriting it would be dishonest about what was sent. Leaving it red
 # forever recreates a worse defect: a permanently-on warning nobody reads, hiding the real finding
@@ -97,10 +111,13 @@ NOT_DRAFTED = re.compile(r"NOT[ -]DRAFTED|no messages? (?:yet|drafted)|research(
 # sources/-forgery ban (CLAUDE.md §0.1 ban #5) in a new coat.
 UNSENT_TAIL = re.compile(r"SEND THIS NOW|not yet sent|unsent|still to send|hold expired|send now", re.I)
 
+# "NOT SENT 2026-01-01: the site asked for an email first" is the opposite of history, and the bare
+# word SENT beside a date would read it as already sent and take that person out of every check. The
+# lookbehinds refuse "not " and "never " directly in front of the word; "not yet sent" is UNSENT_TAIL's.
 ALREADY_SENT = re.compile(
-    r"(?:\bSENT\b|\bsent by (?:me|you)\b|✅\s*SENT)[^\n]{0,60}?"
+    r"(?:(?<!not )(?<!never )\bSENT\b|\bsent by (?:me|you)\b|✅\s*SENT)[^\n]{0,60}?"
     r"(?:20\d\d-\d\d-\d\d|\b\d{1,2}/\d{1,2}/20\d\d\b)"
-    r"|(?:20\d\d-\d\d-\d\d)[^\n]{0,40}?\bSENT\b",
+    r"|(?:20\d\d-\d\d-\d\d)[^\n]{0,40}?(?<!not )(?<!never )\bSENT\b",
     re.I)
 
 
@@ -127,7 +144,7 @@ def person_blocks(text: str) -> list[tuple[str, str]]:
     out = []
     for i, h in enumerate(hits):
         name = h.group("name").strip().strip("*_`")
-        if NOT_A_PERSON.match(name):
+        if NOT_A_PERSON.match(name) or PLACEHOLDER_HEADING.match(name):
             continue
         end = hits[i + 1].start() if i + 1 < len(hits) else len(body)
         # Include the heading LINE itself. Real dossiers sometimes put the profile URL on the
@@ -137,23 +154,22 @@ def person_blocks(text: str) -> list[tuple[str, str]]:
     return out
 
 
-# ── THE ACTION-POINT LADDER (CLAUDE.md §13.6), as a gate. ────────────────────────────
+# THE ACTION-POINT LADDER (CLAUDE.md §13.6), as a gate.
 # The doctrine: every message carries a genuine, direct ask, and, IF you keep a portfolio or
 # public page (set in knowledge-base/01 as "Portfolio / personal site"), a link to it, so the
 # recipient has something to look at. A link with no ask is a brochure. Many people (a nurse, an
 # electrician, a store manager) have no portfolio at all, so with none configured the link is
-# never required and only the ask is checked. Calibrated against real messages: the ones
-# that convert end in a direct second-person request ("Could you consider me for one of these, or
-# route me to whoever owns them?"); the ones that don't read as a shrug ("I'd rather know than
-# guess" is grammatically a preference, not a request, so the recipient can correctly do nothing).
-# Any link: a full URL, or a bare domain in any top-level domain ("janedoe.org/rn", "sam.nyc").
+# never required and only the ask is checked. An ask is a request the reader can act on ("Can you
+# forward this to the hiring lead?"). A closing like "Thanks for reading either way" is not: the
+# reader can read it and correctly do nothing.
+# Any link: a full URL, or a bare domain in any top-level domain ("samlee.org/rn", "sam.nyc").
 ANY_URL = re.compile(
     r"https?://[^\s)>\]]+"
     r"|(?<![\w.@])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24}\b(?!@)(?:/[^\s)>\]]*)?",
     re.I,
 )
 ACTION_ASK = re.compile(
-    r"(?:could|can|would|will)\s+you\b"                    # "Could you consider me"
+    r"(?:could|can|would|will)\s+you\b"                    # "Could you forward this"
     r"|\bany chance you\b|\bare you open to\b|\bwould you be open\b"
     r"|\bi'?d\s+like\s+to\s+be\s+(?:considered|referred|in the mix)\b"
     r"|\bplease\s+(?:consider|refer|point|pass|forward|take a look)"
@@ -161,9 +177,9 @@ ACTION_ASK = re.compile(
     r"|\bpoint me (?:at|to|toward)\b|\bput me in front of\b"
     r"|\bif you'?d\s+(?:nudge|flag|forward|pass|refer|point)\b"
     r"|\bworth (?:a look|two minutes)\b.{0,80}\?"
-    r"|\bis\s+(?:the|there)\b[^.?]{0,90}\?"               # "is the X track the right door?"
+    r"|\bis\s+(?:the|there)\b[^.?]{0,90}\?"               # "is there a person who handles this?"
     # Second-person imperatives are asks too, and arguably stronger than a modal question because
-    # they name the act directly: "Pull up my site and say whether…", "send me one name".
+    # they name the act directly: "show me the schedule", "tell me who hires for this".
     r"|\b(?:tell|show|send|give|point|pass|flag|forward)\s+me\b"
     r"|\b(?:pull up|take a look at|look at|spend\s+\w+\s+minutes? on|have a look at)\b"
     r"|\bsay\s+(?:whether|if|so)\b|\bgive me your read\b|\byour read\b"
@@ -195,7 +211,7 @@ def portfolio_url() -> str | None:
 
 
 def _bare(url: str) -> str:
-    """`https://www.janedoe.org/rn/` -> `janedoe.org/rn`, so the copy can write it either way."""
+    """`https://www.samlee.org/rn/` -> `samlee.org/rn`, so the copy can write it either way."""
     return re.sub(r"^(?:https?://)?(?:www\.)?", "", url.strip(), flags=re.I).rstrip("/")
 
 
@@ -217,11 +233,11 @@ def action_gaps(block: str, portfolio: str | None = "") -> list[str]:
         gaps.append(f"the action item (a link to {_bare(site)}, your portfolio in knowledge-base/01)")
     if not ACTION_ASK.search(body):
         gaps.append("an explicit ask directed at THEM (a request they can act on, not a "
-                    "statement of preference like \"I'd rather know than guess\")")
+                    "closing line like \"Thanks for reading either way\")")
     return gaps
 
 
-# ── SPECIFICITY: a role reference carries its req ID. ─────────────────────────────────
+# SPECIFICITY: a role reference carries its req ID.
 # Not a style preference: an actionability defect. A referral generally can't be submitted
 # without a specific requisition number, so a message that references "a role that's open" with no
 # ID asks the recipient to go do the search you didn't do. And any ID you DO print must be real: an
@@ -244,7 +260,7 @@ OPENING_REF = re.compile(
     re.I,
 )
 
-# A PREFIXED requisition (e.g. a hyphenated "R-100234" or "O-2233326965") is ONE token, but reasoning
+# A PREFIXED requisition (e.g. a hyphenated "R-100234" or "O-1000000002") is ONE token, but reasoning
 # about digit SUBSTRINGS breaks it: the leading letter-hyphen opens a word boundary right before the
 # digits, so a bare `\b(\d{6,10})\b` alternative matches only the inner digits and the whole real req
 # reads as invented. The prefixed alternative goes FIRST so finditer consumes the whole token at the
@@ -254,10 +270,10 @@ OPENING_REF = re.compile(
 # minimum) keeps it off short hyphenated tokens that are not requisitions at all.
 JOB_ID = re.compile(
     r"\b([A-Za-z]{1,2}-\d{4,10})\b"                                # e.g. a prefixed req like R-100234
-    r"|\b(R\d{4,6})\b"                                             # e.g. an R-prefixed req like R20051
+    r"|\b(R\d{4,6})\b"                                             # e.g. an R-prefixed req like R12345
     r"|\b(\d{6,10})\b"                                              # e.g. Greenhouse, Lever, Workday
     r"|\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b"   # Ashby uuid
-    r"|\b([0-9A-F]{10})\b",                                        # e.g. Workable 7D5CF84724
+    r"|\b([0-9A-F]{10})\b",                                        # e.g. a Workable code like 1A2B3C4D5E
     re.I,
 )
 
@@ -307,9 +323,10 @@ def specificity_gaps(block: str, known: set | None = None) -> list[str]:
     scope = block[m.start():] if m else block
     body = "\n".join(re.findall(r"^>.*$|^```[\s\S]*?^```", scope, re.M)) or scope
     ids = _ids_in(body)
-    if OPENING_REF.search(body) and not ids:
+    if OPENING_REF.search(body) and not ids and not REQ_NONE.search(_outside_copy(block)):
         gaps.append("the req/job ID for the opening it points at (a referral generally can't be "
-                    "submitted without one; the referrer needs a specific requisition)")
+                    "submitted without one; the referrer needs a specific requisition). If the "
+                    "posting has none, record `Req: none on posting` on its own line")
     known_ids = repo_verified_reqs() if known is None else known
     bogus = sorted(i for i in ids if i not in known_ids)
     if bogus:
@@ -318,7 +335,7 @@ def specificity_gaps(block: str, known: set | None = None) -> list[str]:
     return gaps
 
 
-# ── PARAGRAPHING. A wall of text does not get read. ────────────────────────────────────
+# PARAGRAPHING. A wall of text does not get read.
 # A single unbroken block over ~500 characters renders in a DM pane as a grey slab, and the ask
 # gets buried in the middle of it. The recipient doesn't need to dislike the message to skip it,
 # they just need to not see where it goes.
@@ -353,25 +370,57 @@ def paragraph_gaps(block: str) -> list[str]:
     return gaps
 
 
+def _outside_copy(block: str) -> str:
+    """The block without its quoted or fenced message text: a marker only counts as a record line,
+    so "my profile: example.com" inside a message is not a profile on file."""
+    return re.sub(r"^>.*$", "", re.sub(r"^```[\s\S]*?^```", "", block, flags=re.M), flags=re.M)
+
+
+def profile_state(block: str) -> str:
+    """'linkedin', 'other' (another URL on a Profile: line), 'none' (`Profile: none found`) or ''."""
+    if PROFILE.search(block):
+        return "linkedin"
+    for m in PROFILE_LINE.finditer(_outside_copy(block)):
+        value = UNFILLED_SLOT.sub("", m.group("value")).strip(" *_")
+        if PROFILE_NONE.match(value):
+            return "none"
+        if re.search(r"https?://\S", value) or ANY_URL.match(value):
+            return "other"
+    return ""
+
+
+def _is_history(block: str) -> bool:
+    """Research-stage on purpose, or already sent to a real person on a real date."""
+    return bool(NOT_DRAFTED.search(block)
+                or (ALREADY_SENT.search(block) and not UNSENT_TAIL.search(block)))
+
+
+def linkedin_gaps(text: str) -> list[str]:
+    """Everyone with drafted copy and no LinkedIn on record. Allowed, and said out loud."""
+    return [name for name, block in person_blocks(text)
+            if not _is_history(block) and profile_state(block) in ("other", "none")
+            and (NOTE.search(block) or DM.search(block))]
+
+
 def scan_text(rel: str, text: str, known_ids: set | None = None, portfolio: str | None = "") -> list[Finding]:
     out: list[Finding] = []
     for name, block in person_blocks(text):
-        if NOT_DRAFTED.search(block):
-            continue  # explicitly research-stage; a roster is not outreach material
-        if ALREADY_SENT.search(block) and not UNSENT_TAIL.search(block):
-            continue  # it went to a real person on a real date; history, not a handover
+        if _is_history(block):
+            continue  # research-stage (a roster is not outreach material), or it already went out
         # A connection note is a connection REQUEST: you can't send one to someone you're already
         # connected to, so a block that records 1st-degree is complete without it.
         already_connected = re.search(r"\b1st°|\b1st\s*degree|already connected", block, re.I)
+        profile = profile_state(block)
+        no_linkedin = profile in ("other", "none")  # no connection request or InMail can reach them
         has = {
-            "the LinkedIn profile URL": bool(PROFILE.search(block)),
-            "the connection note": bool(NOTE.search(block)) or bool(already_connected),
+            PROFILE_PART: bool(profile),
+            "the connection note": bool(NOTE.search(block)) or bool(already_connected) or no_linkedin,
             "the direct message": bool(DM.search(block)),
         }
-        if not any(has.values()):
+        if not (profile in ("linkedin", "other") or NOTE.search(block) or DM.search(block) or already_connected):
             continue  # nothing drafted for this person at all (research stage)
         missing = [k for k, v in has.items() if not v]
-        if has["the direct message"] and not INMAIL.search(block):
+        if has["the direct message"] and not no_linkedin and not INMAIL.search(block):
             missing.append("the `Use InMail: YES/NO` verdict on the DM")
         if has["the direct message"]:
             missing.extend(action_gaps(block, portfolio=portfolio))
@@ -382,160 +431,254 @@ def scan_text(rel: str, text: str, known_ids: set | None = None, portfolio: str 
     return out
 
 
-def targets() -> list[Path]:
-    return sorted(REPO.glob("applications/*/referrals.md")) + \
-           sorted(REPO.glob("pipeline/outreach-*.md"))
+def targets(root: Path = REPO) -> list[Path]:
+    """Every real handover file. A TEMPLATE-* folder ships as blank slots and is nobody's dossier."""
+    return [p for p in sorted(root.glob("applications/*/referrals.md"))
+            if not p.parent.name.startswith("TEMPLATE-")] + \
+           sorted(root.glob("pipeline/outreach-*.md"))
 
 
-# ── selftest fixtures: every name, handle, and company below is invented. ──────────────
-_KNOWN = {"5735407004", "2412e9c2-fdd4-43d6-bd13-7345e82c9ec7", "7D5CF84724", "R20051", "R-100234"}
+# selftest fixtures: every name, handle, and company below is invented.
+_KNOWN = {"1000000001", "a1b2c3d4-0000-4000-8000-000000000001", "1A2B3C4D5E", "R12345", "R-100234"}
+
+
+def _req(line: str) -> str:
+    """A complete, well-formed handover whose second paragraph is the line under test."""
+    return ("## The messages\n### 1 · Sam Lee: the site supervisor\n"
+            "**Profile: https://www.linkedin.com/in/samlee-example**\n"
+            "**#1 Connection note (20 chars):**\n> Hello from Globex.\n"
+            "**#2 Direct message · Use InMail: NO**\n> Hello,\n\n"
+            f"> {line}\n\n"
+            "> My references are at example.com. Can you pass them to the hiring lead?\n\n> Alex\n")
+
+
+_SMALL = """## The messages
+### 1 · Jordan Rivera: office manager at Acme Dental
+{profile}
+{req}
+**Direct message · no LinkedIn, send through the practice's contact page**
+> Hello Jordan, the Dental Assistant opening on your site is the one I mean.
+> My certificate is at example.com. Can you pass it to the dentist who hires?
+"""
+_TEAM = "**Profile: https://acme-dental.example/team**"
+_NO_REQ = "Req: none on posting"
+_UNTOUCHED = """## The messages
+### 1 · [Name], [Role] at [Company]
+
+Profile: [linkedin.com/in/... URL] · why them: [one line]
+
+**Connection note** ([char count], under 300):
+```
+[under ~300 chars, one paragraph]
+```
+
+**Direct message · Use InMail: [YES/NO]** ([one-line reason])
+```
+Hi [Name],
+```
+
+### 2 · [Name], NOT DRAFTED (research-stage)
+
+[reason]
+"""
 
 CASES: list[tuple[str, str, bool]] = [
-    ('a GREENHOUSE 10-digit req id is a real id',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, job ID 5735407004.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
-    ('an ASHBY uuid req is a real id',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, Ashby req 2412e9c2-fdd4-43d6-bd13-7345e82c9ec7.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
-    ('a WORKABLE code is a real id',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, Workable posting 7D5CF84724.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
-    ('an R-prefixed requisition is a real id',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, req R20051.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
+    ("a staff-page profile plus a recorded no-req marker is a complete handover (no LinkedIn needed)",
+     _SMALL.format(profile=_TEAM, req=_NO_REQ), False),
+    ("the marker in bold on its own line counts", _SMALL.format(profile=_TEAM, req="**Req: none on posting**"), False),
+    ("`Profile: none found` is a complete profile line",
+     _SMALL.format(profile="Profile: none found (searched the practice site)", req=_NO_REQ), False),
+    ("a markdown link on the Profile line counts",
+     _SMALL.format(profile="Profile: [team page](https://acme-dental.example/team)", req=_NO_REQ), False),
+    ("a bare domain on the Profile line counts",
+     _SMALL.format(profile="Profile: acme-dental.example/team", req=_NO_REQ), False),
+    ("an opening with no ID and no marker is still caught", _SMALL.format(profile=_TEAM, req=""), True),
+    ("the words 'none on posting' inside the message do not count as the marker",
+     _SMALL.format(profile=_TEAM, req="").replace("> Hello Jordan,", "> Req: none on posting\n> Hello Jordan,"), True),
+    ("the no-req marker never excuses an invented ID",
+     _SMALL.format(profile=_TEAM, req=_NO_REQ).replace("opening on your site", "opening, job 77777777,"), True),
+    ("no Profile line at all is still caught", _SMALL.format(profile="", req=_NO_REQ), True),
+    ("a Profile line still holding the template slot is still caught",
+     _SMALL.format(profile="Profile: [linkedin.com/in/... URL] · why them: [one line]", req=_NO_REQ), True),
+    ("a URL after 'profile:' inside the message is not a profile on file",
+     _SMALL.format(profile="", req=_NO_REQ).replace("> Hello Jordan,", "> My profile: https://acme.example/me\n> Hello Jordan,"), True),
+    ("`Profile: none found` with nothing drafted is research-stage", """## The messages
+### 1 · Sam Lee: warehouse lead
+Profile: none found (the depot has no staff page)
+""", False),
+    ("a staff page with no message drafted is still half a handover", """## The messages
+### 1 · Sam Lee: warehouse lead
+Profile: https://northwind.example/staff
+""", True),
+    ("a LinkedIn person still needs the InMail verdict", """## The messages
+### 1 · Sam Lee: warehouse lead
+Profile: https://www.linkedin.com/in/samlee-example
+**Connection note (20 chars):**
+> Hello Sam.
+**Direct message**
+> Hello Sam. My forklift card is at example.com. Can you pass it to the shift manager?
+""", True),
+    ("the untouched template is nobody: no finding", _UNTOUCHED, False),
+    ("a real name with leftover slots in the heading stays a person", """## The messages
+### 1 · Jordan Rivera, [Role] at [Company]
+**Connection note (20 chars):**
+> Hello Jordan.
+""", True),
+    ("a 10-digit Greenhouse-style id is a real id", _req("The Payroll Clerk opening lists job ID 1000000001."), False),
+    ("an Ashby-style uuid is a real id",
+     _req("The Line Cook posting carries Ashby id a1b2c3d4-0000-4000-8000-000000000001."), False),
+    ("a Workable-style code is a real id", _req("The Forklift Operator opening is Workable code 1A2B3C4D5E."), False),
+    ("an R-prefixed requisition is a real id", _req("The Store Manager role is listed as R12345."), False),
     # A HYPHENATED requisition is ONE token, not a digit substring: "R-100234" must pass whole,
     # never be misread as the bare digits "100234" and flagged invented.
-    ('a hyphenated requisition is a real, verified req (whole token, not the substring after the hyphen)',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, req R-100234.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', False),
-    ('an INVENTED hyphenated req must still be caught (whole-token, still gated)',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, req R-999999.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
-    ('an INVENTED numeric req must still be caught',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, job ID 99999999.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
-    ('an INVENTED ashby uuid must still be caught',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, Ashby req deadbeef-0000-0000-0000-000000000000.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
-    ('an opening named with NO id at all must still be caught',
-     '## The messages\n### 1 · Req Person: a hiring manager\n**Profile: https://www.linkedin.com/in/reqperson**\n**#1 Connection note (20 chars):**\n> Hi there.\n**#2 Direct message · Use InMail: NO**\n> Hi,\n\n> The Charge Nurse role is open, remote in the US.\n\n> Open example.com and tell me whether it fits?\n\n> Jordan\n', True),
+    ("a hyphenated requisition is a real, verified req (whole token, not the substring after the hyphen)",
+     _req("The Dental Hygienist role is req R-100234."), False),
+    ("an INVENTED hyphenated req must still be caught (whole-token, still gated)",
+     _req("The Bus Driver role is req R-777777."), True),
+    ("an INVENTED numeric req must still be caught", _req("The Substitute Teacher role is job 77777777."), True),
+    ("an INVENTED uuid must still be caught",
+     _req("The Electrician posting carries Ashby id cafef00d-0000-0000-0000-000000000000."), True),
+    ("an opening named with NO id at all must still be caught",
+     _req("The Phlebotomist opening is at the downtown lab."), True),
     ("an ORDINAL-PREFIXED note + DM is seen", """## The messages
-### 1 · Ordinal Person: a hiring manager
-**Profile: https://www.linkedin.com/in/ordinalperson**
+### 1 · Sam Lee: the shift lead
+**Profile: https://www.linkedin.com/in/samlee-example**
 **#1 Connection note (40 chars):**
-> Hi, quick hello.
+> Hello from the Acme depot.
 **#2 Direct message · Use InMail: NO**
-> Hi,
+> Hello,
 
-> Would you look at example.com and tell me whether req 5735407004 is the right door?
+> My shift log is at example.com. Can you send it to whoever reviews req 1000000001?
 """, False),
     ("an ordinal-prefixed DM with NO connection note must still FAIL", """## The messages
-### 1 · Half Person: a hiring manager
-**Profile: https://www.linkedin.com/in/halfperson**
+### 1 · Sam Lee: the shift lead
+**Profile: https://www.linkedin.com/in/samlee-example**
 **#2 Direct message · Use InMail: NO**
-> Hi, would you look at example.com and tell me if req 5735407004 is the right door?
+> Hello, my shift log is at example.com. Can you send it to whoever reviews req 1000000001?
 """, True),
     ("already-SENT copy with a DATE is history, not a handover", """## The messages
-### 1 · Gone Person: a hiring manager
-**Profile: https://www.linkedin.com/in/goneperson**
+### 1 · Alex Kim: the buyer
+**Profile: https://www.linkedin.com/in/alexkim-example**
 > **SENT LOG (2026-01-01):** sent the connection note.
 **#1 Connection note (40 chars):**
-> Hi, hello.
+> Hello from Northwind.
 **#2 Direct message · Use InMail: NO**
-> Hi, no ask here and one giant block.
+> Hello, this has no request in it at all.
 """, False),
     ("a SENT marker must NOT hide a newer UNSENT draft in the same block", """## The messages
-### 1 · Mixed Person: a hiring manager
-**Profile: https://www.linkedin.com/in/mixedperson**
+### 1 · Alex Kim: the buyer
+**Profile: https://www.linkedin.com/in/alexkim-example**
 > **SENT LOG (2026-01-01):** sent the connection note.
 **#1 Connection note (40 chars):**
-> Hi, hello.
+> Hello from Northwind.
 **#3 Email · SEND THIS NOW. Use InMail: NO**
-> Hi, still no ask in here.
+> Hello, the invoices went out on Friday.
+""", True),
+    ("'NOT SENT <date>' is the opposite of history and must not suppress", """## The messages
+### 1 · Alex Kim: the buyer
+**Profile: https://www.linkedin.com/in/alexkim-example**
+NOT SENT 2026-01-01: the site asked for an email address first.
+**#1 Connection note (40 chars):**
+> Hello from Northwind.
+""", True),
+    ("'never sent' with a date after it must not suppress either", """## The messages
+### 1 · Alex Kim: the buyer
+**Profile: https://www.linkedin.com/in/alexkim-example**
+Never sent, checked 2026-01-01.
+**#1 Connection note (40 chars):**
+> Hello from Northwind.
 """, True),
     ("an UNDATED 'SENT' must not suppress: the marker records history or nothing", """## The messages
-### 1 · Vague Person: a hiring manager
-**Profile: https://www.linkedin.com/in/vagueperson**
-> **SENT LOG:** sent at some point.
+### 1 · Alex Kim: the buyer
+**Profile: https://www.linkedin.com/in/alexkim-example**
+> **SENT LOG:** went out some time ago.
 **#1 Connection note (40 chars):**
-> Hi, hello.
+> Hello from Northwind.
 **#2 Direct message · Use InMail: NO**
-> Hi, no ask here at all.
+> Hello, the invoices went out on Friday.
 """, True),
-    ("a DM with no ACTION ITEM: no link to act on", """## The messages
-### 1 · Test Person: a manager
-**Profile: https://www.linkedin.com/in/testperson**
-**Connection note (40 chars):**
-> Hi, your work on X was interesting. Could you take a look at my work?
-**Direct message · Use InMail: NO**
-> Hi, I run the night shift at a 40-bed unit. Could you point me at the right door?
-""", True),
-    ("a DM with a link but NO ASK: a real rejected shape", """## The messages
-### 1 · Test Person: a manager
-**Profile: https://www.linkedin.com/in/testperson**
-**Connection note (40 chars):**
-> Hi, your work on X was interesting. Would you take a look? example.com
-**Direct message · Use InMail: NO**
-> Hi, I run the night shift at a 40-bed unit. My work is at example.com. If this is not the right door, I would rather know than guess.
-""", True),
-    ("all three parts present, well-formed", """## The messages
-### 1 · Sam Okafor: the hiring manager, DMs invited
-**Profile: https://www.linkedin.com/in/samokafor**
-**Connection note (60 chars):**
-> Hi Sam, saw your post and applied through your link.
-**Direct message · Use InMail: NO for now** (ledger balance unknown)
-> Hi Sam, your Staff Accountant post asks for someone who has run a month-end close alone.
-> Work is at example.com. Could you consider me for it?
-""", False),
-    ("a profile and a note but NO message: the half-handover", """## The messages
-### 1 · Robin Ashworth: growth lead
-**Profile: https://www.linkedin.com/in/robinashworth**
-**Connection note (60 chars):**
-> Hi Robin, your post about the new store layout made me smile.
-""", True),
-    ("both messages but NO profile URL: the recipient can't be found", """## The messages
-### 1 · Robin Ashworth: growth lead
-**Connection note (40 chars):**
-> Hi Robin, your line made me smile.
-**Direct message · Use InMail: NO**
-> Hi Robin, I applied to the Growth role.
-""", True),
-    ("a DM with no InMail verdict: the channel decision is missing", """## The messages
-### 1 · Robin Ashworth: growth lead
-**Profile: https://www.linkedin.com/in/robinashworth**
-**Connection note (40 chars):**
-> Hi Robin.
-**Direct message**
-> Hi Robin, I applied.
-""", True),
-    ("a research-stage roster with nothing drafted is NOT a failure", """## The messages
-### 1 · Someone To Research: found via the board sweep
-Profile research pending; hooks not fetched yet.
-""", False),
-    ("an explicit NOT DRAFTED marker is respected", """## The messages
-### 1 · Bo Beta: founding engineer, reports-to for this req
-**Profile: https://www.linkedin.com/in/bobeta-example**
-NOT DRAFTED: deliberately left for the outreach pass so it passes the gate.
-""", False),
-    ("section furniture is not read as a person", """## The messages
-### Drafted 2026-01-01 (day-1 batch)
-**Cards for this audience**: IN = systems depth.
-""", False),
-    ("a 1st-degree contact needs no connection REQUEST: must not be flagged", """## The messages
-### 3 · Chloe Marsh: "Support Lead at Acme Studio" (1st°, viewed ~2w ago), DAY 3
-- Profile: https://www.linkedin.com/in/chloemarsh-example/
-- **Use InMail: NO** (1st-degree).
-**DM (607 chars):**
-> Hi Chloe, I am reaching out about the Support Engineer opening, job 5735407004.
-> My work is at example.com. Would you point me at the right person?
-""", False),
-    ("a portfolio is configured but the DM carries no link to it: flagged", """## The messages
-### 1 · Jordan Rivera: the hiring manager
+    ("a DM with an ask but no link, when a portfolio is configured", """## The messages
+### 1 · Jordan Rivera: the office manager
 **Profile: https://www.linkedin.com/in/jordanrivera-example**
 **Connection note (40 chars):**
-> Hi Jordan, I applied to the Lead Teacher role.
+> Hello, we met at the Acme job fair.
 **Direct message · Use InMail: NO**
-> Hi Jordan, I applied and would love your read on it. Would you point me at the right person?
+> Hello, I keep the books for three dental offices. Can you pass this to whoever hires for finance?
+""", True),
+    ("a DM with a link but NO ASK: the reader has nothing to do", """## The messages
+### 1 · Jordan Rivera: the depot manager
+**Profile: https://www.linkedin.com/in/jordanrivera-example**
+**Connection note (40 chars):**
+> Hello, I saw the Northwind fleet news.
+**Direct message · Use InMail: NO**
+> Hello, I drive a 26-foot box truck out of the Northwind depot. My safety record is at example.com. Thanks for reading either way.
+""", True),
+    ("all three parts present, well-formed", """## The messages
+### 1 · Jordan Rivera: the practice manager
+**Profile: https://www.linkedin.com/in/jordanrivera-example**
+**Connection note (60 chars):**
+> Hello Jordan, we met at the Acme job fair.
+**Direct message · Use InMail: NO for now** (ledger balance unknown)
+> Hello Jordan, the clinic's evening roster needs a second medical assistant, and I hold that certificate.
+> A copy is at example.com. Can you forward it to the practice owner?
+""", False),
+    ("a profile and a note but NO message: the half-handover", """## The messages
+### 1 · Alex Kim: produce manager
+**Profile: https://www.linkedin.com/in/alexkim-example**
+**Connection note (60 chars):**
+> Hello Alex, the new Hooli store layout looks good.
+""", True),
+    ("both messages but NO profile URL: the recipient can't be found", """## The messages
+### 1 · Alex Kim: produce manager
+**Connection note (40 chars):**
+> Hello Alex.
+**Direct message · Use InMail: NO**
+> Hello Alex, my application is in.
+""", True),
+    ("a DM with no InMail verdict: the channel decision is missing", """## The messages
+### 1 · Alex Kim: produce manager
+**Profile: https://www.linkedin.com/in/alexkim-example**
+**Connection note (40 chars):**
+> Hello Alex.
+**Direct message**
+> Hello Alex, my application is in.
+""", True),
+    ("a research-stage roster with nothing drafted is NOT a failure", """## The messages
+### 1 · Sam Lee: name from a staff page
+Contact details still to find.
+""", False),
+    ("an explicit NOT DRAFTED marker is respected", """## The messages
+### 1 · Sam Lee: warehouse lead
+**Profile: https://www.linkedin.com/in/samlee-example**
+NOT DRAFTED: waiting on the shift schedule.
+""", False),
+    ("section furniture is not read as a person", """## The messages
+### Drafted 2026-01-01
+**Talking points**: none yet.
+""", False),
+    ("a 1st-degree contact needs no connection REQUEST: must not be flagged", """## The messages
+### 3 · Alex Kim: "Support Lead at Acme" (1st°)
+- Profile: https://www.linkedin.com/in/alexkim-example/
+- **Use InMail: NO** (1st-degree).
+**DM (90 chars):**
+> Hello Alex, the Help Desk Technician opening is job 1000000001.
+> My certificates are at example.com. Can you send them to the team lead?
+""", False),
+    ("a portfolio is configured but the DM carries no link to it: flagged", """## The messages
+### 1 · Jordan Rivera: the head teacher
+**Profile: https://www.linkedin.com/in/jordanrivera-example**
+**Connection note (40 chars):**
+> Hello Jordan, we spoke at the district open day.
+**Direct message · Use InMail: NO**
+> Hello Jordan, my application is in. Can you forward it to the department chair?
 """, True),
     ("a profile URL on the HEADING line counts", """## The messages
-### Noah Bergstrom: engineer at Globex · https://www.linkedin.com/in/noahbergstrom-example
+### Sam Lee: foreman at Globex · https://www.linkedin.com/in/samlee-example
 **Connection note (60 chars):**
-> Hi Noah, I applied to the Senior role.
+> Hello Sam, we spoke at the union hall.
 **Direct message · Use InMail: NO**
-> Hi Noah, I applied and would love your read on it.
-> My work is at example.com. Would you point me at the right person?
+> Hello Sam, my application is in.
+> Site photos are at example.com. Can you show them to the project manager?
 """, False),
 ]
 
@@ -545,17 +688,17 @@ _NO_LINK_DM = """## The messages
 ### 1 · Alex Kim: the clinic manager
 **Profile: https://www.linkedin.com/in/alexkim-example**
 **Connection note (40 chars):**
-> Hi Alex, I applied to the Charge Nurse role.
+> Hello Alex, my application is in.
 **Direct message · Use InMail: NO**
-> Hi Alex, I applied to the Charge Nurse role, job 5735407004, and have run a night shift for six years. Would you point me at the right person?
+> Hello Alex, the Charge Nurse role is job 1000000001, and I hold a current state license. Can you forward my name to the nurse manager?
 """
-_ORG_LINK_DM = _NO_LINK_DM.replace("for six years.", "for six years. My licence and references are at janedoe.org/rn.")
+_ORG_LINK_DM = _NO_LINK_DM.replace("state license.", "state license. A copy is at samlee.org/rn.")
 LINK_CASES: list[tuple[str, str, str | None, bool]] = [
     ("no portfolio configured: a DM with an ask and no link is NOT flagged", _NO_LINK_DM, None, False),
-    ("a .org portfolio configured: a DM linking janedoe.org/rn passes", _ORG_LINK_DM, "janedoe.org/rn", False),
+    ("a .org portfolio configured: a DM linking samlee.org/rn passes", _ORG_LINK_DM, "samlee.org/rn", False),
     ("a portfolio configured with https://www.: the bare form in the DM still counts", _ORG_LINK_DM,
-     "https://www.janedoe.org/rn/", False),
-    ("a .org portfolio configured: a DM with no link IS flagged", _NO_LINK_DM, "janedoe.org/rn", True),
+     "https://www.samlee.org/rn/", False),
+    ("a .org portfolio configured: a DM with no link IS flagged", _NO_LINK_DM, "samlee.org/rn", True),
 ]
 
 
@@ -576,11 +719,39 @@ def selftest() -> int:
         mark = ("✓ CAUGHT " if should else "✓ allowed") if ok else \
                ("✗ MISSED " if should else "✗ FALSE-POSITIVE")
         print(f"  {mark}  {label}")
-    for text, want in (("see janedoe.org/rn", True), ("at sam.nyc", True), ("portfolio.cs.stateu.edu", True),
+    for text, want in (("see samlee.org/rn", True), ("at sam.nyc", True), ("portfolio.cs.stateu.edu", True),
                        ("mail sam.lee@acme.example", False), ("no link here at all", False)):
         ok = bool(ANY_URL.search(text)) == want
         passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
         print(f"  {'✓ url     ' if ok else '✗ URL     '}  ANY_URL on {text!r} -> {want}")
+    gaps = linkedin_gaps(_SMALL.format(profile=_TEAM, req=_NO_REQ))
+    ok = gaps == ["Jordan Rivera: office manager at Acme Dental"]
+    passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+    print(f"  {'✓ gap     ' if ok else '✗ GAP     '}  a person with no LinkedIn is named as a LinkedIn gap")
+    ok = linkedin_gaps(_req("The Payroll Clerk opening lists job ID 1000000001.")) == []
+    passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+    print(f"  {'✓ gap     ' if ok else '✗ GAP     '}  a person with a LinkedIn URL is not a gap")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for folder in ("TEMPLATE-company-role", "acme-clerk"):
+            (root / "applications" / folder).mkdir(parents=True)
+            (root / "applications" / folder / "referrals.md").write_text(_UNTOUCHED, encoding="utf-8")
+        ok = [p.parent.name for p in targets(root)] == ["acme-clerk"]
+    passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+    print(f"  {'✓ template' if ok else '✗ TEMPLATE'}  the sweep skips a TEMPLATE-* folder and keeps a copied dossier")
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        small = Path(td) / "referrals.md"
+        small.write_text(_SMALL.format(profile=_TEAM, req=_NO_REQ), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            main([str(small)])
+    said = out.getvalue()
+    ok = "LINKEDIN GAP" in said and "CLEAN:" in said and "all three parts" not in said
+    passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+    print(f"  {'✓ clean   ' if ok else '✗ CLEAN   '}  a clean run naming a LinkedIn gap never claims all three parts")
     print()
     # portfolio_url() itself must run cleanly against the real repo (configured or not).
     p = portfolio_url()
@@ -590,9 +761,9 @@ def selftest() -> int:
     # tokenization directly (not just the pass/fail classification above), so the regression can
     # never come back even if the classification set changes.
     for text, want in (("point at req R-100234", {"R-100234"}),
-                       ("a hyphenated req O-2233326965", {"O-2233326965"}),
-                       ("an R-prefixed req R20051", {"R20051"}),
-                       ("Greenhouse job 5735407004", {"5735407004"})):
+                       ("a hyphenated req O-1000000002", {"O-1000000002"}),
+                       ("an R-prefixed req R12345", {"R12345"}),
+                       ("Greenhouse job 1000000001", {"1000000001"})):
         got_ids = _ids_in(text)
         ok = got_ids == want
         passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
@@ -627,6 +798,7 @@ def main(argv: list[str]) -> int:
     missing = [str(p) for p in paths if not p.is_file()]
 
     findings: list[Finding] = []
+    no_linkedin: list[str] = []
     checked = 0
     for p in paths:
         if not p.is_file():
@@ -636,10 +808,13 @@ def main(argv: list[str]) -> int:
             rel = str(p.resolve().relative_to(REPO))
         except ValueError:
             rel = str(p)
-        findings.extend(scan_text(rel, p.read_text(encoding="utf-8", errors="replace")))
+        text = p.read_text(encoding="utf-8", errors="replace")
+        findings.extend(scan_text(rel, text))
+        no_linkedin.extend(f"{rel}: {name}" for name in linkedin_gaps(text))
 
     print(f"outreach_format.py: checked {checked} file(s) for the three-part handover (CLAUDE.md §13.6)")
-    print("  every person: the LinkedIn profile URL · the connection note · the DM + its InMail verdict")
+    print("  every person: a profile (LinkedIn, another URL, or `Profile: none found`) · the connection note "
+          "· the DM + its InMail verdict")
     print("  NOT checked: whether the copy is good (knowledge-base/17-writing.md owns voice;"
           " verify_claims.py owns length and evidence),")
     print("               and what an agent types into chat; this gates the FILE the chat is read off.")
@@ -650,8 +825,13 @@ def main(argv: list[str]) -> int:
         print("   Pass a dossier directory, a referrals.md, or no argument at all to sweep the repo.",
               file=sys.stderr)
         return 2
+    if no_linkedin:
+        print(f"\nLINKEDIN GAP, {len(no_linkedin)} person(s). Say this in the handover: no LinkedIn on record, so no "
+              "connection note or InMail; the message goes by another route (email, the employer's contact page).")
+        for line in no_linkedin:
+            print(f"  {line}")
     if not findings:
-        print(f"\nCLEAN: every drafted person in {checked} file(s) carries all three parts.")
+        print(f"\nCLEAN: every drafted person in {checked} file(s) carries every part that applies to them.")
         return 0
     print(f"\n{len(findings)} HALF-FINISHED HANDOVER(S):\n")
     for f in findings:

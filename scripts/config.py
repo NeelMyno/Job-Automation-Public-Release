@@ -14,7 +14,7 @@ values below; never hardcode a name or path back into throughput.py / outreach_q
 from __future__ import annotations
 
 # Your name, exactly as it might appear in your own dossier notes when YOU (not an agent) did
-# something, e.g. "SUBMITTED 2026-07-21 by Jordan", "Jordan filled this form by hand". Used by
+# something, e.g. "SUBMITTED 2030-03-14 by Jordan", "Jordan filled this form by hand". Used by
 # throughput.py to recognize a self-attested submission or a self-attested form fill.
 # Leave as None to fall back to name-independent phrasing ("by hand", "filled it myself"); the
 # checks work correctly with zero configuration; setting this only sharpens them for your own notes.
@@ -37,8 +37,8 @@ RECRUITER_PLATFORM_KEYWORDS: list[str] = []
 
 # Your own years of professional experience, used by seniority_gate.py to flag a JD asking for
 # materially more years than you actually have (a role you'd be dropped from at the resume screen,
-# not one worth spending a tailored application on). Leave as None to skip that check entirely: it
-# is silently skipped (not a failure) rather than guessing a number.
+# not one worth spending a tailored application on). Left as None, the gate checks nothing and says
+# so: it prints NOT CHECKED and exits 3, which is never a pass. It never guesses a number.
 YOUR_YEARS_OF_EXPERIENCE: int | None = None
 
 # Absolute URL to your own LIVE, published résumé (the one a recruiter actually downloads), if you
@@ -76,6 +76,10 @@ COLD_ACCEPT_DAYS: int = 14
 COLD_REST_DAYS: int = 30
 COLD_LEAD_DAYS: int = 21
 
+# ghost.py: days of silence past a company's newest chase date before its application is marked
+# ghosted on its own (CLAUDE.md section 7). Write "no auto-ghost" in a row's `next` to keep that row live.
+GHOST_DAYS: int = 14
+
 # Day of the month your paid messaging credits refill, if you use any (the optional InMail ledger).
 # Leave as None if you don't; nothing depends on it.
 INMAIL_REFILL_DAY: int | None = None
@@ -84,6 +88,10 @@ INMAIL_REFILL_DAY: int | None = None
 # it (knowledge-base/12-application-answers.md §3 owns when to mention it). Set False to turn the
 # check off.
 WORK_AUTH_MENTION_CHECK: bool = True
+
+# slop_check.py: when True, its two narrow TO FIX shapes fail the check and stop the turn. Set False
+# to make every finding a second look that is printed for a re-read and blocks nothing.
+SLOP_CHECK_BLOCKS: bool = True
 
 # hooks.py: the record reflex at the end of a turn (CLAUDE.md §7). Set False to turn it off.
 RECORD_REFLEX: bool = True

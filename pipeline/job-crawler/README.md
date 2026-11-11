@@ -24,7 +24,7 @@ can go into `discover.py --urls -`; add the rest as lead rows in `pipeline/track
 there (the agent fills those forms too). When a crawl finds 3 matches or fewer, its `hints` say
 this too.
 
-Also included: **`liveness.py`**, a clean-room ghost-job re-checker. Re-verify a lead is still live
+Also included: **`liveness.py`**, a clean-room ghost-job re-checker. Check a lead is still live
 before spending time tailoring or applying to it: `python3 liveness.py --url <URL>` or `--tracker`.
 Greenhouse, Lever and Ashby postings are checked against the board's public API (the job id is on
 the board or it isn't). SmartRecruiters, Workable, Workday and every other URL get a page check: the
@@ -129,7 +129,7 @@ deciding what goes where:
   the feed's Flag column. These phrases live in `filters.yaml` under `flag_patterns`, empty by
   default. Pass `--hide-no-sponsor` to exclude them from a run instead.
 - **Hard legal walls belong in `exclude_patterns`** if they're genuine dead ends for you: a
-  citizenship-only requirement, a clearance you don't hold, an ITAR restriction, whatever actually
+  citizenship-only requirement, a license or certification you don't hold, whatever actually
   applies to your situation. Empty by default; add your own.
 
 A posting that trips both a wall and a soft flag is dropped (the wall always wins). Don't merge
@@ -157,6 +157,11 @@ It also carries **`dropped`**: how many postings each rule turned away (`title`,
 `location`, `age`, `no_sponsor_hidden`, each explained in `dropped_reasons`), so a thin run says
 which rule removed the rest. When `remote_ok` is false but most jobs came from sources that list remote
 jobs only and no company board was read, `hints` says so and points at `discover.py --sweep`.
+`raw_jobs` counts every posting read from every source (company boards, job APIs and Hacker News), and
+`boards` counts company boards only, so `boards: 0` beside a large `raw_jobs` is normal on an empty
+`boards.yaml`. Each source's own share is its `jobs` value in `sources`.
+Dates and times use `local_now()` from `scripts/config.py` when that file exists (your `TIMEZONE`), and
+this computer's local time otherwise.
 
 Outputs (with `--write`):
 - **`pipeline/job-feed.md`**: a scannable table of the fresh matches (rewritten each run), with a
@@ -169,9 +174,14 @@ fit (`title_fit`: 3 = the title is exactly one of yours, 2 = contains one as who
 of a word), then newest. With `include_keywords` empty every score is 0 and only title fit and
 freshness rank; the JSON `ranking` field says which applies.
 
-Without `--write`, `crawl.py` prints its matches as JSON to stdout and touches nothing else. This
-is useful if you just want the job list and plan to handle the rest yourself (see the companion
-crawler-only release of this repo, if that's all you need).
+Without `--write`, `crawl.py` prints its matches as JSON to stdout and touches nothing else. Use
+it for a quick look at what a run would find.
+
+**Exit codes.** `crawl.py` exits 0 when the run worked, even with no matches; 2 when `filters.yaml`
+has no titles, or `filters.yaml` or `boards.yaml` is broken (the message names the file and the
+line); 3 when nothing could be fetched (every source failed, or every source was off), which is
+never a run with no jobs. A missing `boards.yaml` or a missing or broken `sources.yaml` does not
+stop the run: it carries on with the feeds it has and says so in `hints` and `sources`. `discover.py --sweep` likewise exits 3 when no board could be checked (the index did not answer).
 
 ## Files
 
@@ -181,11 +191,13 @@ crawler-only release of this repo, if that's all you need).
 - `hn.py`: the HN "Who's Hiring" collector, used by `crawl.py`.
 - `http_util.py`: the shared URL reader (gzip, retry on a cut-off read).
 - `liveness.py` / `test_liveness.py`: the ghost-job re-checker and its offline test suite.
-- `test_discover.py`, `test_sources.py`: offline tests for discovery, the job APIs and the crawl
-  report. No network.
+- `test_crawl.py`, `test_discover.py`, `test_http_util.py`, `test_sources.py`: offline tests for the
+  crawler, discovery, the URL reader, the job APIs and the crawl report. No network.
 - `boards.yaml`: company boards (ATS + slug). Filled by `discover.py`; you can add rows by hand.
 - `filters.yaml`: your titles, the patterns to drop or flag, and the location gates (`require_us`
   for the region; `remote_ok`, `onsite_ok`, `home_metros` for where you can work).
+- `config_files.py`: reads the settings files, so a missing or broken one ends in a plain message
+  (`--selftest` runs offline).
 - `locations.py`: the location rule `crawl.py` and `discover.py` share (`--selftest` runs offline).
 - `titles.py`: the title rule `crawl.py` and `discover.py` share. A title term matches as a substring,
   except a term of 3 characters or fewer ("rn", "qa", "pm"), which must be a whole word so it never

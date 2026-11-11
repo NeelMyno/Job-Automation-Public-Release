@@ -7,17 +7,21 @@ separately against the live boards.
 
 Run:  python3 test_liveness.py           (or: python3 -m unittest test_liveness -v)
 """
+import argparse
 import unittest
+from datetime import datetime, timedelta, timezone
+from unittest import mock
+
 import liveness as L
 
 # A realistic single-line tracker row (single-quotes only inside values, like the real file).
 SAMPLE_ROW = (
     '  {co:"Northwind", role:"Senior Staff Accountant", loc:"Columbus, OH, US", comp:"\u2014", compK:null, '
-    'status:"lead", fit:"watch", spon:"ask", posted:"2026-06-29", source:"crawl-jobs", '
-    'jd:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", '
-    'apply:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", folder:null, refs:0, '
-    'everify:"unknown", next:"Read the full JD, tailor, apply.", '
-    'link:"https://job-boards.greenhouse.io/northwind/jobs/5995303004", '
+    'status:"lead", fit:"watch", spon:"ask", posted:"2031-02-11", source:"crawl-jobs", '
+    'jd:"https://job-boards.greenhouse.io/northwind/jobs/1000000002", '
+    'apply:"https://job-boards.greenhouse.io/northwind/jobs/1000000002", folder:null, refs:0, '
+    'next:"Read the full JD, tailor, apply.", '
+    'link:"https://job-boards.greenhouse.io/northwind/jobs/1000000002", '
     'notes:"Found by the crawler. Fresh ATS pull."},')
 
 LIVE_JD_BODY = (
@@ -33,7 +37,7 @@ LIVE_JD_BODY = (
 
 MINI_TRACKER = (
     "<script>\n"
-    'const UPDATED = "2026-07-14";\n'
+    'const UPDATED = "2031-03-18";\n'
     "\n"
     "const APPLICATIONS = [\n"
     '  {co:"Alpha", role:"Warehouse Supervisor", loc:"Reno, NV", status:"lead", jd:"https://jobs.ashbyhq.com/alpha/1", '
@@ -47,6 +51,16 @@ MINI_TRACKER = (
     '  {name:"Zed", status:"lead", notes:"n"}\n'
     "];\n"
     "</script>\n")
+
+
+class TestCheckedDate(unittest.TestCase):
+    def test_uses_the_shared_clock(self):
+        fixed = datetime(2031, 3, 4, 5, 6, tzinfo=timezone(timedelta(hours=14)))
+        with mock.patch.object(L.config_files, "local_now", return_value=fixed):
+            self.assertEqual(L._today(argparse.Namespace(today=None)), "2031-03-04")
+
+    def test_override_still_wins(self):
+        self.assertEqual(L._today(argparse.Namespace(today="2030-01-02")), "2030-01-02")
 
 
 class TestClassify(unittest.TestCase):
@@ -183,7 +197,7 @@ class TestResolution(unittest.TestCase):
         self.assertFalse(L._looks_like_index("https://x.com/careers/senior-accountant-req"))
 
     def test_check_url_linkedin_is_uncertain_no_network(self):
-        v, r = L.check_url("https://www.linkedin.com/jobs/view/4426522138/")
+        v, r = L.check_url("https://www.linkedin.com/jobs/view/1234567890/")
         self.assertEqual(v, "uncertain")
         self.assertIn("auth-walled", r)
 
@@ -194,25 +208,25 @@ class TestResolution(unittest.TestCase):
 
 class TestTrackerWriter(unittest.TestCase):
     def test_set_liveness_basic_and_idempotent(self):
-        out = L.set_liveness_on_line(SAMPLE_ROW, "dead", "2026-07-14")
+        out = L.set_liveness_on_line(SAMPLE_ROW, "dead", "2031-03-18")
         self.assertIsNotNone(out)
         self.assertEqual(out.count('liveness:"'), 1)
         self.assertEqual(out.count('checked:"'), 1)
         self.assertIn('liveness:"dead"', out)
-        self.assertIn('checked:"2026-07-14"', out)
+        self.assertIn('checked:"2031-03-18"', out)
         self.assertTrue(out.rstrip().endswith("},"))
         self.assertEqual(L._field(out, "co"), "Northwind")           # untouched
         self.assertEqual(L._field(out, "status"), "lead")          # untouched
         # re-stamp: still exactly one field each, value updated (no duplication)
-        again = L.set_liveness_on_line(out, "live", "2026-07-15")
+        again = L.set_liveness_on_line(out, "live", "2031-03-19")
         self.assertEqual(again.count('liveness:"'), 1)
         self.assertIn('liveness:"live"', again)
-        self.assertIn('checked:"2026-07-15"', again)
+        self.assertIn('checked:"2031-03-19"', again)
         # same inputs -> identical output (true idempotency)
-        self.assertEqual(L.set_liveness_on_line(out, "dead", "2026-07-14"), out)
+        self.assertEqual(L.set_liveness_on_line(out, "dead", "2031-03-18"), out)
 
     def test_set_liveness_rejects_non_row(self):
-        self.assertIsNone(L.set_liveness_on_line("not a row object", "dead", "2026-07-14"))
+        self.assertIsNone(L.set_liveness_on_line("not a row object", "dead", "2031-03-18"))
 
     def test_parse_applications(self):
         rows = L.parse_applications(MINI_TRACKER)
@@ -225,7 +239,7 @@ class TestTrackerWriter(unittest.TestCase):
     def test_rewrite_tracker_is_safe_and_validated(self):
         rows = L.parse_applications(MINI_TRACKER)
         updates = {r["idx"]: v for r, v in zip(rows, ["dead", "uncertain", "live"])}
-        new_text, note = L.rewrite_tracker(MINI_TRACKER, updates, "2026-07-14")
+        new_text, note = L.rewrite_tracker(MINI_TRACKER, updates, "2031-03-18")
         self.assertTrue(note.startswith("ok"), note)
         # structure preserved
         self.assertEqual(new_text.count('co:"'), MINI_TRACKER.count('co:"'))
@@ -233,7 +247,7 @@ class TestTrackerWriter(unittest.TestCase):
         self.assertEqual(len(new_text.split("\n")), len(MINI_TRACKER.split("\n")))
         # every checked row now annotated exactly once
         self.assertEqual(new_text.count('liveness:"'), 3)
-        self.assertEqual(new_text.count('checked:"2026-07-14"'), 3)
+        self.assertEqual(new_text.count('checked:"2031-03-18"'), 3)
         # and it still parses back to the same rows
         self.assertEqual(len(L.parse_applications(new_text)), 3)
         # the network row (NETWORK array) was NOT annotated
@@ -242,10 +256,10 @@ class TestTrackerWriter(unittest.TestCase):
     def test_rewrite_tracker_idempotent(self):
         rows = L.parse_applications(MINI_TRACKER)
         updates = {r["idx"]: "dead" for r in rows}
-        once, _ = L.rewrite_tracker(MINI_TRACKER, updates, "2026-07-14")
+        once, _ = L.rewrite_tracker(MINI_TRACKER, updates, "2031-03-18")
         rows2 = L.parse_applications(once)
         updates2 = {r["idx"]: "dead" for r in rows2}
-        twice, note = L.rewrite_tracker(once, updates2, "2026-07-14")
+        twice, note = L.rewrite_tracker(once, updates2, "2031-03-18")
         self.assertEqual(once, twice)                               # no drift on re-run
         self.assertTrue(note.startswith("already current"), note)
 

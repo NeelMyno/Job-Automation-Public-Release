@@ -13,8 +13,10 @@ Politeness, enforced here rather than left to good intentions:
     inside the interval does NOT call the source again. It reuses the jobs cached from the last
     successful fetch and says so in the crawl report, so frequent runs stay polite.
   * Search sources are queried one title at a time, a few seconds apart, capped by `max_queries`.
-    A title a source cannot search (Jobicy answers HTTP 400 to a tag shorter than 3 characters,
-    such as "rn") is skipped for that source only.
+    A title a source cannot search is adapted or skipped for that source only: Jobicy answers
+    HTTP 400 to a tag outside 3 to 20 characters, so "rn" is not sent there and a longer title is
+    sent as its last words that fit ("journeyman electrician" as "electrician"). crawl.py still
+    matches every job against your full titles.
   * One failed query does not lose the others: the results that came back are kept, and the source
     counts as failed only when every query failed. A rate limit (HTTP 429) stops that source's
     queries for this run at once.
@@ -35,10 +37,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from http_util import read_url, UA  # sibling module: gzip + retry on a cut-off read
+import config_files  # sibling module: reads the settings files, with plain errors
 
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = HERE / "cache"
 STATE_NAME = "sources-state.json"
+CONFIG_ENTRY = "sources-config"  # report entry for a problem in sources.yaml
+NOT_SOURCES = ("cache", CONFIG_ENTRY)  # report entries that are notes about this run, not job sources
 
 # Display name and home page of each source, for attribution in the feed.
 LABELS = {
@@ -86,11 +91,12 @@ class Partial(list):
         self.errors = list(errors)
 
 
-# Shortest search term each source accepts. Jobicy answers HTTP 400 to a shorter tag.
+# Shortest and longest search term each source accepts. Jobicy answers HTTP 400 outside 3 to 20.
 MIN_QUERY_CHARS = {"jobicy": 3}
+MAX_QUERY_CHARS = {"jobicy": 20}
 
 
-# ---- small helpers ----
+# small helpers
 def http_get(url, headers=None, timeout=25, raw=False):
     h = {"User-Agent": UA, "Accept": "application/json"}
     h.update(headers or {})
@@ -130,18 +136,34 @@ def to_dt(v):
 
 
 def _job(source, company, title, location, url, posted_at, remote, description):
-    return dict(company=(company or "").strip(), title=(title or "").strip(),
-                location=(location or "").strip(), url=(url or "").strip(), posted_at=posted_at,
-                remote=remote, description=_clean(description), source=source)
+    # feeds send "Aisles &amp; Abroad": decode it once here, so the feed never shows "&amp;amp;"
+    def text(v):
+        return html.unescape(str(v or "")).strip()
+    return dict(company=text(company), title=text(title), location=text(location), url=(url or "").strip(),
+                posted_at=posted_at, remote=remote, description=_clean(description), source=source)
+
+
+def _fit(title, longest):
+    """The title's last words that fit in `longest` characters ("" when none do). The end of a job
+    title names the job, and the wider search is safe: crawl.py filters on your full titles."""
+    words = title.split()
+    while words and len(" ".join(words)) > longest:
+        words.pop(0)
+    return " ".join(words)
 
 
 def _queries(titles, cfg, source=None):
     n = int(cfg.get("max_queries") or 5)
-    shortest = MIN_QUERY_CHARS.get(source, 1)
-    usable = [t for t in titles if t and len(t.strip()) >= shortest]
-    if titles and [t for t in titles if t] and not usable:
-        raise SourceSkip(f"every title is shorter than {shortest} characters, and this source's "
-                         f"search does not accept a term that short")
+    shortest, longest = MIN_QUERY_CHARS.get(source, 1), MAX_QUERY_CHARS.get(source)
+    real = [t for t in titles if t]
+    fitted = [_fit(t, longest) for t in real] if longest else real
+    usable = list(dict.fromkeys(t for t in fitted if len(t.strip()) >= shortest))
+    if real and not usable:
+        if all(len(t.strip()) < shortest for t in real):
+            raise SourceSkip(f"every title is shorter than {shortest} characters, and this source's "
+                             f"search does not accept a term that short")
+        raise SourceSkip(f"no title can be searched here: this source accepts {shortest} to {longest} "
+                         f"characters")
     return usable[:max(1, n)]
 
 
@@ -168,7 +190,7 @@ def _per_query(queries, sleep, run):
     return Partial(out, errors) if errors else out
 
 
-# ---- one fetcher per source: (cfg, titles, get, sleep) -> [normalized job] ----
+# one fetcher per source: (cfg, titles, get, sleep) -> [normalized job]
 def fetch_himalayas(cfg, titles, get, sleep):
     """Himalayas search API (https://himalayas.app/api): `q` + `country`, 20 results a page."""
     def one(t):
@@ -190,7 +212,7 @@ def fetch_himalayas(cfg, titles, get, sleep):
 
 def fetch_jobicy(cfg, titles, get, sleep):
     """Jobicy remote-jobs API v2 (https://jobicy.com/jobs-rss-feed): `geo`, `tag`, `count`. A tag
-    shorter than 3 characters gets HTTP 400, so such a title is not sent here."""
+    outside 3 to 20 characters gets HTTP 400, so _queries() shortens or leaves out such a title."""
     def one(t):
         q = {"count": int(cfg.get("count") or 50), "tag": t}
         if cfg.get("geo"):
@@ -321,18 +343,46 @@ FETCHERS = {"himalayas": fetch_himalayas, "jobicy": fetch_jobicy, "remotive": fe
             "weworkremotely": fetch_weworkremotely, "usajobs": fetch_usajobs}
 
 
-# ---- config, state, and the one entry point crawl.py calls ----
-def load_config(path=None):
-    """sources.yaml merged over DEFAULTS. A missing file means the defaults."""
+# config, state, and the one entry point crawl.py calls
+def read_config(path=None):
+    """(cfg, problems): sources.yaml merged over DEFAULTS, plus one plain sentence for anything in
+    it that could not be used. A missing file means the defaults, with nothing to report. A broken
+    file also means the defaults, and says so: the crawl carries on with what is known."""
     path = Path(path) if path else HERE / "sources.yaml"
     cfg = {k: dict(v) for k, v in DEFAULTS.items()}
-    if path.exists():
-        import yaml
-        data = yaml.safe_load(path.read_text()) or {}
-        for name, block in ((data.get("sources") or {}) if isinstance(data, dict) else {}).items():
-            if isinstance(block, dict):
-                cfg.setdefault(name, {}).update(block)
-    return cfg
+    if not path.exists():
+        return cfg, []
+    try:
+        data = config_files.read_yaml(path)
+    except config_files.ConfigError as e:
+        return cfg, [f"Using the built-in source settings for this run. {e}"]
+    blocks = data.get("sources") if isinstance(data, dict) else None
+    if not isinstance(blocks, dict):
+        return cfg, ["Using the built-in source settings for this run. pipeline/job-crawler/sources.yaml "
+                     "has no `sources:` block of settings: restore the shipped copy with "
+                     "`git checkout -- pipeline/job-crawler/sources.yaml` (or, in a Download-ZIP copy, download that file again from the repo's GitHub page), then run this again."]
+    problems = []
+    for name, block in blocks.items():
+        if isinstance(block, dict):
+            cfg.setdefault(name, {}).update(block)
+        else:
+            problems.append(f"sources.yaml: the `{name}` entry is not a block of settings, so it was "
+                            f"ignored" + (" and its built-in settings were used." if name in DEFAULTS else "."))
+    return cfg, problems
+
+
+def load_config(path=None):
+    """sources.yaml merged over DEFAULTS (read_config, without its list of problems)."""
+    return read_config(path)[0]
+
+
+def _interval_minutes(name, c):
+    """The larger of the source's floor and its min_interval_minutes (which, if unreadable, is ignored)."""
+    try:
+        wanted = float(c.get("min_interval_minutes") or 0)
+    except (TypeError, ValueError):
+        wanted = 0
+    return max(wanted, FLOOR_MINUTES.get(name, 60))
 
 
 def _ser(j):
@@ -365,10 +415,16 @@ def _save_state(cache_dir, state):
 
 def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep=time.sleep):
     """Run every enabled source once, politely. Returns (jobs, report). `report` has one entry per
-    known source: {name, label, status: ran|cached|skipped|error, jobs, reason}. Nothing raises."""
-    cfg = cfg if cfg is not None else load_config()
+    known source: {name, label, status: ran|cached|skipped|error, jobs, reason}, then one
+    CONFIG_ENTRY entry per problem found in sources.yaml. Nothing raises."""
+    problems = []
+    if cfg is None:
+        cfg, problems = read_config()
+        cfg, unusable = config_files.clean_source_settings(cfg, DEFAULTS)
+        problems += unusable
     now = now or datetime.now(timezone.utc)
     state = _load_state(cache_dir)
+    titles_key = "|".join(sorted({str(t).strip().lower() for t in titles or []}))
     jobs, report = [], []
     for name in ORDER + [n for n in cfg if n not in ORDER]:
         c = cfg.get(name) or {}
@@ -382,7 +438,7 @@ def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep
             entry["reason"] = "disabled in sources.yaml"
             continue
         st = state.get(name) or {}
-        interval = max(float(c.get("min_interval_minutes") or 0), FLOOR_MINUTES.get(name, 60))
+        interval = _interval_minutes(name, c)
         last = to_dt(st.get("last_attempt"))
         if last and now - last < timedelta(minutes=interval):
             ago = int((now - last).total_seconds() // 60)
@@ -390,10 +446,18 @@ def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep
             jobs.extend(cached)
             why = (f"the last attempt {ago} min ago failed ({st['last_error']})" if st.get("last_error")
                    else f"last fetched {ago} min ago")
-            entry.update(status="cached", jobs=len(cached),
+            retry = max(int(interval) - ago, 1)
+            entry.update(status="cached", jobs=len(cached), retry_in=retry,
                          reason=f"{why}; this source allows one call every {int(interval)} min, so it "
                                 f"was not called again and {len(cached)} jobs from its last good fetch "
-                                f"were reused")
+                                f"were reused (next call in about {retry} min)")
+            if st.get("last_error"):
+                entry["last_attempt_failed"] = True
+            if st.get("titles") is not None and st.get("titles") != titles_key:
+                # the cached jobs were searched for other titles: say so, never a silent 0 for the new ones
+                entry["stale_titles"] = True
+                entry["reason"] += ("; those jobs were searched for your earlier titles, so jobs for your "
+                                    f"current titles may be missing until then")
             continue
         try:
             got = fetcher(c, titles, get, sleep)
@@ -412,7 +476,7 @@ def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep
         got = [j for j in got if j["title"] and j["url"]]
         jobs.extend(got)
         state[name] = {"last_attempt": now.isoformat(), "last_success": now.isoformat(),
-                       "jobs": [_ser(j) for j in got]}
+                       "titles": titles_key, "jobs": [_ser(j) for j in got]}
         entry.update(status="ran", jobs=len(got))
         if failed:
             entry["reason"] = (f"{len(failed)} quer{'y' if len(failed) == 1 else 'ies'} failed and the "
@@ -421,10 +485,12 @@ def collect(titles, cfg=None, cache_dir=CACHE_DIR, now=None, get=http_get, sleep
         report.append({"name": "cache", "label": "cache", "status": "error", "jobs": 0,
                        "reason": f"could not write {Path(cache_dir) / STATE_NAME}; minimum intervals "
                                  f"cannot be enforced across runs until it is writable"})
+    report += [{"name": CONFIG_ENTRY, "label": "sources.yaml", "status": "error", "jobs": 0, "reason": p}
+               for p in problems]
     return jobs, report
 
 
-# ---- offline selftest ----
+# offline selftest
 def _selftest():
     import tempfile
     fixtures = {
@@ -501,6 +567,17 @@ def _selftest():
             raise AssertionError("only too-short titles must skip Jobicy")
         except SourceSkip as e:
             assert "shorter than 3" in str(e)
+        # a tag over 20 characters is shortened to its last words that fit, never sent whole
+        lc = []
+        fetch_jobicy({}, ["journeyman electrician", "electrician", "electrical technician"],
+                     lambda url, headers=None, raw=False: lc.append(url) or fixtures["jobicy.com"], lambda s: None)
+        tags = [urllib.parse.parse_qs(urllib.parse.urlparse(u).query)["tag"][0] for u in lc]
+        assert tags == ["electrician", "technician"], tags
+        try:
+            fetch_jobicy({}, ["x" * 25], jget, lambda s: None)
+            raise AssertionError("a title with no words that fit must skip Jobicy")
+        except SourceSkip as e:
+            assert "3 to 20" in str(e)
         # one failed query keeps the rest; the source fails only when every query failed
         def hget(url, headers=None, raw=False):
             if "q=accountant" in url:

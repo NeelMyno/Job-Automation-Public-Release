@@ -2,7 +2,6 @@
 """check_law.py: keeps the operating law internally consistent.
 
 WHY THIS EXISTS
----------------
 A career-automation repo accumulates instruction files fast: the main entry file, command
 definitions, workflow scripts, skill files, knowledge-base notes. A rule stated once and then
 restated in two or three more places looks harmless right up until the rule CHANGES. At that
@@ -34,6 +33,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -92,7 +95,6 @@ def law_files() -> list[str]:
                 seen.add(str(p.relative_to(REPO)))
     return sorted(seen)
 
-# --------------------------------------------------------------------------------------
 # OWNED RULES: each rule, its single owner, and the shape of an illegal restatement.
 #
 # `restatement` must match a CONCRETE assertion of the rule's content, not a mention of it.
@@ -420,20 +422,15 @@ def check_owners() -> list[Finding]:
     return out
 
 
-# --------------------------------------------------------------------------------------
 # Self-test: the mechanical checks (§ cross-reference integrity, ADR-file-existence integrity,
 # ops-numbering collision detection, owner existence) and the template's three OWNED rules.
 # Add cases here the day you register a rule of your own.
-# --------------------------------------------------------------------------------------
 
 CASES: list[tuple[str, str, str, bool]] = [
     # (label, fake-path, text, should_flag)
 
-    # --- § cross-reference integrity. Deliberately checked against THIS repo's own real, current
-    # CLAUDE.md and ops/decisions/ (via `claude_sections()`/`known_adrs()` below) rather than a
-    # mocked set: §1 and ADR-0001 are permanent, blessed fixtures this template ships with
-    # specifically so its own gate scripts have something stable to test against. Don't delete
-    # either (see `ops/decisions/0001-example-starter-decision.md`'s own text). ---
+    # § cross-reference integrity, checked against a fixed fictional set (see selftest(): only §1
+    # and ADR-0001 exist), so what you have written into CLAUDE.md or ops/ can never move a case.
     ("a dangling section reference",
      "CLAUDE.md", "See §99.4 for the details.", True),
     ("a real section reference must not fire",
@@ -443,7 +440,7 @@ CASES: list[tuple[str, str, str, bool]] = [
     ("a real ADR reference must not fire (the worked-example ADR this template ships with)",
      "CLAUDE.md", "See ADR-0001 for the shape every decision record follows.", False),
 
-    # --- the populations of § that are NOT pointers into CLAUDE.md at all, and must never fire ---
+    # the populations of § that are NOT pointers into CLAUDE.md at all, and must never fire
     ("a statute citation must not fire",
      "knowledge-base/02-work-authorization.md",
      "Even a SOC-2-certified vendor can still violate 22 CFR §120.62.", False),
@@ -457,7 +454,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      "knowledge-base/11-preferences-and-conventions.md",
      "Amends `CLAUDE.md` §99.4.", True),
 
-    # --- work-auth-answers: only the answer bank may PRINT an answer ---
+    # work-auth-answers: only the answer bank may PRINT an answer
     ("a command that hardcodes an answer pair fires",
      ".claude/commands/apply.md",
      "The form answers are **YES** (authorized now) / **NO** (will require sponsorship).", True),
@@ -480,7 +477,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      ".claude/commands/apply.md",
      "> Read the exact question; no sponsorship answer is ever inferred from another one.", False),
 
-    # --- voice-rules: the writing file owns the voice rulebook ---
+    # voice-rules: the writing file owns the voice rulebook
     ("a command restating a banned-word list fires",
      ".claude/commands/outreach.md",
      "Banned words: leverage, synergy, passionate.", True),
@@ -491,7 +488,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      "knowledge-base/17-writing.md",
      "Banned words: leverage, synergy, passionate.", False),
 
-    # --- application-protocol: the rules file owns §13/§14 text ---
+    # application-protocol: the rules file owns §13/§14 text
     ("a command restating the review-pass rule fires",
      ".claude/commands/wave.md",
      "Never ship a resume or cover letter without 5 independent review passes.", True),
@@ -505,11 +502,8 @@ CASES: list[tuple[str, str, str, bool]] = [
 
 
 def selftest() -> int:
-    # The §/ADR cases above deliberately read THIS repo's own real state (the same call `run()`
-    # itself makes) rather than a mocked set. That is safe specifically because §1 and ADR-0001
-    # are permanent fixtures this template ships with for exactly this purpose (see the CASES
-    # comment above). Don't delete either.
-    sections, adrs = claude_sections(), known_adrs()
+    # A fixed fictional law surface for the §/ADR cases: a selftest never reads your own files.
+    sections, adrs = {"1"}, {"0001"}
     passed = failed = 0
     print("check_law.py selftest: the mechanical integrity checks, against fictional file/section names\n")
     for label, rel, text, should in CASES:
@@ -551,7 +545,15 @@ def selftest() -> int:
     # `.claude/commands/*.md` and `.claude/workflows/*.js`, so its single-owner compliance and
     # §/ADR pointers were never machine-checked. This asserts the glob resolves it into law_files().
     handover = ".claude/outreach-handover-format.md"
-    covered = (handover in set(law_files())) if (REPO / handover).is_file() else (".claude/*.md" in LAW_GLOBS)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / handover).write_text("fixture", encoding="utf-8")
+        REPO = tmp_path
+        try:
+            covered = handover in set(law_files())
+        finally:
+            REPO = saved_repo
     passed, failed = (passed + 1, failed) if covered else (passed, failed + 1)
     print(f"  {'✓ covered' if covered else '✗ UN-GATED'}   .claude/ root instruction files are on "
           f"the check_law law surface")

@@ -33,7 +33,6 @@ TWO DEFECTS THIS SCRIPT WAS HARDENED AGAINST:
 Exit 1 if any UNCLEARED pending line is found, 0 clean.
 
 WHY THIS HAS A SELFTEST
-------------------------
 This is typically the first check a session or CI run reads, so a false
 negative here means unfinished work goes unreported indefinitely. Both
 defects above were found by manual audit, not by the script catching itself:
@@ -128,13 +127,11 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-# --------------------------------------------------------------------------------------
 # Self-test. Every fixture below is invented, generic ADR text, not real decision content.
 # Both defects this script was hardened against (the invisible heading form, the
 # un-clearable line) are pinned, and so is every wording that must NOT be counted,
 # because the failure mode of a debt tracker is symmetrical: miss a real item and work is
 # lost; count a false one and the noise trains the reader to skip the whole report.
-# --------------------------------------------------------------------------------------
 
 _P07 = ('Consequences-pending: re-run the board sweep after adding a new data source; the last '
         'sweep only covered 3 of the 9 known feeds and the remaining 6 are unconfirmed.')
@@ -156,29 +153,29 @@ CASES: list[tuple[str, dict[str, str], int, int]] = [
     ("all three forms together = 3 live items",
      {"0007-a.md": _P07, "0011-b.md": _P11, "0013-c.md": _P13}, 3, 0),
 
-    # --- mentions. A sentence ABOUT debt is not debt. ---
+    # mentions. A sentence ABOUT debt is not debt.
     ("a mid-sentence mention is NOT debt",
-     {"0009-sweep-still-valid-note.md":
-      "- ADR-0007's Consequences-pending line stays valid (the sweep is still worth running), "
-      "but its\n  first clause is now false."}, 0, 0),
+     {"0009-garden-note.md":
+      "- ADR-0007's Consequences-pending line is worth rereading before the next planting "
+      "season,\n  since the shed was moved."}, 0, 0),
 
     ("backticked / mid-line mentions of the field are NOT debt",
-     {"0015-debt-tracker-postmortem.md":
-      "edited, so `Consequences-pending:` was a one-way door. ADR-0007's line says *\"the sweep "
-      "is\nnow optional\"*\n"
-      "`adr_debt.py` was also **missing real debt**: it matched `Consequences-pending:` with a "
-      "colon only,\n"
-      "so ADR-0011's `## Consequences-pending` heading was invisible. It reported 1 when the "
-      "truth was 2."}, 0, 0),
+     {"0015-bakery-review.md":
+      "The menu notes mention `Consequences-pending:` once. ADR-0007's line says *\"the oven "
+      "order\nis on hold\"*\n"
+      "and the `Consequences-pending:` field in `adr_debt.py` is quoted here only as an "
+      "example,\n"
+      "just like ADR-0011's `## Consequences-pending` heading in a code span. Nothing here "
+      "is a real item."}, 0, 0),
 
     ("`Consequences-pending: none` is a clean bill of health, not debt",
      {"0017-clearing-mechanism-unused.md":
       "- **Consequences-pending:** none. The clearing mechanism is live but deliberately unused."},
      0, 0),
 
-    # --- self-clearing phrasing: a later ADR whose OWN pending line already says the debt was
+    # self-clearing phrasing: a later ADR whose OWN pending line already says the debt was
     #     retired in the same commit it was recorded in. Before this was recognized it was
-    #     broadcast as live debt at every SessionStart forever, a permanent false alarm. ---
+    # broadcast as live debt at every SessionStart forever, a permanent false alarm.
     ("'Consequences-pending: cleared by the same commit' is self-cleared, NOT debt",
      {"0023-gate-plus-doc-shipped-together.md":
       "Consequences-pending: cleared by the same commit (gate + selftest + doc shipped together)."},
@@ -190,7 +187,7 @@ CASES: list[tuple[str, dict[str, str], int, int]] = [
       "coverage shipped together)."},
      0, 0),
 
-    # --- clearing. The mechanism is exercised end to end. ---
+    # clearing. The mechanism is exercised end to end.
     ("🔴 a later ADR CLEARS an earlier one",
      {"0007-data-source-sweep.md": _P07,
       "0019-sweep-complete.md": "Consequences-cleared: ADR-0007 - the sweep finished; all 9 "

@@ -42,12 +42,23 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
-    import config  # optional user knobs
-except ImportError:  # pragma: no cover
+    import config  # optional user knobs (scripts/config.py)
+except Exception as _e:  # a missing file is fine; a file that will not load is named, never a traceback
+    if not (isinstance(_e, ModuleNotFoundError) and _e.name == "config"):
+        import traceback as _tb
+        _line = _e.lineno if isinstance(_e, SyntaxError) else next(
+            (f.lineno for f in reversed(_tb.extract_tb(_e.__traceback__)) if Path(f.filename).name == "config.py"), "?")
+        _why = _e.msg if isinstance(_e, SyntaxError) else f"{type(_e).__name__}: {_e}"
+        print(f"outreach_bundle: not checked, scripts/config.py line {_line}: {_why}. Fix that line and run this again.")
+        sys.exit(3)
     config = None  # type: ignore[assignment]
 
 def _today() -> date:
@@ -65,6 +76,7 @@ SMALL_CAP = getattr(config, "SMALL_BASKET_CAP", 3) if config else 3
 PROFILE = re.compile(r"https?://[A-Za-z.]*linkedin\.com/in/[A-Za-z0-9\-_%]+/?", re.I)
 INMAIL = re.compile(r"use\s+inmail\s*:?\s*\**\s*(yes|no)", re.I)
 ASKSHAPE = re.compile(r"ask\s*=\s*([^)\n*]+)", re.I)
+MD_LINK = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)\s*\)")
 NOT_DRAFTED = re.compile(r"NOT[ -]DRAFTED|no messages? (?:yet|drafted)|research(?:-| )stage|deliberately not drafted|"
                          r"do not send|do-not-contact", re.I)
 FIRST_DEGREE = re.compile(r"\b1st°|\b1st[- ]degree\b|already connected", re.I)
@@ -76,7 +88,7 @@ DMS_FILE = "outreach-bundle-dms-on-accept.md"
 DASHES = re.compile("[\u2013\u2014]")
 
 try:  # the SENT-marker grammar has one owner, outreach_format.py; fall back only if it can't load
-    from outreach_format import ALREADY_SENT, UNSENT_TAIL, person_blocks
+    from outreach_format import ALREADY_SENT, PROFILE_LINE, UNFILLED_SLOT, UNSENT_TAIL, _outside_copy, person_blocks
 except Exception:  # pragma: no cover
     print("outreach_bundle: scripts/outreach_format.py could not be imported", file=sys.stderr)
     raise
@@ -93,6 +105,21 @@ def _sent_kinds_from_text(s: str) -> set[str]:
     if has_dm and not has_note:
         return {"dm"}
     return {"note", "dm"}
+
+
+def _recorded_profile(block: str) -> str:
+    """What the person's `Profile:` line records, as outreach_format.py reads it: the URL inside a
+    markdown link, a site with or without a scheme, or `none found (where you looked)`. Anything after
+    ` · ` is a note, not the profile. Empty only when no line holds a value."""
+    for m in PROFILE_LINE.finditer(_outside_copy(block)):
+        value = m.group("value").strip(" *_")
+        linked = MD_LINK.match(value)
+        if linked:
+            return linked.group(1)
+        value = UNFILLED_SLOT.sub("", value.split(" \u00b7 ")[0]).strip(" *_")
+        if value:
+            return value
+    return ""
 
 
 def _person_key(heading: str) -> str:
@@ -190,6 +217,8 @@ def parse_people(text: str, slug: str, ledger: dict | None = None) -> list[dict]
         prof, ask, inm = PROFILE.search(block), ASKSHAPE.search(block), INMAIL.search(block)
         people.append(dict(
             name=name.strip(), why=why, profile=prof.group(0) if prof else "",
+            no_linkedin=not prof and not connected and not note,
+            other_profile=_recorded_profile(block) if not prof else "",
             note=note if to_note else "", dm=dm if to_dm else "",
             note_sent=bool(note) and "note" in kinds, connected=connected,
             inmail=(inm.group(1).upper() if inm else "NO"), ask=(ask.group(1).strip() if ask else "")))
@@ -235,7 +264,7 @@ def derive_scope(since: date, hold: set[str], ledger_text: str) -> tuple[list[st
         if a.get("folder"):
             s = a["folder"].rstrip("/").split("/")[-1]
             co_of[s] = a.get("co", "")
-            if a.get("status") in ("interview", "offer", "rejected", "passed", "withdrawn"):
+            if a.get("status") in HELD_STATUSES:
                 held.add(s)
     live = sorted(s for s in slugs if s not in held and (REPO / "applications" / s / "referrals.md").exists())
     # An active thread is a judgment call, so it is surfaced, never auto-held.
@@ -274,6 +303,8 @@ def _person_head(p: dict) -> list[str]:
     L = [f"## {p['_i']}. {p['name']}" if "_i" in p else f"### {p['name']}"]
     if p["profile"]:
         L.append(f"**Profile:** {p['profile']}")
+    elif p.get("no_linkedin"):
+        L.append(f"**Profile:** {p.get('other_profile') or 'none found'} (no LinkedIn on record: use email or phone)")
     why = [x for x in (p["why"], f"ask = {p['ask']}" if p["ask"] else "") if x]
     if why:
         L.append(f"**Why:** {' · '.join(why)}")
@@ -323,7 +354,7 @@ def render_dms(compiled: list[dict], today: str, notes_file: str) -> str:
         company, role, _req = clean_title(c["title"])
         for k in (1, 2):
             ps = [p for p in c["people"]
-                  if p["dm"] and not p["connected"] and (p["note_sent"] or not p["note"]) == (k == 1)]
+                  if p["dm"] and not p["connected"] and not p.get("no_linkedin") and (p["note_sent"] or not p["note"]) == (k == 1)]
             if not ps:
                 continue
             parts[k] += [f"## {company}" + (f": {role}" if role else ""), ""]
@@ -331,13 +362,22 @@ def render_dms(compiled: list[dict], today: str, notes_file: str) -> str:
                 parts[k] += _person_head(p) + ["", "*Your note already went out.*" if k == 1 else
                                                "*Note not sent yet (it is in the send file).*", "", "**DM:**", fence(p["dm"]), ""]
             counts[k] += len(ps)
+    other_way = []
+    for c in sorted(compiled, key=lambda c: c["title"].lower()):
+        company, role, _req = clean_title(c["title"])
+        ps = [p for p in c["people"] if p["dm"] and p.get("no_linkedin")]
+        if ps:
+            other_way += [f"## {company}" + (f": {role}" if role else ""), ""]
+            for p in ps:
+                other_way += _person_head(p) + ["", "**Message:**", fence(p["dm"]), ""]
     head = [f"# DMs for after people accept ({today})", "",
             "**Not for sending now.** When people accept your connection request, tell me who and I'll hand you their DMs.", "",
             f"- **Part 1: your note already went out ({counts[1]} people).** Waiting on them to accept.",
             f"- **Part 2: not contacted yet ({counts[2]} people).** Their notes are in `{notes_file}`.",
             "- DMs you've already sent are not here. Every DM is copied word for word from the dossier's `referrals.md`.", "",
             "---", "", "# Part 1: note already sent, waiting on accept", ""]
-    return "\n".join(head + parts[1] + ["---", "", "# Part 2: not contacted yet (send the note first)", ""] + parts[2]) + "\n"
+    return "\n".join(head + parts[1] + ["---", "", "# Part 2: not contacted yet (send the note first)", ""] + parts[2]
+                     + (["---", "", "# Part 3: no LinkedIn on record (send by email or phone, no connection step)", ""] + other_way if other_way else [])) + "\n"
 
 
 # run
@@ -413,6 +453,31 @@ def run(argv: list[str]) -> int:
     return 1 if not_ready else 0
 
 
+# A row in one of these states is not in the send scope: interviewing already, or no one left to ask.
+HELD_STATUSES = ("interview", "offer", "rejected", "passed", "withdrawn", "ghosted")
+
+
+def _config_guard_cases() -> list:
+    """Run a copy of this script beside a config.py that will not load: plain words, its line, exit 3."""
+    import shutil
+    import subprocess
+    import tempfile
+    here = Path(__file__).resolve()
+    out = []
+    for kind, body, word in (("a syntax error", "X = 1\nX = = 2\n", "invalid syntax"),
+                             ("a raise at import", "X = 1\nraise RuntimeError('boom')\n", "boom")):
+        with tempfile.TemporaryDirectory() as td:
+            for p in here.parent.glob("*.py"):
+                if p.name != "config.py":
+                    shutil.copy(p, td)
+            (Path(td) / "config.py").write_text(body, encoding="utf-8")
+            r = subprocess.run([sys.executable, str(Path(td) / here.name)], capture_output=True, text=True, timeout=60)
+        out.append((f"broken config.py ({kind}): names the line, exit 3, no traceback",
+                    r.returncode == 3 and "scripts/config.py line 2" in r.stdout and word in r.stdout
+                    and "Traceback" not in r.stdout + r.stderr))
+    return out
+
+
 def selftest() -> int:
     passed = failed = 0
 
@@ -437,6 +502,7 @@ def selftest() -> int:
     finally:
         config = _saved_cfg
     want("today comes from the configured zone (config.local_now), not the machine clock", _zone_ok)
+    want("a ghosted company is held out of the send scope", "ghosted" in HELD_STATUSES)
 
     doc = ("# Acme: Staff Engineer (req 4417) · referral pack\n\n## The messages\n\n"
            "### 1 · Pat Probe: Engineering Lead\n✅ SENT 2026-01-05 (connection note, by me). DM: send after accept.\n"
@@ -460,6 +526,28 @@ def selftest() -> int:
     want("a fenced note + DM parse verbatim, paragraphs kept", "Jordan Rivera" in by and "\n\nA fenced DM." in by["Jordan Rivera"]["dm"])
     want("the profile URL is lifted off the heading when it lives there", by["Jordan Rivera"]["profile"].endswith("/jordanrivera"))
     want("a person the ledger shows fully sent is dropped", "Gone Person" not in by)
+    _small = parse_people("# Northwind: Hygienist · referral pack\n\n## The messages\n\n### 1 · Dana Reyes: Office Manager\nProfile: none found (searched the practice site)\n\n"
+                          "**Direct message · Use InMail: NO**\n> Hi Dana, a short email.\n", "northwind-hygienist", {})
+    want("no LinkedIn on record is carried on the person", bool(_small) and _small[0]["no_linkedin"])
+    want("no LinkedIn: the header says so instead of showing nothing",
+         any("no LinkedIn on record" in x for x in _person_head(_small[0])))
+    def _recorded(line: str) -> str:
+        block = f"### 1 \u00b7 Sam Lee: Dispatcher\n{line}\n\n**Direct message**\n> Hi Sam, a short email.\n"
+        rows = parse_people("# Globex: Dispatcher \u00b7 referral pack\n\n## The messages\n\n" + block, "globex-dispatcher", {})
+        return " ".join(_person_head(rows[0])) if rows else ""
+    want("no LinkedIn: a site with no scheme is printed as recorded, never as none found",
+         "**Profile:** acme-dental.example/team (no LinkedIn" in _recorded("Profile: acme-dental.example/team"))
+    want("no LinkedIn: the URL inside a markdown link is what gets printed",
+         "**Profile:** https://acme-dental.example/team (no LinkedIn" in _recorded("Profile: [team page](https://acme-dental.example/team)"))
+    want("no LinkedIn: a note after the separator never rides along in the profile",
+         "**Profile:** none found (searched the depot site) (no LinkedIn" in _recorded("Profile: none found (searched the depot site) \u00b7 why them: runs dispatch"))
+    want("no LinkedIn: an explicit none found keeps where you looked",
+         "**Profile:** none found (searched the depot site) (no LinkedIn" in _recorded("Profile: none found (searched the depot site)"))
+    want("no LinkedIn: no Profile line at all says none found",
+         "**Profile:** none found (no LinkedIn" in _recorded("Why them: runs the depot"))
+    _dms = render_dms([{"title": "Northwind: Hygienist", "slug": "northwind-hygienist", "people": _small}], "2031-07-04", "notes.md")
+    want("no LinkedIn: the DM file never says a note went out, it goes in its own part",
+         "Part 3: no LinkedIn" in _dms and "Your note already went out" not in _dms)
     want("a 1st-degree person gets the DM only, and InMail YES is carried",
          by["First Degree"]["note"] == "" and by["First Degree"]["connected"] and by["First Degree"]["inmail"] == "YES")
     comp = [dict(slug="acme-staff-engineer", title="Acme: Staff Engineer (req 4417) · referral pack", people=people)]
@@ -480,6 +568,8 @@ def selftest() -> int:
     BIG = saved
     want("basket: with BIG_COMPANIES unset everything is small (the safe default)",
          not BIG or basket("Northwind", "northwind-x").startswith("small"))
+    for _label, _ok in _config_guard_cases():
+        want(_label, _ok)
     print()
     if failed:
         print(f"SELFTEST FAILED: {failed} of {passed + failed} wrong")

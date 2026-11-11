@@ -10,8 +10,8 @@ Pulls REAL postings from three kinds of free source, for any role in any industr
      sources.yaml, each fetched politely within its own terms (see sources.py);
   3. the monthly Hacker News "Ask HN: Who is hiring?" thread.
 It filters all of them the same way, to your own target roles
-(configured in filters.yaml), DROPS hard blockers you define (e.g. citizenship/clearance/ITAR
-walls, if any apply to you), FLAGS soft "won't sponsor" postings (kept, not dropped, by default;
+(configured in filters.yaml), DROPS hard blockers you define (e.g. a license you don't hold or a
+citizenship requirement, if any apply to you), FLAGS soft "won't sponsor" postings (kept, not dropped, by default;
 edit filters.yaml if this doesn't apply to your situation), and returns the fresh matches. $0,
 no API keys, no login, no scraping of any login-walled platform (no account-ban risk). The whole
 point is to catch a posting the day it goes up, before it's buried under a week of new listings.
@@ -46,6 +46,7 @@ import hn  # sibling module: the HN "Who's Hiring" collector (same dir, on sys.p
 import sources as api_sources  # sibling module: the free job APIs configured in sources.yaml
 import locations  # sibling module: the location rule crawl.py and discover.py share
 import titles  # sibling module: the title rule crawl.py and discover.py share
+import config_files  # sibling module: reads the settings files, with plain errors
 from locations import _block_re, location_ok  # noqa: F401  (kept importable from crawl.py)
 
 HERE = Path(__file__).resolve().parent
@@ -54,16 +55,30 @@ TRACKER = HERE.parent / "tracker.html"    # pipeline/tracker.html
 CACHE_DIR = HERE / "cache"                # gitignored: source fetch times + discovery state
 NO_TITLES = ("No job titles set: run /setup, or add your role titles under include_titles in "
              "pipeline/job-crawler/filters.yaml, then run the crawler again.")
-NO_BOARDS_HINT = ("boards.yaml has no company boards yet (it ships empty), so only the job APIs and "
-                  "Hacker News were searched. Run `python3 pipeline/job-crawler/discover.py --sweep` "
+NO_BOARDS_HINT = ("boards.yaml has no company boards yet (it ships empty), so no company boards were "
+                  "searched. Run `python3 pipeline/job-crawler/discover.py --sweep` "
                   "to find company boards hiring for your titles (it stops after a few minutes and "
                   "continues on the next run), or add named companies with `discover.py --company "
                   "\"Name\"`, or job URLs with `discover.py --urls -`.")
+RESTORE_BOARDS = "git checkout -- pipeline/job-crawler/boards.yaml"
+MISSING_BOARDS_HINT = (f"boards.yaml is missing, so no company boards were searched. Get "
+                       f"the starter file back with `{RESTORE_BOARDS}` (or, in a Download-ZIP copy, download that file again from the repo's GitHub page), then run `python3 "
+                       f"pipeline/job-crawler/discover.py --sweep` to find company boards hiring for "
+                       f"your titles.")
+NOTHING_SEARCHED = ("Nothing was searched: there are no company boards in boards.yaml and the job feeds and "
+                    "Hacker News were switched off (--no-api, --no-hn). Drop those flags, or add boards with "
+                    "`python3 pipeline/job-crawler/discover.py --sweep`.")
+NOT_DATA = "returned a web page or something else that isn't job data, it may be down or blocking requests"
 
 
 def load_yaml(name):
-    import yaml  # PyYAML
-    return yaml.safe_load((HERE / name).read_text())
+    return config_files.read_yaml(HERE / name)
+
+
+def plain_failure(reason):
+    """A failure reason with the parser's raw JSONDecodeError text swapped for a plain sentence. A
+    reason can list several failed searches split by semicolons, so each is handled on its own."""
+    return re.sub(r"JSONDecodeError[^;]*", NOT_DATA, reason)
 
 
 def fetch(url, timeout=25):
@@ -99,7 +114,7 @@ def parse_ts(v):
         return None
 
 
-# ---- per-provider fetch + normalize -> {company,title,location,url,posted_at,remote,description} ----
+# per-provider fetch + normalize -> {company,title,location,url,posted_at,remote,description}
 def from_greenhouse(company, slug):
     d = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
     out = []
@@ -142,13 +157,13 @@ def from_lever(company, slug):
     return out
 
 
-# ---- Workday / SmartRecruiters / Workable: three more public ATS platforms beyond the GH/Lever/
-#      Ashby core, useful because they host a different mix of employers (Workday in particular
-#      skews toward large enterprises the other three rarely reach). Discovery only: none of these
-#      list endpoints return the full JD body (fetch it from the posting URL yourself when you
-#      tailor), and Workday's list API gives only a RELATIVE post date ("Posted 3 Days Ago"), so its
-#      posted_at below is an APPROXIMATION, never exact. A wrong slug 404s and is reported like any
-#      other bad slug, same as the three ATSes above. ----
+# Workday / SmartRecruiters / Workable: three more public ATS platforms beyond the GH/Lever/
+# Ashby core, useful because they host a different mix of employers (Workday in particular
+# skews toward large enterprises the other three rarely reach). Discovery only: none of these
+# list endpoints return the full JD body (fetch it from the posting URL yourself when you
+# tailor), and Workday's list API gives only a RELATIVE post date ("Posted 3 Days Ago"), so its
+# posted_at below is an APPROXIMATION, never exact. A wrong slug 404s and is reported like any
+# other bad slug, same as the three ATSes above.
 WORKDAY_MAX_PER_TERM = 60  # 3 pages of 20; Workday relevance-sorts, so title matches surface first
 
 
@@ -258,9 +273,13 @@ FEW_MATCHES = 3  # a run with this many matches or fewer gets the "look beyond t
 FEW_MATCHES_HINT = (
     "{n} match(es) this run. The default free feeds are mostly remote and tech jobs, and many "
     "employers (hospitals, schools, government, retailers and more) use hiring systems this crawler "
-    "can't read, so a small count does not mean there are few jobs for you. Search the web for "
-    "\"{title} jobs{place}\" and for employers' own career pages (`python3 "
+    "can't read, so a small count does not mean there are few jobs for you. ")
+WEB_SEARCH_HINT = (
+    "Search the web for \"{title} jobs{place}\" and for employers' own career pages (`python3 "
     "pipeline/job-crawler/discover.py --queries` prints ready-made searches), then {route}")
+FEW_MATCHES_HINT += WEB_SEARCH_HINT
+# The feed says what the hint says: boards are one source, never the only place jobs are.
+EMPTY_FEED = "No fresh matches this run. Job boards are one source, not the only one. " + WEB_SEARCH_HINT
 ROUTE_TRACKER = ("add each posting you find as a lead row in pipeline/tracker.html and apply there; "
                  "the agent fills those forms too.")
 ROUTE_DIRECT = "open each posting you find and apply there."
@@ -270,29 +289,99 @@ LIST_KEYS = ("include_keywords", "exclude_patterns", "flag_patterns", "exclude_c
 def normalize_filters(F):
     """filters.yaml as crawl.py compares it: titles and every word list lowercased (job text is
     lowercased before matching, so "US Citizen" or "Acme" would otherwise never match), and an
-    empty or null list read as no list. A blank entry is dropped: it would match every posting."""
-    F = dict(F or {})
-    F["include_titles"] = [str(t).strip().lower() for t in (F.get("include_titles") or [])
+    empty or null list read as no list, and a single value as a one-item list. A blank entry is
+    dropped: it would match every posting."""
+    F = config_files.listify(F)
+    F["include_titles"] = [str(t).strip().lower() for t in F["include_titles"]
                            if t is not None and str(t).strip()]
     for k in LIST_KEYS:
-        v = F.get(k) or []
-        if isinstance(v, str):
-            v = [v]
-        F[k] = [str(x).lower() for x in v if x is not None and str(x).strip()]
+        F[k] = [str(x).lower() for x in F[k] if x is not None and str(x).strip()]
     return F
+
+
+def read_sources():
+    """sources.yaml as (settings, problems), each unusable value already swapped for its built-in
+    one, so a bad number never reaches a fetcher or the interval arithmetic."""
+    cfg, problems = api_sources.read_config()
+    cfg, bad = config_files.clean_source_settings(cfg, api_sources.DEFAULTS)
+    return cfg, problems + bad
+
+
+ALL_FAILED_HINT = (
+    "Every source failed this run (no connection, rate limits, or sites answering with errors), so "
+    "this run says nothing about your titles or filters. Check your connection and run the crawler "
+    "again in about an hour; `sources` and `errors` say what each one answered.")
+
+
+def all_sources_failed(report):
+    """True when at least one source was tried and none of them answered. A source that answered
+    with no jobs did answer; so did one reusing its last good results inside its fetch interval."""
+    tried = [r for r in report if r.get("status") != "skipped" and r.get("name") not in api_sources.NOT_SOURCES]
+
+    def answered(r):
+        return r["status"] == "ran" or (r["status"] == "cached"
+                                        and (r.get("jobs") or not r.get("last_attempt_failed")))
+    return bool(tried) and not any(answered(r) for r in tried)
+
+
+BAD_BOARDS_HINT = (
+    "None of the rows in boards.yaml could be used (`errors` names each one), so no company board was "
+    "searched this run. Each row needs a company, an ats and a slug, like `- {company: Acme, ats: "
+    "greenhouse, slug: acme}`. Fix those rows, or run `python3 pipeline/job-crawler/discover.py --sweep` "
+    "to add working ones.")
+BAD_BOARDS_REST_FAILED = (
+    "The job APIs and Hacker News did not answer this run either; `sources` says what each one "
+    "answered. Fix the boards.yaml rows and run the crawler again.")
+
+
+def usable_boards(boards):
+    """boards.yaml as (rows, errors). A row missing its company, ats or slug is left out and named
+    in `errors`, so one bad row never stops the crawl."""
+    rows = boards.get("boards") if isinstance(boards, dict) else boards
+    if not rows:
+        return [], []
+    if not isinstance(rows, list):
+        return [], ["boards.yaml: `boards:` is not a list, so no company boards were read. Each row "
+                    "should look like `- {company: Acme, ats: greenhouse, slug: acme}`."]
+    good, errors = [], []
+    for n, b in enumerate(rows, 1):
+        missing = [k for k in ("company", "ats", "slug") if not (isinstance(b, dict) and b.get(k))]
+        if missing:
+            name = f" ({b['company']})" if isinstance(b, dict) and b.get("company") else ""
+            errors.append(f"boards.yaml row {n}{name}: no {' or '.join(missing)}, so it was skipped.")
+            continue
+        good.append(dict(company=str(b["company"]), ats=str(b["ats"]), slug=str(b["slug"])))
+    return good, errors
+
+
+def board_http_note(code):
+    """What an HTTP error from a company board most likely means, for the report's `errors`."""
+    if code == 429:
+        return "HTTP 429 (rate limited; try again later)"
+    if code >= 500:
+        return f"HTTP {code} (the board's server had a problem; try again later)"
+    return f"HTTP {code} (bad slug?)"
+
+
+def search_hint(template, F, **kw):
+    """`template` filled with your first title, your first home metro (if any) and where to put what
+    you find. F may be None or carry no titles (the feed of a run that stopped early)."""
+    F = F or {}
+    try:
+        _, onsite, metros = locations.settings(F)
+    except ValueError:
+        onsite, metros = "anywhere", ()
+    place = f" {metros[0]}" if metros else ""
+    title = (F.get("include_titles") or ["your job title"])[0]
+    return template.format(title=title, place=place,
+                           route=ROUTE_TRACKER if TRACKER.exists() else ROUTE_DIRECT, **kw)
 
 
 def few_matches_hint(n, F):
     """The plain hint for a run that found little; None when it found enough."""
     if n > FEW_MATCHES:
         return None
-    try:
-        _, onsite, metros = locations.settings(F)
-    except ValueError:
-        onsite, metros = "anywhere", ()
-    place = f" {metros[0]}" if metros else ""
-    return FEW_MATCHES_HINT.format(n=n, title=F["include_titles"][0], place=place,
-                                   route=ROUTE_TRACKER if TRACKER.exists() else ROUTE_DIRECT)
+    return search_hint(FEW_MATCHES_HINT, F, n=n)
 
 
 def title_match(job, F):
@@ -414,8 +503,10 @@ def consider(j, F, args, cutoff, stats):
     """Run one normalized posting (from ANY source) through the shared gates (title match,
     reject patterns, US-location, freshness) and return a match dict (carrying provenance
     `source`) or None. Used identically for ATS boards and HN so both obey the same filters.yaml.
-    Increments stats['title_hits'] on a title-match hit (across all sources), and counts every
-    posting it turns away under stats['dropped'][<reason>] (see DROP_REASONS)."""
+    Counts every posting it reads under stats['raw_jobs'] and every title-match hit under
+    stats['title_hits'] (both across all sources), and every posting it turns away under
+    stats['dropped'][<reason>] (see DROP_REASONS)."""
+    stats["raw_jobs"] += 1
     m = title_match(j, F)
     if not m:
         return _drop(stats, "title")
@@ -437,7 +528,7 @@ def consider(j, F, args, cutoff, stats):
                 posted_approx=bool(j.get("posted_approx")))
 
 
-# ---- outputs: the review feed + the tracker leads ----
+# outputs: the review feed + the tracker leads
 def _md_esc(s):
     return (s or "").replace("|", "\\|").replace("\n", " ").strip()
 
@@ -449,8 +540,8 @@ def _src_label(m):
     return _SRC_LABEL.get(m.get("source", "ats"), m.get("source", "ats"))
 
 
-def write_feed(matches, hours, keywords_on=True):
-    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")  # your own local time
+def write_feed(matches, hours, keywords_on=True, all_failed=False, bad_boards=False, F=None):
+    now = config_files.local_now().strftime("%Y-%m-%d %H:%M %Z")  # your own local time
     nflag = sum(1 for m in matches if m.get("no_sponsor_flag"))
     meta = (f"_Generated {now} · last {hours}h · {len(matches)} match(es)"
             + (f" · {nflag} ⚠ no-sponsor" if nflag else "") + " · via `pipeline/job-crawler/crawl.py`._")
@@ -485,8 +576,11 @@ def write_feed(matches, hours, keywords_on=True):
                  f"{_md_esc(m['location']) or 'n/a'} | {(m['posted_at'] or '')[:10]} | {src} | {flag} | "
                  f"[open]({m['url']}) |")
     if not matches:
-        L.append("| n/a | n/a | n/a | _No fresh matches this run. Widen with `--hours` or add boards._ "
-                 "| n/a | n/a | n/a | n/a | n/a |")
+        empty = ("Every source failed this run, so nothing could be checked. Run the crawler again later."
+                 if all_failed else _md_esc(search_hint(EMPTY_FEED, F)))
+        if all_failed and bad_boards:
+            empty = "No row in boards.yaml could be used and the other sources did not answer. Fix those rows and run it again."
+        L.append(f"| n/a | n/a | n/a | _{empty}_ | n/a | n/a | n/a | n/a | n/a |")
     FEED.write_text("\n".join(L) + "\n")
     return str(FEED)
 
@@ -505,7 +599,7 @@ def _js_row(m):
     posted_raw = (m["posted_at"] or "")[:10]
     approx = bool(m.get("posted_approx")) and bool(posted_raw)
     posted = "" if approx else posted_raw
-    today = datetime.now().astimezone().date().isoformat()  # your own local date
+    today = config_files.local_now().date().isoformat()  # your own local date
     flagged = bool(m.get("no_sponsor_flag"))
     spon = "no" if flagged else "ask"
     src_label = "the crawler" if m.get("source", "ats") == "ats" else _src_label(m)
@@ -538,13 +632,36 @@ def _js_row(m):
     url = qurl(m["url"])
     posted_js = f'"{posted}"' if posted else '"unknown"'
     # Full per-job record: fresh crawler rows carry the same schema as every other row. source is
-    # always "crawl-jobs" here; jd/apply = the real posting URL; folder/refs/everify start empty
-    # (no dossier, no referral, work-auth-enrollment unverified, never guessed). Missing values
-    # render as the no-data glyph in the tracker, never a fake value.
+    # always "crawl-jobs" here; jd/apply = the real posting URL; folder/refs start empty
+    # (no dossier, no referral, never guessed). Missing values render as the no-data glyph in the
+    # tracker, never a fake value.
     return (f'  {{co:"{q(m["company"])}", role:"{q(m["title"])}", loc:"{q(m["location"])}", '
             f'comp:"", compK:null, status:"lead", fit:"watch", spon:"{spon}", posted:{posted_js},\n'
-            f'   source:"crawl-jobs", jd:"{url}", apply:"{url}", folder:"", refs:0, everify:"unknown",\n'
+            f'   source:"crawl-jobs", jd:"{url}", apply:"{url}", folder:"", refs:0,\n'
             f'   next:"{q(nxt)}", notes:"{q(notes)}", link:"{url}"}},')
+
+
+TRACKER_URL_FIELD = re.compile(r'\b(?:link|jd|apply):"([^"]+)"')
+TRACKING_KEYS = {"gclid", "fbclid", "msclkid", "mc_cid", "mc_eid", "gh_src", "lever-source",
+                 "lever-origin", "ref", "referrer", "src", "trk", "_hsenc", "_hsmi"}
+
+
+def same_posting_key(url):
+    """A URL reduced to what names the posting, so the same job read twice compares equal: no
+    scheme, host lower-cased without `www.`, no trailing slash, no fragment, no tracking query keys
+    (`utm_*` and TRACKING_KEYS), the other keys sorted. "" for a blank URL."""
+    from urllib.parse import urlsplit, parse_qsl, urlencode
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if "://" not in u:
+        u = "//" + u.lstrip("/")
+    p = urlsplit(u)
+    host = p.netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    q = sorted((k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+               if not k.lower().startswith("utm_") and k.lower() not in TRACKING_KEYS)
+    return host + (p.path.rstrip("/") or "") + ("?" + urlencode(q) if q else "")
 
 
 def patch_tracker(matches):
@@ -557,15 +674,25 @@ def patch_tracker(matches):
     i = src.find(marker)
     if i < 0:
         return {"error": "APPLICATIONS array marker not found; NOT patched", "added": 0}
-    existing = set(re.findall(r'link:"([^"]+)"', src))
-    new = [m for m in matches if m["url"] and m["url"] not in existing]
+    # One posting, one row (records-format.md section 1): a row added by hand from a web search
+    # carries the URL in `jd`/`apply` and no `link`, so every URL field counts, compared normalised.
+    # No role check here, on purpose: a crawler result's URL names one posting, so a row already
+    # holding that exact URL is that posting, and a second row risks a second application.
+    # (records_check adds the role check for rows written by hand, where `jd` can be a shared page.)
+    existing = {same_posting_key(u) for u in TRACKER_URL_FIELD.findall(src)} - {""}
+    new = []
+    for m in matches:
+        k = same_posting_key((m["url"] or "").replace('"', "%22"))
+        if k and k not in existing:
+            existing.add(k)  # two results for one posting in the same run add one row
+            new.append(m)
     if not new:
         return {"added": 0}
     rows = "\n".join(_js_row(m) for m in new)
     at = i + len(marker)
     patched = src[:at] + "\n" + rows + src[at:]
     patched = re.sub(r'const UPDATED = "[^"]*";',
-                     f'const UPDATED = "{datetime.now().astimezone().date().isoformat()}";',
+                     f'const UPDATED = "{config_files.local_now().date().isoformat()}";',
                      patched, count=1)
     # safety: exactly one array, closer present, and row count grew by exactly len(new)
     if (patched.count(marker) == 1 and "];" in patched
@@ -596,66 +723,83 @@ def main():
                     help="exclude postings flagged 'no sponsorship' (default: include + flag them)")
     args = ap.parse_args()
 
-    F = normalize_filters(load_yaml("filters.yaml"))
+    try:
+        F = normalize_filters(load_yaml("filters.yaml"))
+        boards_missing = not (HERE / "boards.yaml").exists()
+        boards = {} if boards_missing else load_yaml("boards.yaml")
+    except config_files.ConfigError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
     if not F["include_titles"]:
         print(NO_TITLES, file=sys.stderr)
         sys.exit(2)
     try:
         location_rule = locations.describe(F)
-    except ValueError as e:
+        hours = config_files.lookback_hours(F.get("lookback_hours", 72), args.hours)
+    except (ValueError, config_files.ConfigError) as e:
         print(str(e), file=sys.stderr)
         sys.exit(2)
-    boards = load_yaml("boards.yaml") if (HERE / "boards.yaml").exists() else {}
-    board_list = (boards.get("boards") if isinstance(boards, dict) else boards) or []
-    hours = args.hours if args.hours is not None else F.get("lookback_hours", 72)
+    board_list, errors = usable_boards(boards)
+    bad_boards = bool(errors) and not board_list  # rows were there, and not one could be used
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    matches, errors, hints = [], [], []
+    matches, hints = [], []
+    failed_boards = 0
     report = []  # one entry per source: what ran, what it returned, what was skipped and why
     stats = {"boards": 0, "raw_jobs": 0, "title_hits": 0, "dropped": {k: 0 for k in DROP_REASONS}}
     for b in board_list:
-        company, ats, slug = b["company"], b["ats"], b["slug"]
+        company, ats, slug = b["company"], str(b["ats"]).strip().lower(), b["slug"]  # "Greenhouse" is greenhouse
         if args.company and args.company.lower() not in company.lower():
             continue
         fetcher = FETCHERS.get(ats)
         if not fetcher:
-            errors.append(f"{company}: unknown ats '{ats}'")
+            errors.append(f"{company}: unknown ats '{ats}' (this crawler reads " + ", ".join(sorted(FETCHERS))
+                          + "; for any other system pass the careers URL to `discover.py --urls -`" + ", or add the posting as a lead row in pipeline/tracker.html" + ")")
             continue
         try:
             # Workday has no "list the whole board" mode (see from_workday's docstring): it needs a
             # search term per call, so it's the one fetcher that takes your own include_titles too.
             jobs = fetcher(company, slug, F["include_titles"]) if ats == "workday" else fetcher(company, slug)
         except urllib.error.HTTPError as e:
-            errors.append(f"{company} ({ats}:{slug}): HTTP {e.code} (bad slug?)")
+            errors.append(f"{company} ({ats}:{slug}): {board_http_note(e.code)}")
+            failed_boards += 1
             continue
         except Exception as e:
-            errors.append(f"{company} ({ats}:{slug}): {type(e).__name__} {str(e)[:70]}")
+            errors.append(f"{company} ({ats}:{slug}): " + plain_failure(f"{type(e).__name__} {str(e)[:70]}"))
+            failed_boards += 1
             continue
         stats["boards"] += 1
-        stats["raw_jobs"] += len(jobs)
         for j in jobs:
             mm = consider(j, F, args, cutoff, stats)
             if mm:
                 matches.append(mm)
     n_ats = len(matches)
     if board_list:
-        report.append({"name": "ats-boards", "label": "Company ATS boards (boards.yaml)", "status": "ran",
-                       "boards_listed": len(board_list), "boards_read": stats["boards"],
-                       "jobs": stats["raw_jobs"], "matches": n_ats})
+        entry = {"name": "ats-boards", "label": "Company ATS boards (boards.yaml)", "status": "ran",
+                 "boards_listed": len(board_list), "boards_read": stats["boards"],
+                 "jobs": stats["raw_jobs"], "matches": n_ats}
+        if failed_boards and not stats["boards"]:
+            entry.update(status="error", reason="every board failed; `errors` says why")
+        report.append(entry)
     else:
         report.append({"name": "ats-boards", "label": "Company ATS boards (boards.yaml)",
                        "status": "skipped", "jobs": 0, "matches": 0,
-                       "reason": "boards.yaml has no company boards yet (run discover.py --sweep)"})
-        hints.append(NO_BOARDS_HINT)
+                       "reason": ("boards.yaml has no usable rows; `errors` says why" if errors else
+                                  f"boards.yaml is missing (restore it with `{RESTORE_BOARDS}` (or, in a Download-ZIP copy, download that file again from the repo's GitHub page))" if boards_missing else
+                                  "boards.yaml has no company boards yet (run discover.py --sweep)")})
+        hints.append(BAD_BOARDS_HINT if errors else MISSING_BOARDS_HINT if boards_missing else NO_BOARDS_HINT)
 
-    # ---- free job APIs (sources.yaml). Each is fetched politely within its own terms; the same
-    #      job seen on an ATS board above is not listed twice. Failures are non-fatal. ----
+    # free job APIs (sources.yaml). Each is fetched politely within its own terms; the same
+    # job seen on an ATS board above is not listed twice. Failures are non-fatal.
     if args.no_api:
         report.append({"name": "job-apis", "label": "Free job APIs (sources.yaml)", "status": "skipped",
                        "jobs": 0, "matches": 0, "reason": "--no-api"})
     else:
         try:
-            api_jobs, api_report = api_sources.collect(F["include_titles"], cache_dir=CACHE_DIR)
+            source_settings, problems = read_sources()
+            api_jobs, api_report = api_sources.collect(F["include_titles"], source_settings, cache_dir=CACHE_DIR)
+            api_report += [{"name": api_sources.CONFIG_ENTRY, "label": "sources.yaml", "status": "error",
+                            "jobs": 0, "reason": p} for p in problems]
         except Exception as e:  # a broken sources.yaml must never break the crawl
             api_jobs, api_report = [], [{"name": "job-apis", "label": "Free job APIs", "status": "error",
                                          "jobs": 0, "reason": f"{type(e).__name__} {str(e)[:80]}"}]
@@ -672,10 +816,13 @@ def main():
                 per[j["source"]] = per.get(j["source"], 0) + 1
         for r in api_report:
             r["matches"] = per.get(r["name"], 0)
+            if r.get("reason"):
+                r["reason"] = plain_failure(r["reason"])
+        hints += [r["reason"] for r in api_report if r["name"] == api_sources.CONFIG_ENTRY]
         report += api_report
 
-    # ---- HN "Who's Hiring" source (on by default; --no-hn to skip). Failures are non-fatal:
-    #      a hiccup here is reported under `errors` and never breaks the ATS crawl. ----
+    # HN "Who's Hiring" source (on by default; --no-hn to skip). Failures are non-fatal:
+    # a hiccup here is reported under `errors` and never breaks the ATS crawl.
     hn_meta = None
     if not args.no_hn:
         n_before = len(matches)
@@ -690,22 +837,61 @@ def main():
             report.append({"name": "hn", "label": "HN Who's Hiring", "status": "ran",
                            "jobs": len(hn_jobs), "matches": len(matches) - n_before})
         except Exception as e:
-            errors.append(f"hn (who's hiring): {type(e).__name__} {str(e)[:80]}")
+            why = plain_failure(f"{type(e).__name__} {str(e)[:80]}")
+            errors.append(f"hn (who's hiring): {why}")
             report.append({"name": "hn", "label": "HN Who's Hiring", "status": "error", "jobs": 0,
-                           "matches": 0, "reason": f"{type(e).__name__} {str(e)[:80]}"})
+                           "matches": 0, "reason": why})
     else:
         report.append({"name": "hn", "label": "HN Who's Hiring", "status": "skipped", "jobs": 0,
                        "matches": 0, "reason": "--no-hn"})
 
     matches.sort(key=rank_key, reverse=True)
-    ro_hint = remote_only_hint(F, report, stats["dropped"])
-    if ro_hint:
-        hints.append(ro_hint)
-    few = few_matches_hint(len(matches), F)
-    if few:
-        hints.append(few)
+    failed_all = all_sources_failed(report)
+    nothing_ran = bool(report) and all(r.get("status") == "skipped" for r in report)
+    if nothing_ran:  # every source was off or empty: say so, and never report it as a run with no jobs
+        hints[:] = [BAD_BOARDS_HINT + " The job feeds and Hacker News were also switched off (--no-api, --no-hn)."
+                    if errors else NOTHING_SEARCHED]
+        failed_all = True
+    elif failed_all:  # the sources are the problem here, so no hint about titles or location
+        board_errors = [e for e in errors if not e.startswith("hn ")]
+        dead = [e for e in board_errors if "404" in e or "no board" in e.lower()]
+        if board_errors and len(dead) == len(board_errors) and not any(r.get("status") in ("error", "cached") for r in report
+                                                             if r.get("name") not in ("ats-boards",)):
+            # every failure was a board that does not exist: the rows are wrong, and a retry will not fix them
+            hints.append("Every company board in boards.yaml answered 404 (no board at that name), so the rows are "
+                         "wrong, not your connection: " + "; ".join(dead[:5]) + ". Fix or remove those rows, or find "
+                         "the right ones with `python3 pipeline/job-crawler/discover.py --company \"Name\"`.")
+        else:
+            hints.append(BAD_BOARDS_REST_FAILED if bad_boards else ALL_FAILED_HINT)
+    else:
+        ro_hint = remote_only_hint(F, report, stats["dropped"])
+        if ro_hint:
+            hints.append(ro_hint)
+        # feeds that were not searched this run: say which and when, before any hint about your field
+        held = [r for r in report if r.get("status") == "cached" and (r.get("last_attempt_failed") or r.get("stale_titles"))]
+        if held:
+            hints.append("Not searched this run: " + "; ".join(
+                f"{r.get('label') or r['name']} ({'its last call failed' if r.get('last_attempt_failed') else 'its saved results are for your earlier titles'}, "
+                f"next call in about {r.get('retry_in', '?')} min)" for r in held)
+                + ". Run the crawler again after that; a small count before then says nothing about your field.")
+        bad_rows = [e for e in errors if e and not e.startswith("hn ")]  # boards only; HN failures are named below
+        if bad_rows and not bad_boards:
+            hints.append(f"{len(bad_rows)} company board(s) could not be read this run: " + "; ".join(bad_rows[:5])
+                         + ("; more in `errors`." if len(bad_rows) > 5 else "."))
+        hn_down = [e for e in errors if e.startswith("hn ")]
+        if hn_down:
+            hints.append("Hacker News could not be read this run (" + hn_down[0].split(": ", 1)[-1]
+                         + "); the other sources ran.")
+        few = few_matches_hint(len(matches), F)
+        fresh_feed = any(r.get("status") == "ran" for r in report if r.get("name") not in ("ats-boards", "hn"))
+        if few and (fresh_feed or not held):
+            hints.append(few)
+        too_old = stats["dropped"].get("age", 0)
+        if few is not None and too_old:  # matching postings exist, just older than this run's window
+            hints.append(f"{too_old} posting(s) match your titles but were posted before the last {hours} hours; "
+                         f"run with `--hours 720` to see them.")
 
-    out = dict(generated=datetime.now().astimezone().isoformat(), lookback_hours=hours,
+    out = dict(generated=config_files.local_now().isoformat(), lookback_hours=hours,
                boards=stats["boards"], raw_jobs=stats["raw_jobs"], title_hits=stats["title_hits"],
                count=len(matches),
                dropped=stats["dropped"], dropped_reasons=DROP_REASONS,
@@ -719,12 +905,15 @@ def main():
                              "`sources` lists each one, what it returned, and why any was skipped."),
                hints=hints, hn=hn_meta, matches=matches, errors=errors)
     if args.write:
-        out["feed_written"] = write_feed(matches, hours, keywords_on=bool(F.get("include_keywords")))
+        out["feed_written"] = write_feed(matches, hours, keywords_on=bool(F.get("include_keywords")),
+                                         all_failed=failed_all, bad_boards=bad_boards, F=F)
         if TRACKER.exists():  # no tracker file -> feed only, no tracker key, no error
             out["tracker"] = patch_tracker(matches)
     for h in hints:
         print(h, file=sys.stderr)
     print(json.dumps(out, indent=2))
+    if failed_all:
+        sys.exit(3)  # nothing could be fetched: not a run with no matches, so never exit 0
 
 
 if __name__ == "__main__":

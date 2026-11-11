@@ -168,7 +168,9 @@ job. It is mandatory in every bundle (§13.3).
 - **Read first, never draft before:** the dossier's `jd-*.md` IN FULL (the verbatim JD, never a
   summary; no dossier → build it first, §13.3) · `knowledge-base/07` (every claim's source of
   truth) · `knowledge-base/08` → "Cover-letter methodology" (the facts and structure a note must get
-  right) · `knowledge-base/17-writing.md` (how it sounds) · the template
+  right) · `knowledge-base/17-writing.md` (how it sounds) · `knowledge-base/18-in-your-own-words.md`
+  (the real stories and reasons a letter is built from; it may be blank, and then nothing is invented
+  in its place) · the template
   `applications/TEMPLATE-company-role/cover-letter/cover-note.md`.
 - **Write it per `knowledge-base/17-writing.md`**, the only owner of how it sounds. Its gate is a
   fresh read-aloud review by a reviewer that sees only `17-writing.md`, your voice samples, the draft
@@ -177,12 +179,16 @@ job. It is mandatory in every bundle (§13.3).
   `knowledge-base/12-application-answers.md` §3 is their only owner.
 - **Hard facts:** `python3 scripts/voice_check.py --sendable cover-letter/cover-note.md` → exit 0
   (hard facts, your never-say list, over-confidence phrases and dashes only; it says nothing about
-  the voice).
-- **Render:** copy the cover-letter template, drop the note in, render one page (fonts embedded via
-  relative paths), verify by rasterizing the REAL PDF, never by reading the HTML.
+  the voice). `python3 scripts/slop_check.py applications/<dossier>` flags machine-sounding sentence
+  shapes; a pass is a floor, not the voice.
+- **Render:** `python3 scripts/render_cover.py applications/<dossier> --meta "Company, Role, City, ST"`
+  drops the note into the dossier's `cover-letter.html` (it copies the template and its fonts when the
+  dossier has none), fills the letterhead from your knowledge base and renders one page. Exit 1 says
+  what to fix. Then verify by rasterizing the REAL PDF, never by reading the HTML.
 - **Deliverable (§13.3):** `cover-letter/` = `cover-note.md` (sendable body + form-answer honesty
-  block + JD-to-line map + "deliberately not said" + "one thing you should know") + the HTML + the
-  PDF + `review-passes.md`.
+  block + one "Facts used" line naming each fact's source + "deliberately not said" + "one thing you
+  should know") + the HTML + the PDF + `review-passes.md`. No line-by-line map of the posting:
+  matching its keywords line by line is what makes a letter open on "your posting says...".
 
 ### 6. Review + gates (once per artifact)
 ONE `application-review` workflow per target (the five lenses, §13.1), integrate with safe AMBER
@@ -220,17 +226,33 @@ on. Never respond to a refusing gate by handing the user the form to fill.
    tool list has no browser tool"): install Node.js 20.19+ or 22.12+ and Google Chrome; in Claude
    Code type `/mcp` and enable `chrome-devtools` if it shows as disabled, or, if they said no at the
    approval prompt, quit, run `claude mcp reset-project-choices`, start `claude` again and approve
-   it (Codex: trust the folder, or `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1`);
+   it (Codex: trust the folder, or `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1 --no-usage-statistics`);
    then restart the session. The rule, in the same words §14 and `doctor.py` use: "With no browser
    tool in its session at all, the agent gives you these steps and stops at the form; once you
    restart, it fills the form. It never asks you to fill the form by hand."
 0b. **Fit/seniority gate:** `python3 scripts/seniority_gate.py "applications/<dossier>"` (or
    `--all --unsubmitted` across the wave) checks the JD's stated years against your own
-   `YOUR_YEARS_OF_EXPERIENCE` (`scripts/config.py`). **DROP** = a clear gap: don't fill it; say which
-   requirement and your number, set the tracker status to `passed` with the reason, and offer the next
-   ranked target in its place. **REVIEW** = borderline: one line to you with the requirement and your
-   number, fill on your yes. Unset `YOUR_YEARS_OF_EXPERIENCE`: the gate prints NOT CHECKED and exits 3,
-   which is never a pass: offer to set it.
+   `YOUR_YEARS_OF_EXPERIENCE` (`scripts/config.py`). **DROP** = the posting looks like a clear gap, but
+   you decide: don't fill it yet, and show one line with the requirement as the posting words it and your
+   number, asking whether to skip it. On your yes, set the tracker status to `passed` with the reason and
+   offer the next ranked target in its place; on your no, add the line `Seniority: KEPT YYYY-MM-DD (you
+   said fill it)` to the dossier's README, so the gate stops asking, and fill it like any other. Never mark a job
+   `passed` from a DROP without your yes: a posting can welcome people below its bar in words no gate
+   knows. **REVIEW** = borderline: one line to you with the requirement and your number, fill on your yes. NOT CHECKED (exit 3) is never a pass, and the gate's output names its
+   cause. The usual ones: `YOUR_YEARS_OF_EXPERIENCE` is unset or `scripts/config.py` has an error
+   (offer to fix it), the dossier has no `jd-*.md` or its `jd-*.md` still holds only the template's
+   placeholders (save the posting's full text there, then run the gate again), or no dossier exists
+   yet (build one first).
+0c. **Never fill a form twice.** Before opening any form, read its tracker row and dossier for a
+   submitted record (status `applied` or later, or a `## SUBMITTED` heading). A submitted form is never
+   opened again. One open tab per form: a later fix pass reuses that form's tab. **A tab that is gone
+   is never refilled without asking,** because a missing tab usually means you submitted it and closed
+   it. "Refill" below only ever means a tab that is still open and has reset.
+   **Repeat-application limits are the agent's to track.** When a form refuses a repeat application
+   or prints a limit, work out the clear date from the records (the row's `applied:` and rejection
+   dates plus the limit the form prints) and write it on the row's `next` as `LIMIT CLEARED <date>` or
+   `BLOCKED until <date>`. Say it as a date; don't ask you to work it out. If the form prints no
+   length, record the refusal and its date on the row and say that the length isn't known.
 1. **Presubmit gate:** `python3 scripts/presubmit_check.py "applications/<dossier>"`: exit 2 =
    unchecked `- [ ] BLOCKING:` items. Quote each, say what clears it, do the ones the agent can do,
    ask about the rest, re-run. Don't open the browser until it passes.
@@ -250,21 +272,56 @@ on. Never respond to a refusing gate by handing the user the form to fill.
    SuccessFactors, iCIMS, a board that needs an account)** → the user signs in inside the automation
    window (account creation and passwords are their hands only), then the agent fills everything
    after. **A paste kit only for a named reason** (§14): a CAPTCHA wall, a login the user declines to
-   do in the automation window, terms that ban automated access, or an ATS that rejects a submit from
+   do in the automation window, terms that ban automated access, an ATS that rejects a submit from
    the automation browser (seen on some Lever forms: an "error verifying your application" or an
-   hCaptcha on submit). Even then: fill and DOM-verify it first, then add a `## Paste kit` section to
+   hCaptcha on submit), or a site's bot check that walls the automation browser (a "Verification
+   failed" or "Unable to apply" page, or a block on the apply page; seen on some pages of several
+   hiring systems). **Try every form first.** A system's name is never the reason, and no whole ATS
+   goes to a paste kit by default. Even then: fill and DOM-verify everything the page lets you reach
+   first, then add a `## Paste kit` section to
    `application.md` (the direct form URL on its own line, every field label with its exact value in
    form order, long answers in full, the résumé and cover file paths) and give the user the link + kit
    with the reason. The full list of reasons is owned by `.claude/rules/application-protocol.md` §14.
 4. **Fill:** snapshot (a11y tree, stable uids; re-snapshot after EVERY navigation/render, since uids
-   die) → map every field to the answer bank BEFORE filling any → fill in one batch. **Ask the user
-   only** on: a required numeric salary · a work-authorization phrasing that maps to no row in
-   `knowledge-base/12` §3 · required free text with nothing true in the bank · a self-ID field §5b
-   doesn't cover. Fill everything else first, then ask all of these in one message.
-   **Optional free-text fields** (about you / anything else / additional context / why us): always
-   fill them, never skip, thought through per §14 (the specific true link, written per
-   `knowledge-base/17-writing.md`). Before ANY handoff, sweep EVERY open form for a blank field (query
-   `textarea`s with empty value) and fill it, not only the field you were pointed at.
+   die) → map every field to the answer bank BEFORE filling any → set selects, radios and checkboxes
+   in one batch → type the text.
+   **Every field gets filled; nothing is handed back for you to fill.** Free text of every kind (why
+   us, about you, hardest you've worked, a fun fact, culture questions) is written by the agent from
+   the knowledge base and the dossier, never skipped. Screening, conditional and agreement fields:
+   `knowledge-base/12` §5c and §5d. The only blanks: a required numeric salary your §4 policy doesn't
+   cover · a work-authorization phrasing that maps to no row in §3 · a self-ID field §5b doesn't cover
+   · a fact only you hold that §5c and §5d don't record yet. Fill everything else first, then ask all
+   of these once, in one message, and record each answer in the section that owns it so it is never
+   asked again.
+   **Read the label before writing.** A why-THEM question gets an answer about the company and why you
+   want to be there, never a recital of your work (§5.1a); only a why-YOU question gets your work
+   (§5.1b). Every free-text answer is built from `knowledge-base/18-in-your-own-words.md` and your
+   other real records, never an invented reason, and written per `knowledge-base/17-writing.md`.
+   Before filling: `python3 scripts/why_check.py applications/<dossier>` and
+   `python3 scripts/slop_check.py applications/<dossier>`. Exit 1 = fix the answer. Exit 3 from
+   why_check = nothing to compare yet, which is never a pass: carry on, and item 7 reads what is on the
+   form.
+   **Type text answers by keystroke.** On a controlled field (most React forms), `fill` or a script can
+   leave a value on screen that the form never stored, and the first edit elsewhere on the page puts
+   the old value back. So for each text box: clear it, click it, `type_text` the answer (any other
+   browser tool: its real keyboard-typing action). Then run `scripts/form_persist.js`: every entry
+   the form holds must match the screen (`mismatched: []`). `controlled: 0` means this form has no field that
+   check can read, so rely on the DOM read-back in item 6.
+   **The page helpers.** `scripts/form_blanks.js`, `form_persist.js` and `form_answers.js` are plain
+   functions. Read the file and pass its whole text as the `function` argument of `evaluate_script`;
+   chrome-devtools-mcp takes no path to a script. To save the result, also pass `filePath` with a path
+   inside this repo, such as `.claude/tmp/forms/<tab number>.json` (the tool refuses a path outside its
+   workspace). With any other browser tool, run the same text through its JavaScript action and write
+   the returned JSON to that file yourself.
+   **Blank sweep:** before ANY handoff, run `scripts/form_blanks.js` on EVERY open tab, not only this
+   batch's. It lists each visible input, textarea, select, radio group, Yes/No pair and dropdown with
+   no answer, by label. Fill each one, re-run, and hand over only when what remains is the blanks
+   allowed above. `unreadableFrames` above 0 means a frame it could not look inside, so that part was
+   not swept: open the frame's own URL, or check it from the a11y tree and say so.
+   **Work-history entries** (any form with an Experience or Work History section): one entry per résumé
+   title, each description box that role's résumé bullets verbatim, never a summary (`knowledge-base/12`
+   §1b; `python3 scripts/work_history_check.py --print` gives the text, `--resume <the dossier's résumé>`
+   when it was tailored).
    Known quirks: custom comboboxes (a location or school field) often fail a plain fill → click → type
    → click the option; date inputs may CONCATENATE, so clear via the native value setter +
    input/change events (§14); iframed forms may block scripts → verify from the a11y tree and SAY SO;
@@ -284,7 +341,22 @@ on. Never respond to a refusing gate by handing the user the form to fill.
    cover-equivalent and must be filled. A form is never handed over with an empty cover field.
 7. **Hand over:** **re-run step 6 on every open tab in one pass right before this message**, and give
    the time of that pass (an earlier check does not survive a reload or an evicted tab; a tab that
-   reset gets refilled). Full-page screenshot to `.claude/tmp/`, then one message with ALL forms + the
+   reset gets refilled).
+   **Close what's done.** After every turn that logs submits, and before any handover, get the open
+   tabs from the browser tool (`list_pages`) and pass them to `python3 scripts/open_tab_sweep.py`
+   (`--file <list>`, or `-` to read stdin). Close each tab it labels SUBMITTED or CLOSED with the browser tool's own
+   close action (`close_page`), and name any tab where it says a different role at that company went
+   in. It only ever sees the automation browser's tabs, never your everyday one.
+   **Read every answer against the question the FORM prints, never against the dossier's note of it.**
+   In the same pass: run `scripts/form_answers.js` on every open tab, saved to
+   `.claude/tmp/forms/<tab number>.json`; then `python3 scripts/why_check.py --live .claude/tmp/forms`,
+   `python3 scripts/work_history_check.py --live .claude/tmp/forms` (add `--resume` as in item 4) and
+   `scripts/form_persist.js` on every tab. Exit 1 = fix it; exit 3 = not checked, which you say at
+   handover. Read `.claude/tmp/forms/REVIEW.md` in full yourself and hand it to a fresh reviewer:
+   every question and its help text beside its answer. Each answer must answer every part of what is
+   printed, why-them answers about them. Fix what fails, re-read the changed tabs, then hand over.
+   Clear `.claude/tmp/forms/` before each pass, so a closed tab's file isn't read again.
+   Full-page screenshot to `.claude/tmp/`, then one message with ALL forms + the
    exact per-form leftovers (salary, consents, legal checkboxes, unlisted EEO) + the gate's
    NOT-checked line verbatim. Browser window stays open; **the user reviews and submits.** Paste-kit
    forms: the direct link + kit + the reason.

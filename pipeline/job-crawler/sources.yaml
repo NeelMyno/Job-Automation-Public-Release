@@ -32,8 +32,9 @@ sources:
     enabled: true
     # Remote jobs by keyword tag. https://jobicy.com/jobs-rss-feed
     # Terms (summary): one automated pass per hour at most; handle HTTP 429; credit Jobicy with a
-    # clickable link and keep the canonical Jobicy job URL. A title shorter than 3 characters
-    # (e.g. "rn") gets HTTP 400 from Jobicy, so the crawler does not send it here.
+    # clickable link and keep the canonical Jobicy job URL. A title outside 3 to 20 characters
+    # gets HTTP 400 from Jobicy, so the crawler leaves out "rn" and sends a longer title as its last
+    # words that fit ("journeyman electrician" as "electrician"). Matches still use your full titles.
     geo: usa                  # "" for any region
     count: 50                 # jobs per query, 1 to 200
     max_queries: 5

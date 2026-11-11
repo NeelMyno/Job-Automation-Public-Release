@@ -31,12 +31,17 @@ as the surface's unknown marker below, never left out and never guessed. Check b
 
 ```
 {co:"...", role:"...", loc:"...", comp:"...", compK:N, status:"<status>", fit:"...", spon:"...", posted:"<posted>",
- source:"...", jd:"<url>", apply:"<url>", folder:"applications/<slug>"|"", refs:N, everify:"...", applied:"<applied>",
+ source:"...", jd:"<url>", apply:"<url>", folder:"applications/<slug>"|"", refs:N, applied:"<applied>",
  next:"...", notes:"...", link:"..."},
 ```
-- `everify` is optional: leave it out if E-Verify does not matter to you. When present it is a string.
-- `status`: `lead`, `active`, `applied`, `interview`, `offer`, `rejected`, `passed` (the page's STATUS map).
-- `applied`, required on every `applied`, `interview`, `offer` and `rejected` row: `YYYY-MM-DD` (the submit
+- `status`: `lead`, `active`, `applied`, `interview`, `offer`, `rejected`, `passed`, `ghosted` (the page's STATUS
+  map). `ghosted`: you applied and the company stopped answering. It is submitted, not live and not a rejection.
+  `scripts/ghost.py` sets it by itself when the newest open `@OWED[them|date|...]` is `GHOST_DAYS` (default 14)
+  days past and nothing dated later is on record. Write `no auto-ghost` in the row's `next` to keep a row live.
+  **Reopen rule:** when a ghosted company replies, in the same turn set the status back, record the reply, and
+  add the new `@OWED`.
+- `applied`: a `lead`, `active` or `passed` row that was never submitted omits the field. An empty `applied:""` is
+  refused. Required on every `applied`, `interview`, `offer`, `rejected` and `ghosted` row: `YYYY-MM-DD` (the submit
   date from a dated record, such as the confirmation email), `on or before YYYY-MM-DD` (no dated record; the
   first day the tracker showed it submitted, so the submit was that day or earlier), `unknown`, or
   `none on record` (the row reached interview or rejection and no record shows any application submit,
@@ -45,6 +50,12 @@ as the surface's unknown marker below, never left out and never guessed. Check b
   `notes` as `posted (as recorded): ...`.
 - `folder`: `applications/<slug>` of a folder that exists, or `""`. Never `null`, never without the prefix.
 - `next`: free text, newest first, carrying `@OWED[...]` tokens (section 4). No empty slots in the array (`,,`).
+- `jd`, `apply`, `link`: `jd` is the posting's page and `apply` its form (often the same URL). `link` is the posting
+  URL the crawler found, and only a crawler row carries it. A row you add from a web search sets `jd`, `apply` and
+  `source:"web search"`, and no `link`.
+- One posting gets one row. The crawler skips a posting whose URL already sits in any row's `link`, `jd` or
+  `apply`, and `scripts/records_check.py` names two rows with the same `link`, or the same `jd` or `apply` and the same role (one careers page can list two roles). Both compare URLs without the
+  scheme, a trailing slash, the fragment or tracking keys such as `utm_*`.
 - Keys are lower case. APPLICATIONS uses `notes`, never `note`.
 
 ## 2. `pipeline/tracker.html`: NETWORK row
@@ -80,6 +91,14 @@ as the surface's unknown marker below, never left out and never guessed. Check b
 `@OWED[them|you | YYYY-MM-DD|? | <what, no ]>]`. Required on every interview and offer row
 (scripts/commitments.py). A take-home, assessment or deadline named in `next:` carries one.
 
+`@OWED-closed[...]` is a finished commitment: same three parts, its text kept, read by no script as open.
+
+**A dead thread cannot hold an open action.** A `rejected`, `passed` or `ghosted` row holds no open `@OWED`:
+each becomes `@OWED-closed[...]`, text kept, in the same edit that sets the status. A `next` that begins
+`CLOSED` holds no open `@OWED[you|...]`. A NETWORK person whose company's every application is dead has `fu`
+`closed`. Companies match with the bracketed aside and a legal suffix ignored (`Acme (Series B)` is `Acme`).
+`scripts/records_check.py` refuses each of these.
+
 ## 5. `pipeline/inmail-ledger.md`: balance table (optional)
 
 Only if you use a paid tier with a monthly message allotment. Under `## Current balance`:
@@ -96,10 +115,13 @@ scripts/config.py and `scripts/cold.py` will flag a balance not counted since th
   a note may follow the date after a comma; or `## Exact form answers (not recorded)` for a submit whose
   answers no record holds. A prepared or intended block is not an as-filled block.
 - A row whose `applied` is `none on record` carries `## NO SUBMIT ON RECORD` instead, and no SUBMITTED heading.
-- Each work-authorization answer under the answers heading is one line: `- "<question exactly as printed>"
-  → Yes` (or `→ No`). A statement-style option: `- "<question>" → "<option text>" (= No)`.
-  `scripts/visa_gate.py` also reads `-> No`, `: Yes`, a trailing `? Yes` and `**Yes**`, and reports any
-  answer it cannot read as UNVERIFIED (exit 1).
+- Under the answers heading, the work-authorization answers sit indented under the template's label line
+  `- 🔴 Work-authorization field(s), worded EXACTLY as the form printed them:`, so `scripts/visa_gate.py`
+  reads every line there as an answer. Each answer is one line: `- "<question exactly as printed>"
+  → Yes` (or `→ No`). A statement-style option: `- "<statement as printed>" → No`. `scripts/visa_gate.py`
+  concludes only from a bare Yes or No, one marked Yes or No option, or the exact wording recorded in
+  KB-12 §3, and reports anything else on a work-authorization line as UNVERIFIED (exit 1). A form with
+  no such question gets the line `- No work-authorization question on this form.`, exactly.
 
 ## 7. `applications/<slug>/referrals.md`
 
@@ -126,4 +148,5 @@ number of cells as the table's header (`| Date | Decision | Why |` as shipped). 
 ## 11. `ops/HANDOFF.md`
 
 One block, the `/wave` close template (`.claude/commands/wave.md`), overwritten at each close. Never a
-second top-level `# ` block stacked under the first.
+second top-level `# ` block stacked under the first, and never a block stamped `CLOSED`, `OUTDATED` or
+`superseded`: overwrite it.

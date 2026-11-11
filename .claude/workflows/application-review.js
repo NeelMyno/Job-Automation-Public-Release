@@ -173,12 +173,26 @@ proves it, and mark VERIFIED / UNSOURCED / FALSE.
     model: 'sonnet',
     effort: 'high',
     brief: `LENS 5: VOICE (a fresh read-aloud, per knowledge-base/17-writing.md).
-Read ${repo}/knowledge-base/17-writing.md FIRST, and the voice samples it names. It is the only owner of how the candidate's
-writing sounds. You see only that file, its samples, the cover letter and the facts it cites. Then:
+Read ${repo}/knowledge-base/17-writing.md FIRST, with the voice samples and the reference letter it holds if the candidate
+pasted them, and ${repo}/knowledge-base/18-in-your-own-words.md. Any of those can be blank; blank is normal, so say which were
+blank and carry on. 17-writing.md is the only owner of how the candidate's writing sounds. You see only those, the cover letter
+and the facts it cites. Then:
+- Run python3 scripts/slop_check.py on the dossier and report its exit code and every finding. Exit 3 means nothing was checked:
+  say so. A TO FIX finding must be fixed or kept with a reason. A "second look" is only a prompt to re-read that sentence: if it is
+  true and it is how the candidate would say it, it stays, and you do not report it as a defect.
+- If there are samples of the candidate's own writing, say for each sentence, in one line, whether it reads closer to their text
+  or to a generated application. Flag any feeling, moment, reason, opinion or habit that is not in 18-in-your-own-words.md, the
+  knowledge base or the candidate's own words (an invented inner life).
 - Read the cover letter ALOUD in your head, as the candidate talking to this one person. Mark every sentence that sounds
   machine-made, over-confident, salesy, unclear or untrue, and say why in one line each.
 - Run python3 scripts/voice_check.py --sendable on the cover note and report its exit code (it checks only hard facts, the
-  candidate's never-say list, over-confidence phrases and dashes; passing says nothing about the voice).
+  candidate's never-say list, over-confidence phrases, filler questions and dashes; passing says nothing about the voice).
+- Mark any sentence copied or near-copied from a knowledge-base file, any spec-like description of how something works, any
+  qualifier bolted on to keep a claim safe, any recital of the employer's own posting or site back to them, and any forced
+  curious closer.
+- Your fix is always to cut or say it plainer, never to add words or qualifiers. Same for every other lens: a claim that needs a
+  hedge to be true gets cut, not hedged. Never suggest shortening or splitting a joined sentence to make it punchier, and never
+  push sentence length away from how the candidate's own samples read.
 - Do NOT invent a personal detail to make it sound human. If a line needs a true specific detail the candidate hasn't given,
   mark it [NEEDS: one real detail] and say exactly what to ask them.`,
   },

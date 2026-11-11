@@ -35,6 +35,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR/scripts/commit_guard.py\" ]; then python3 \"$CLAUDE_PROJECT_DIR/scripts/commit_guard.py\" --pre-tool; fi",
+            "timeout": 15
+          }
+        ]
       }
     ],
 
@@ -86,6 +96,11 @@
       "Bash(python3 scripts/doctor.py:*)",
       "Bash(python3 scripts/records_check.py:*)",
       "Bash(python3 scripts/cold.py:*)",
+      "Bash(python3 scripts/why_check.py:*)",
+      "Bash(python3 scripts/slop_check.py:*)",
+      "Bash(python3 scripts/work_history_check.py:*)",
+      "Bash(python3 scripts/open_tab_sweep.py:*)",
+      "Bash(python3 scripts/ghost.py --dry-run:*)",
       "Bash(python3 pipeline/job-crawler/crawl.py:*)",
       "Bash(python3 pipeline/job-crawler/discover.py:*)",
       "Bash(git status:*)",

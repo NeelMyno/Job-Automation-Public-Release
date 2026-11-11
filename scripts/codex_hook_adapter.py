@@ -28,13 +28,19 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+if __name__ == "__main__" and "--selftest" in sys.argv:  # a throwaway copy that holds none of your files
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 try:
-    from config import RESPONSE_TIMESTAMP
-except ImportError:
-    RESPONSE_TIMESTAMP = False
-try:
-    from config import local_stamp
-except ImportError:  # an older config.py without the helper: this machine's local zone
+    import config as _config
+except Exception:  # a missing or broken config.py never stops the adapter
+    _config = None
+# Off unless you turn it on: requiring every reply to open with a time stamp is a personal habit.
+RESPONSE_TIMESTAMP = bool(getattr(_config, "RESPONSE_TIMESTAMP", False))
+local_stamp = getattr(_config, "local_stamp", None)
+if local_stamp is None:  # an older config.py without the helper: this machine's local zone
     def local_stamp() -> str:
         t = datetime.now().astimezone()
         return f"{t:%Y-%m-%d} {t.strftime('%I:%M %p').lstrip('0')} {t.tzname() or ''}".rstrip()
@@ -206,6 +212,14 @@ def pre_tool(data: dict) -> dict | None:
         fp_cmd = re.sub(r"\s+", " ", command.replace('"', " ").replace("'", " "))
         if FORCE_PUSH.search(fp_cmd):
             return deny("Force-push is forbidden in this repo. Pull with rebase and push normally.")
+        try:  # the same git refusals Claude Code gets (scripts/commit_guard.py owns them)
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from commit_guard import danger as _git_danger
+            _why = _git_danger(command)
+        except Exception:  # a missing or broken guard never stops an ordinary command
+            _why = None
+        if _why:
+            return deny(_why)
     if tool_name in {"Bash", "apply_patch"} and SENSITIVE.search(command):
         _secret_deny = deny(
             "Do not read or modify .env files, and do not modify .mcp.json. Check .env only for "
@@ -308,19 +322,25 @@ def post_edit(data: dict) -> dict | None:
 def selftest() -> int:
     checks: list[tuple[str, bool]] = []
     base = {"session_id": "selftest", "turn_id": "turn-1"}
-    if RESPONSE_TIMESTAMP:
+    global RESPONSE_TIMESTAMP
+    saved_stamp = RESPONSE_TIMESTAMP
+    checks.append(("the reply stamp is off unless config sets it", saved_stamp is False))
+    try:
+        RESPONSE_TIMESTAMP = False
+        checks.append(("timestamp injection no-ops when RESPONSE_TIMESTAMP is off", timestamp_inject(base) is None))
+        idle = dict(base, last_assistant_message="Hello")
+        checks.append(("timestamp Stop never blocks a plain reply when RESPONSE_TIMESTAMP is off", timestamp_stop(idle) is None))
+        RESPONSE_TIMESTAMP = True
         injected = timestamp_inject(base) or {}
         expected = load_expected_stamp(base)
         checks.append(("timestamp injection has Codex envelope", injected.get("hookSpecificOutput", {}).get("hookEventName") == "UserPromptSubmit"))
         checks.append(("timestamp injection leaves a per-turn receipt", bool(expected)))
-        compliant = dict(base, last_assistant_message=f"📅 Response at: {expected}\n\nHello")
+        compliant = dict(base, last_assistant_message=f"\U0001F4C5 Response at: {expected}\n\nHello")
         checks.append(("timestamp Stop allows the exact supplied line", timestamp_stop(compliant) is None))
         missing = dict(base, last_assistant_message="Hello")
-        checks.append(("timestamp Stop blocks a missing line", (timestamp_stop(missing) or {}).get("decision") == "block"))
-    else:
-        checks.append(("timestamp injection no-ops when RESPONSE_TIMESTAMP is off", timestamp_inject(base) is None))
-        idle = dict(base, last_assistant_message="Hello")
-        checks.append(("timestamp Stop no-ops when RESPONSE_TIMESTAMP is off", timestamp_stop(idle) is None))
+        checks.append(("timestamp Stop blocks a missing line when it is on", (timestamp_stop(missing) or {}).get("decision") == "block"))
+    finally:
+        RESPONSE_TIMESTAMP = saved_stamp
     checks.append(("the stamp carries a zone label (config.TIMEZONE or local)", bool(re.match(r"^\d{4}-\d\d-\d\d \d{1,2}:\d\d [AP]M \S+$", now_stamp()))))
     # PostToolUse tab taint (account_guard --post), on a throwaway state file.
     import account_guard
@@ -364,6 +384,10 @@ def selftest() -> int:
     checks.append(("🔴 leading-whitespace +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "   git push origin +main"}}))))
     checks.append(("🔴 env-prefixed +refspec force-push is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "GIT_SSH_COMMAND='ssh -i k' git push origin +main"}}))))
     checks.append(("safe commands remain allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "git status --short"}}) is None))
+    if (Path(__file__).resolve().parent / "commit_guard.py").is_file():
+        checks.append(("commit guard: pulling with autostash is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git pull --autostash origin main"}}))))
+        checks.append(("commit guard: skipping the commit hook is denied", bool(pre_tool({"tool_name": "Bash", "tool_input": {"command": "git commit --no-verify -m x"}}))))
+    checks.append(("a normal commit is allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": 'git commit -m "Add shift notes"'}}) is None))
     checks.append(("a real metadata-only secret check is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c .env"}}) is None))
     checks.append(("a metadata check with an unrelated substitution is still allowed", pre_tool({"tool_name": "Bash", "tool_input": {"command": "wc -c $(ls) .env"}}) is None))
     # The shipped .mcp.json: doctor.py's own fix command used to be denied.

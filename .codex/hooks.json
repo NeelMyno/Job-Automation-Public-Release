@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/hooks.py\" --session-start",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks.py\" --session-start",
             "timeout": 60,
             "statusMessage": "Deriving live repo state",
             "additionalContextLimit": 5000
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --timestamp-inject",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/codex_hook_adapter.py\" --timestamp-inject",
             "timeout": 10,
             "additionalContextLimit": 1200
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --pre-tool",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/codex_hook_adapter.py\" --pre-tool",
             "timeout": 10,
             "statusMessage": "Checking repository safety policy"
           }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --post-tool",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/codex_hook_adapter.py\" --post-tool",
             "timeout": 15,
             "statusMessage": "Checking browser tabs for logged-in accounts"
           }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --post-edit",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/codex_hook_adapter.py\" --post-edit",
             "timeout": 45,
             "statusMessage": "Checking edited files"
           }
@@ -68,12 +68,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/hooks.py\" --stop",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/hooks.py\" --stop",
             "timeout": 45
           },
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/codex_hook_adapter.py\" --timestamp-stop",
+            "command": "python3 \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/scripts/codex_hook_adapter.py\" --timestamp-stop",
             "timeout": 10
           }
         ]

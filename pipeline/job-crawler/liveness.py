@@ -37,14 +37,15 @@ Usage:
   python3 liveness.py --tracker --write           # + annotate each checked row (liveness/checked)
   python3 liveness.py --tracker --company acme     # only leads whose company matches
   python3 liveness.py --tracker --sleep 0.5 --timeout 15   # tune politeness / timeouts
-  python3 liveness.py --tracker --today 2026-07-14         # override the check date (sandbox clock)
+  python3 liveness.py --tracker --today 2031-03-18         # override the check date (sandbox clock)
 """
-import json, sys, argparse, re, html, time, socket, datetime
+import json, sys, argparse, re, html, time, socket
 import urllib.request, urllib.error
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 
 import crawl  # sibling module (same dir, on sys.path): reuse fetch(), strip_html(), UA (clean-room)
+import config_files  # sibling module: local_now(), the user's own date
 
 HERE = Path(__file__).resolve().parent
 TRACKER = HERE.parent / "tracker.html"          # pipeline/tracker.html
@@ -56,7 +57,6 @@ GH_API = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
 ASHBY_API = "https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
 LEVER_API = "https://api.lever.co/v0/postings/{slug}?mode=json"
 
-# ---------------------------------------------------------------------------------------------
 # Closed-signal vocabulary for the HTTP text classifier. Two tiers, deliberately.
 #   STRONG: specific phrases that cannot plausibly sit on a LIVE job description. One hit -> dead.
 #   WEAK:   generic words ("removed", "closed", "no longer available") that DO appear innocently
@@ -64,7 +64,6 @@ LEVER_API = "https://api.lever.co/v0/postings/{slug}?mode=json"
 #           NOT enough -> it takes two, or a corroborating signal. This split is the mechanism
 #           behind "only say dead on strong evidence": the ambiguous words can never sink a real
 #           lead on their own.
-# ---------------------------------------------------------------------------------------------
 STRONG_CLOSED = (
     "no longer accepting", "no longer accept applications", "no longer accepts applications",
     "we are no longer accepting", "this position has been filled", "position has been filled",
@@ -106,9 +105,7 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 AUTH_WALLED_HOSTS = ("linkedin.com",)
 
 
-# ============================================================================================
 # 1) THE PURE CLASSIFIER  (no network: feed it strings; this is what test_liveness.py exercises)
-# ============================================================================================
 def _host(url):
     try:
         return (urlparse(url).hostname or "").lower()
@@ -207,9 +204,7 @@ def classify(status_code, final_url, body_text, *, original_url):
     return "uncertain", "no apply affordance and no closed-signal"
 
 
-# ============================================================================================
 # 2) TARGET RESOLUTION  (URL -> which ATS, which board slug, which job id)
-# ============================================================================================
 def detect_ats(url):
     """Greenhouse / Ashby / Lever from the URL, or None. A company-hosted page carrying `gh_jid=`
     is Greenhouse even though its host is the company's own domain (e.g. acme.example.com, globex.example.com)."""
@@ -292,9 +287,7 @@ def resolve_target(url, company=None, boards_map=None):
     return (ats, slug, jid)
 
 
-# ============================================================================================
 # 3) THE CHECKS  (ATS board API, authoritative; and the HTTP fallback)
-# ============================================================================================
 def _fetch_ats_ids(ats, slug, timeout=25):
     """Return (all_ids, listed_ids, error). ids are strings, lowercased for uuids. On any fetch
     error return ([], [], reason) so the caller reports `uncertain`, never `dead`, off a failure."""
@@ -387,6 +380,8 @@ def check_url(url, company=None, boards_map=None, cache=None, timeout=20):
     """Top-level single-URL check -> (verdict, reason). Picks the ATS or HTTP strategy itself."""
     if not url:
         return "uncertain", "no URL on this lead: nothing to check"
+    if not re.match(r"[a-z][a-z0-9+.-]*://", url, re.I):  # pasted from an address bar without the https:// part
+        url = "https://" + url.lstrip("/")
     host = _host(url)
     if any(host == h or host.endswith("." + h) for h in AUTH_WALLED_HOSTS):
         return "uncertain", "an auth-walled platform: verify by hand"
@@ -399,9 +394,7 @@ def check_url(url, company=None, boards_map=None, cache=None, timeout=20):
     return classify(status, final, body, original_url=url)
 
 
-# ============================================================================================
 # 4) TRACKER READ / REPORT / (SAFE) WRITE
-# ============================================================================================
 def load_boards_map():
     """{company_lower|slug_lower: (ats, slug)} from boards.yaml, so company-hosted Greenhouse rows
     (acme.example.com/...?gh_jid=) resolve to a board slug. PyYAML is the crawler's one existing dep;
@@ -412,7 +405,7 @@ def load_boards_map():
         data = yaml.safe_load((HERE / "boards.yaml").read_text())
     except Exception:
         return out
-    for b in (data.get("boards", data) if isinstance(data, dict) else (data or [])):
+    for b in ((data.get("boards", data) if isinstance(data, dict) else data) or []):
         try:
             co, ats, slug = b["company"], b["ats"], b["slug"]
         except Exception:
@@ -514,7 +507,7 @@ def rewrite_tracker(text, updates, checked):
         new_text = new_text.replace(old, new, 1)
         changed += 1
 
-    # ---- structural validation: refuse to write anything that broke the file ----
+    # structural validation: refuse to write anything that broke the file
     checks = {
         "one APPLICATIONS marker": new_text.count(_APP_START) == 1,
         "NETWORK array intact": new_text.count("const NETWORK = [") == text.count("const NETWORK = ["),
@@ -530,14 +523,12 @@ def rewrite_tracker(text, updates, checked):
     return new_text, "ok: %d row(s) annotated" % changed
 
 
-# ============================================================================================
 # 5) CLI
-# ============================================================================================
 def _today(args):
     if getattr(args, "today", None):
         return args.today
     try:
-        return datetime.date.today().isoformat()
+        return config_files.local_now().date().isoformat()
     except Exception:
         return ""
 
@@ -563,7 +554,6 @@ def run_tracker(args):
     results, updates = [], {}
     print("Re-checking %d lead(s) from %s\n" % (len(targets), TRACKER.name))
     print("  %-5s  %-26s  %-42s  %s" % ("", "COMPANY", "ROLE", "REASON"))
-    print("  " + "-" * 96)
     tally = {"live": 0, "dead": 0, "uncertain": 0}
     for i, r in enumerate(targets):
         verdict, reason = check_url(r["url"], company=r["co"], boards_map=boards_map,

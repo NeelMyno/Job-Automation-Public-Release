@@ -7,8 +7,8 @@ Synthetic. Not a real application. Exercises `application.md`'s form-answer swee
 
 ### Q1. What's a project you're most proud of? (required)
 
-> An internal tooling suite I built and shipped myself, in production code I wrote and
-> maintained end to end.
+> A shared handoff checklist for the night shift that I set up with two coworkers, then kept
+> current for a year.
 
 ### Q2. Are you authorized to work in this country? (required)
 

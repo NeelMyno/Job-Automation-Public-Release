@@ -35,3 +35,24 @@ prefix_rule(
     justification = "Preserve user and parallel-session changes; use a scoped, recoverable alternative.",
     match = ["git reset --hard"],
 )
+
+prefix_rule(
+    pattern = ["git", "pull", "--autostash"],
+    decision = "forbidden",
+    justification = "It stashes every uncommitted change, including another chat's work. Commit your own files, then pull.",
+    match = ["git pull --autostash"],
+)
+
+prefix_rule(
+    pattern = ["git", "rebase", "--autostash"],
+    decision = "forbidden",
+    justification = "It stashes every uncommitted change, including another chat's work. Commit your own files first.",
+    match = ["git rebase --autostash"],
+)
+
+prefix_rule(
+    pattern = ["git", "commit", "--no-verify"],
+    decision = "forbidden",
+    justification = "That flag skips the commit hook that checks your records. Fix the row the hook names instead.",
+    match = ["git commit --no-verify"],
+)

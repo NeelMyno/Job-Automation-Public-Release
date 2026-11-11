@@ -15,8 +15,9 @@ LinkedIn headline. What do you do, at what level, and what's the one thing that 
 of that role distinct? This gets pulled into cover letters and outreach, so write it in your real
 voice (`knowledge-base/17-writing.md` owns how that sounds).
 
-Example shape (not to be copied verbatim): "I'm a [role] who [the specific thing you actually do,
-not the job-title version of it]. Most recently at [context], I [one concrete, real thing]."
+Example shape (not to be copied verbatim): "Most recently at [place], I [one concrete, real thing,
+not the job-title version of it]. Before that, [one more real thing]." Start with the fact; skip the
+"I'm a [role] who ..." opener, which the slop check flags.
 -->
 
 [Write your own here.]

@@ -47,6 +47,10 @@ import tempfile
 import time
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from config import NEVER_TOUCH_DOMAINS as _EXTRA0

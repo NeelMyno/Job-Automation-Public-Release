@@ -10,7 +10,9 @@ first (the free channel), then the DM once accepted (or immediately if already c
 
 ### 1 · [Name], [Role] at [Company]
 
-Profile: [linkedin.com/in/... URL] · why them: [one line]
+Profile: [linkedin.com/in/... URL, another profile or staff-page URL, or "none found" and where you looked] · why them: [one line]
+
+Req: [the req or job ID, or "none on posting"; never invent one]
 
 **Connection note** ([char count], under 300):
 ```

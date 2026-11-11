@@ -27,7 +27,7 @@
   }
   a { color:#0b6e47; text-decoration:none; }
 
-  /* ---- header ---- */
+  /* header */
   .name {
     font-size:20pt; font-weight:700; letter-spacing:-0.02em;
     color:#0a0a0a; line-height:1.0;
@@ -38,24 +38,27 @@
   .contact a { color:#333; }
   .rule-strong { border:0; border-top:1.4pt solid #0b6e47; margin-top:7pt; }
 
-  /* ---- sections ---- */
+  /* sections */
   section { margin-top:8.5pt; }
   h2 {
     font-size:8.6pt; font-weight:700; text-transform:uppercase; letter-spacing:0.045em;
     color:#0a0a0a; padding-bottom:2pt; border-bottom:0.6pt solid #d8d8d8; margin-bottom:4.5pt;
   }
 
-  /* ---- skills ---- */
+  /* skills */
   .skill { margin-bottom:2.5pt; }
   .skill b { color:#0a0a0a; font-weight:700; }
 
-  /* ---- experience ---- */
+  /* experience */
   .job { margin-bottom:6pt; }
   .job:last-child { margin-bottom:0; }
   .job-head { display:flex; justify-content:space-between; align-items:baseline; }
   .job-title { font-weight:700; color:#0a0a0a; font-size:9.2pt; }
   .job-title .co { color:#0a0a0a; }
   .job-dates { font-size:8.4pt; color:#6b6b6b; white-space:nowrap; padding-left:8pt; }
+  /* Several titles at one employer: one .job, one heading, one .role row per title. */
+  .role { display:flex; justify-content:space-between; align-items:baseline; line-height:1.25; }
+  .role-title { color:#0a0a0a; font-size:8.8pt; }
   ul { list-style:none; margin-top:1.5pt; }
   li { position:relative; padding-left:9pt; margin-bottom:1.6pt; }
   li:before { content:"›"; position:absolute; left:0; top:-0.4pt; color:#0b6e47; font-weight:700; }
@@ -95,6 +98,22 @@
         <li>Bullet three.</li>
       </ul>
     </div>
+
+    <!-- Promoted, or held several titles at one employer? Keep it as ONE .job with the employer
+         heading on its own and one .role row per title, newest first, then one list of bullets:
+
+    <div class="job">
+      <div class="job-head">
+        <div class="job-title"><span class="co">Employer Name</span> · City</div>
+      </div>
+      <div class="role"><div class="role-title">Newest Title</div><div class="job-dates">Mon YYYY to Present</div></div>
+      <div class="role"><div class="role-title">Earlier Title</div><div class="job-dates">Mon YYYY to Mon YYYY</div></div>
+      <ul>
+        <li>Bullet.</li>
+      </ul>
+    </div>
+
+    The heading carries no date of its own. knowledge-base/07-master-resume.md shows the matching entry. -->
 
     <div class="job">
       <div class="job-head">

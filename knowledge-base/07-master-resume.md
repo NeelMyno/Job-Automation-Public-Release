@@ -76,7 +76,22 @@ exact: title | [your real current title, exactly as you want it to appear]
 Keep each employer line in the shape above: **Employer, Title** then the dates in parentheses,
 with "Present" on the current job. scripts/resume_gate.py reads the employer (the text before the
 first comma) and the start month, so a name that itself contains a comma should be written
-without it here. Add one block per employer, most recent first. If an employer turned out to be something you can't
+without it here. Add one block per employer, most recent first.
+
+Promoted, or held several titles at one employer? Write ONE block: the employer in bold with no
+title, the dates of your whole time there (first start to last end), then one plain line per title,
+newest first, then the bullets. A title line stays unbolded, because a bold line is read as another
+employer:
+
+**[Employer Name]** ([Mon YYYY of your first title] - Present)
+[Newest Title] ([Mon YYYY] - Present)
+[Earlier Title] ([Mon YYYY] - [Mon YYYY])
+- [Bullet 1]
+
+On the résumé this becomes one heading with one row per title (the `.role` rows, shown in a comment
+inside resume/resume.html). The earliest row's start date must be the same month this line gives.
+
+If an employer turned out to be something you can't
 honestly claim (never existed, or you're not sure it should be listed), don't just delete the
 block silently. Note it here as a permanent record of what you decided and why, the same way you'd
 want a "never:" line in the block above to remember a correction. An engine that can quietly forget

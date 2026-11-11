@@ -9,13 +9,14 @@ Built [when/how, from which JD + facts files]. Checks: [ ] `voice_check.py --sen
 ---
 Hi,
 
-[Paragraph 1 is a JD-matched open: reference something specific from the posting.]
+[Paragraph 1: why you want this job, in plain words, from a real reason of yours. Don't open on the
+posting's own words.]
 
-[Paragraph 2 is an earned opinion plus 1-2 real builds mapped to the JD's pillars, named honestly,
-no counted metrics in prose.]
+[Paragraph 2: one real piece of your work that bears on theirs, told in the order it happened.]
 
-[Paragraph 3 is a live artifact link, availability, close.]
+[Paragraph 3: a link if you have one, when you can start or talk, close.]
 
+Thanks,
 [Your name]
 ---
 
@@ -24,11 +25,9 @@ no counted metrics in prose.]
 No work-authorization claims appear in the letter above; those answers live only in the form,
 sourced from `knowledge-base/12-application-answers.md` §3.
 
-## Why these specifics (JD-to-line map)
+## Facts used
 
-| Line in the note | JD pillar it answers | Grounded source |
-|---|---|---|
-| [ ] | [ ] | [ ] |
+[One line: each fact the letter states and where it came from (a `knowledge-base/` file or a stored source).]
 
 ## Cards played
 

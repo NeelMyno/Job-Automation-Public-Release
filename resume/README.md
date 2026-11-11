@@ -42,7 +42,11 @@ that waits on your decision.
 3. **Every employment entry is on the page**: every employer under `### WORK EXPERIENCE` in
    `knowledge-base/07-master-resume.md`, each beside its own start date, and the current one
    beside a still-open date range rather than demoted to a project credit. The required set is
-   read from the KB at run time, so a job change updates the gate with no code edit.
+   read from the KB at run time, so a job change updates the gate with no code edit. **Several
+   titles at one employer** are one entry: one heading, one `.role` row per title (the shape is in
+   a comment inside `resume.html`, and the matching KB entry is described in KB-07). The gate
+   reads the rows under that heading, so the earliest title's start date must be on the page, and
+   for a current employer so must the open date range.
 
 **Why rule 3 is in a page-fill gate.** The two defects travel together. The classic shape: a
 tailored variant fills about two thirds of the page AND has dropped the current employer (or kept it

@@ -57,20 +57,38 @@ NODE_ENGINES = "^20.19.0 || ^22.12.0 || >=23"
 PLACEHOLDER = re.compile(r"^\s*[\[<]")
 
 ENABLE_HEADING = "If your tool list has no browser tool:"
-ENABLE_STEPS = (
-    "  1. Install Node.js 20.19+ or 22.12+ (https://nodejs.org) and Google Chrome\n"
-    "     (https://www.google.com/chrome/), then open a new terminal.\n"
-    "  2. Claude Code: the repo's .mcp.json already lists `chrome-devtools`. Start `claude` from\n"
-    "     the repo folder and approve the `chrome-devtools` project server when asked. Then type\n"
-    "     /mcp: if `chrome-devtools` shows as disabled, enable it there. If you said no to the\n"
-    "     approval prompt earlier, quit, run `claude mcp reset-project-choices`, start `claude`\n"
-    "     again and approve it.\n"
-    "  3. Codex: .codex/config.toml already lists it; Codex only reads that file for a trusted\n"
-    "     project, so trust this folder when Codex asks. Or add it for yourself:\n"
-    f"     `codex mcp add chrome-devtools -- npx -y {MCP_PKG}`\n"
-    "  4. Restart the session so the agent picks the tool up, then run this check again.\n"
-    "The first start downloads the tool with npx, so it needs internet and can take a minute.\n"
-    "It opens its own separate Chrome profile, never your everyday browser.")
+def enable_steps(claude_note="", codex_listed=True) -> str:
+    """The enable steps, saying what the repo's files really hold: step 2 opens with
+    `claude_note` (why .mcp.json does not list the server, "" when it does) and step 3 says
+    whether .codex/config.toml lists it, each with the restore command when it does not."""
+    claude_line = (
+        "  2. Claude Code: the repo's .mcp.json already lists `chrome-devtools`. Start `claude` from\n"
+        if not claude_note else
+        f"  2. Claude Code: {claude_note}, so Claude Code has no `chrome-devtools` entry yet. Restore it\n"
+        "     with `git checkout -- .mcp.json` (or, in a Download-ZIP copy, download .mcp.json again from\n"
+        "     the repo's GitHub page), then start `claude` from\n")
+    codex_line = (
+        "  3. Codex: .codex/config.toml already lists it; Codex only reads that file for a trusted\n"
+        if codex_listed else
+        "  3. Codex: .codex/config.toml has no [mcp_servers.chrome-devtools]. Restore it with\n"
+        "     `git checkout -- .codex/config.toml`; Codex only reads that file for a trusted\n")
+    return (
+        "  1. Install Node.js 20.19+ or 22.12+ (https://nodejs.org) and Google Chrome\n"
+        "     (https://www.google.com/chrome/), then open a new terminal.\n"
+        + claude_line +
+        "     the repo folder and approve the `chrome-devtools` project server when asked. Then type\n"
+        "     /mcp: if `chrome-devtools` shows as disabled, enable it there. If you said no to the\n"
+        "     approval prompt earlier, quit, run `claude mcp reset-project-choices`, start `claude`\n"
+        "     again and approve it.\n"
+        + codex_line +
+        "     project, so trust this folder when Codex asks. Or add it for yourself:\n"
+        f"     `codex mcp add chrome-devtools -- npx -y {MCP_PKG} --no-usage-statistics`\n"
+        "  4. Restart the session so the agent picks the tool up, then run this check again.\n"
+        "The first start downloads the tool with npx, so it needs internet and can take a minute.\n"
+        "It opens its own separate Chrome profile, never your everyday browser.")
+
+
+ENABLE_STEPS = enable_steps()
 # The one sentence for what the agent does when its session has no browser tool at all. The same
 # words sit in .claude/rules/application-protocol.md section 14 and .claude/commands/wave.md 7.0.
 NO_TOOL_LINE = ("With no browser tool in its session at all, the agent gives you these steps and "
@@ -115,7 +133,8 @@ def check_pyyaml(importable=_importable):
     if importable("yaml"):
         return check("pyyaml", OK, "PyYAML installed")
     return check("pyyaml", BLOCK, "PyYAML is missing (the job crawler needs it)",
-                 "Run: python3 -m pip install -r pipeline/job-crawler/requirements.txt")
+                 "Run: python3 -m pip install -r pipeline/job-crawler/requirements.txt "
+                 "(if pip answers externally-managed-environment, see SETUP.md Troubleshooting)")
 
 
 def _weasy_import_error():
@@ -239,14 +258,18 @@ def check_pymupdf(importable=_importable):
                  "the rendered PDFs with it)", "Run: python3 -m pip install pymupdf", fill=True)
 
 
-def check_pdftotext(path=None):
-    """Optional: the five-pass review (.claude/workflows/application-review.js) tells reviewers to
-    read the PDF with `pdftotext -layout`. Without it they read the PDF another way."""
+def check_pdftotext(path=None, info=None):
+    """Optional, one install for both: the five-pass review (.claude/workflows/application-review.js)
+    tells reviewers to read the PDF with `pdftotext -layout`, and render_cover.py counts pages with
+    `pdfinfo`. Without them the reviewers read the PDF another way and the page count is read from
+    the PDF itself."""
     where = shutil.which("pdftotext") if path is None else (path or None)
-    if where:
-        return check("pdftotext", OK, f"pdftotext found at {where}")
-    return check("pdftotext", WARN, "pdftotext is not installed (optional: the five-pass review "
-                 "reads the PDF with it)",
+    info_where = shutil.which("pdfinfo") if info is None else (info or None)
+    if where and info_where:
+        return check("pdftotext", OK, f"pdftotext found at {where}, pdfinfo at {info_where}")
+    missing = " and ".join(n for n, w in (("pdftotext", where), ("pdfinfo", info_where)) if not w)
+    return check("pdftotext", WARN, f"{missing} not installed (optional: the five-pass review reads "
+                 "the PDF with pdftotext, and render_cover.py counts pages with pdfinfo)",
                  "Install poppler: macOS `brew install poppler`, Ubuntu/Debian "
                  "`apt install poppler-utils`, Windows: see https://poppler.freedesktop.org.")
 
@@ -280,8 +303,10 @@ def check_browser_config(root: Path):
     where = [n for n, v in (("Claude Code .mcp.json", claude), ("Codex .codex/config.toml", codex))
              if v]
     if claude and codex:
-        return check("browser-tool", OK, "chrome-devtools is configured for Claude Code and Codex",
-                     fill=True)
+        c = check("browser-tool", OK, "chrome-devtools is configured for Claude Code and Codex",
+                  fill=True)
+        c.update(claude_note="", codex_listed=True)
+        return c
     if isinstance(mcp_text, tuple):
         note = "could not read .mcp.json (" + mcp_text[1] + ")"
     elif mcp_text is None:
@@ -297,10 +322,15 @@ def check_browser_config(root: Path):
         missing.append(".codex/config.toml has no [mcp_servers.chrome-devtools]")
     status = WARN if where else BLOCK
     fix = ("Restore the repo's .mcp.json and .codex/config.toml (git checkout -- .mcp.json "
-           ".codex/config.toml), then follow the steps under \"" + ENABLE_HEADING + "\" below.")
-    return check("browser-tool", status,
-                 ("configured for " + ", ".join(where) + "; " if where else "") + "; ".join(missing),
-                 fix, fill=True)
+           ".codex/config.toml, or in a Download-ZIP copy download those two files again from the repo's "
+           "GitHub page), then follow the steps under \"" + ENABLE_HEADING + "\" below.")
+    c = check("browser-tool", status,
+              ("configured for " + ", ".join(where) + "; " if where else "") + "; ".join(missing),
+              fix, fill=True)
+    # the enable steps read the same state, so they never say a missing file "already lists" it
+    c.update(claude_note="" if claude else (note or ".mcp.json has no chrome-devtools server"),
+             codex_listed=codex)
+    return c
 
 
 # The four required knowledge-base files
@@ -311,6 +341,12 @@ KB = {
     "07": "knowledge-base/07-master-resume.md",
     "12": "knowledge-base/12-application-answers.md",
 }
+
+
+def _visible(text: str) -> str:
+    """The file as its reader sees it. Template checks must skip HTML comments: a comment that keeps
+    an example such as [Employer Name], or a `**Name:** [x]` hint, says nothing about the file itself."""
+    return re.sub(r"(?s)<!--.*?-->", "", text)
 
 
 def _field(text: str, label: str):
@@ -329,6 +365,7 @@ def _unfilled_fields(text: str, labels) -> list:
 
 
 def kb01_problems(text: str) -> list:
+    text = _visible(text)
     probs = [f"`{x}` not filled" for x in _unfilled_fields(text, ["Name", "Email", "Location"])]
     if "[Write your own here.]" in text:
         probs.append("`Who you are` still has the template line")
@@ -336,13 +373,15 @@ def kb01_problems(text: str) -> list:
 
 
 def kb02_problems(text: str) -> list:
+    text = _visible(text)
     labs = ["My status", "Do I need an employer to sponsor a visa, ever, for this to work?"]
     return [f"`{x}` not filled" for x in _unfilled_fields(text, labs)]
 
 
 def kb07_problems(text: str) -> list:
-    # The template's own header comment mentions ```canonical-facts, so anchor on a fence that
-    # starts its own line and take the last one, then hand it to resume_gate's own parser.
+    text = _visible(text)
+    # Anchor on a fence that starts its own line and take the last one, then hand it to
+    # resume_gate's own parser.
     blocks = re.findall(r"(?ms)^```canonical-facts\n(.*?)^```", text)
     if not blocks:
         return ["no ```canonical-facts``` block"]
@@ -367,6 +406,7 @@ def kb12_problems(root: Path) -> list:
     probs = [] if expected else ["§3 work-authorization block not filled (visa_gate.py reads it)"]
     text = _read(root / KB["12"])
     if isinstance(text, str):
+        text = _visible(text)
         for lab in ("First name", "Last name", "Email"):
             m = re.search(r"^\|\s*" + re.escape(lab) + r"\s*\|\s*(.*?)\s*\|", text, re.M)
             if not m or not m.group(1) or PLACEHOLDER.match(m.group(1)):
@@ -410,6 +450,19 @@ def _yaml_load(text: str):
         return "invalid"
 
 
+def _yaml_error_line(text: str):
+    """The line a YAML parse error points at, or None."""
+    try:
+        import yaml
+        yaml.safe_load(text)
+    except ImportError:
+        return None
+    except Exception as e:
+        mark = getattr(e, "problem_mark", None)
+        return mark.line + 1 if mark else None
+    return None
+
+
 def check_filters(root: Path):
     rel = "pipeline/job-crawler/filters.yaml"
     text = _read(root / rel)
@@ -418,7 +471,10 @@ def check_filters(root: Path):
                      "Restore it with git checkout, then run /setup.")
     data = _yaml_load(text)
     if data == "invalid":
-        return check("filters", BLOCK, f"{rel} is not valid YAML", "Fix the YAML syntax it reports.")
+        line = _yaml_error_line(text)
+        where = f" near line {line}" if line else ""
+        return check("filters", BLOCK, f"{rel} is not valid YAML{where}",
+                     f"Fix that line, or restore the shipped copy with `git checkout -- {rel}`.")
     if isinstance(data, dict):
         titles = [str(t) for t in (data.get("include_titles") or [])]
     else:  # PyYAML missing: read the list by hand
@@ -462,6 +518,15 @@ def check_boards(root: Path):
                  "--company \"Name\" for companies you name. /setup runs this.")
 
 
+def _zone_usable(name) -> bool:
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
 def check_config(root: Path):
     p = root / "scripts" / "config.py"
     if not p.is_file():
@@ -474,6 +539,13 @@ def check_config(root: Path):
         return check("config", BLOCK, f"scripts/config.py does not import ({type(e).__name__}: {e})",
                      "Fix the line it names; every value there is optional, so the original file "
                      "(git checkout -- scripts/config.py) always works.")
+    zone = getattr(mod, "TIMEZONE", None)
+    if zone and not _zone_usable(zone):
+        return check("config", WARN, f"TIMEZONE = {zone!r} in scripts/config.py can't be used by this Python, "
+                     "so dates use this computer's local time",
+                     "Check the spelling against a real zone name such as America/Chicago, or set "
+                     "TIMEZONE = None to use this computer's time. If the name is right, this Python has "
+                     "no time zone list (common on Windows): run python3 -m pip install tzdata")
     return check("config", OK, "scripts/config.py imports")
 
 
@@ -517,7 +589,8 @@ def render(checks, code, fill_only) -> str:
     if fill_only or any(c["name"] in tool_lines and c["status"] != OK for c in checks):
         lines.append("")
         lines.append(ENABLE_HEADING)
-        lines.append(ENABLE_STEPS)
+        bt = next((c for c in checks if c["name"] == "browser-tool"), {})
+        lines.append(enable_steps(bt.get("claude_note", ""), bt.get("codex_listed", True)))
         lines.append(NO_TOOL_LINE)
     lines.append({0: "All OK.", 1: "OK with warnings.", 2: "Blockers found (exit 2)."}[code])
     return "\n".join(lines)
@@ -617,6 +690,27 @@ def selftest() -> int:
         t("KB-07 template's header-comment fence is not mistaken for the real block",
           any("exact: email" in p for p in kb07_problems(T07)), True)
 
+        # A filled file keeps the template's comments, and those comments keep the placeholders.
+        hint01 = "<!-- **Name:** [Full legal name] and [Write your own here.] -->\n"
+        hint02 = "<!-- **My status:** [Pick one] -->\n"
+        hint07 = ("<!--\n**[Employer Name]** ([Mon YYYY] - Present)\n[Your Full Name]\n"
+                  "```canonical-facts\nexact: email | [your real email]\n```\n-->\n")
+        hint12 = "<!--\n| First name | [ ] |\n-->\n"
+        t("filled KB-01 keeping a placeholder comment passes", kb01_problems(hint01 + F01), [])
+        t("filled KB-02 keeping a placeholder comment passes", kb02_problems(hint02 + F02), [])
+        t("filled KB-07 keeping a placeholder comment passes", kb07_problems(F07 + hint07), [])
+        t("an unfilled file is not filled by a comment that looks filled",
+          len(kb01_problems("<!-- **Name:** Jordan Rivera\n**Email:** a@b.example\n**Location:** X -->\n" + T01)) >= 3, True)
+        withc = Path(td) / "with-comments"
+        _make(withc, filled=True)
+        for num, hint in (("01", hint01), ("02", hint02), ("07", hint07), ("12", hint12)):
+            f = withc / KB[num]
+            f.write_text(hint + f.read_text(encoding="utf-8"), encoding="utf-8")
+        checks, code = run(withc, node="v22.12.0", npx=True, importable=lambda m: True, chrome="/c", pdftotext="/p")
+        t("a filled clone whose KB files keep their comments reports every KB file OK",
+          [status(checks, f"kb-{n}") for n in ("01", "02", "07", "12")], [OK] * 4)
+        t("that clone is not stopped by the template check", code in (0, 1), True)
+
         ready = Path(td) / "ready"
         _make(ready, filled=True)
         checks, code = run(ready, node="v22.12.0", npx=True, importable=lambda m: True, chrome="/c", pdftotext="/p")
@@ -642,9 +736,12 @@ def selftest() -> int:
         t("--fill with no browser tool exits 2", code, 2)
         out = render(checks, code, True)
         t("--fill blocker prints Claude Code and Codex enable steps",
-          all(s in out for s in ("reset-project-choices", "codex mcp add chrome-devtools", MCP_PKG)),
+          all(s in out for s in ("reset-project-choices", "codex mcp add chrome-devtools", MCP_PKG + " --no-usage-statistics")),
           True)
         t("--fill skips crawler checks", any(c["name"] == "filters" for c in checks), False)
+        t("--fill with .mcp.json deleted never says it 'already lists' the tool; it gives both restores",
+          ("already lists" in out, ".mcp.json is missing" in out, "git checkout -- .mcp.json" in out,
+           "git checkout -- .codex/config.toml" in out), (False, True, True, True))
         t("--fill with only browser blockers says the session's own tool still fills",
           "fills the form anyway" in out, True)
 
@@ -688,7 +785,11 @@ def selftest() -> int:
           (check_pymupdf(lambda m: m != "fitz")["status"], check_pymupdf(lambda m: True)["fill"]),
           (BLOCK, True))
         t("pdftotext missing is a warning, not a form-filling check",
-          (check_pdftotext("")["status"], check_pdftotext("")["fill"]), (WARN, False))
+          (check_pdftotext("", "/x/pdfinfo")["status"], check_pdftotext("", "/x/pdfinfo")["fill"]), (WARN, False))
+        t("pdfinfo missing is named as a warning too",
+          (check_pdftotext("/x/pdftotext", "")["status"], "pdfinfo" in check_pdftotext("/x/pdftotext", "")["message"]),
+          (WARN, True))
+        t("both found is OK", check_pdftotext("/x/pdftotext", "/x/pdfinfo")["status"], OK)
         checks, code = run(ready, fill_only=True, node="v22.12.0", npx=True, chrome="",
                            importable=lambda m: True)
         t("--fill with no Chrome exits 1 (warning), not 2", code, 1)
@@ -697,6 +798,11 @@ def selftest() -> int:
         _make(half, filled=True, mcp=True, codex=False)
         t("Claude config only is a warning, not a blocker",
           check_browser_config(half)["status"], WARN)
+        hc, hcode = run(half, fill_only=True, node="v22.12.0", npx=True, chrome="/c", importable=lambda m: True)
+        hout = render(hc, hcode, True)
+        t("Codex config missing: step 2 still says .mcp.json lists it, step 3 gives the restore",
+          ("the repo's .mcp.json already lists" in hout, ".codex/config.toml already lists" in hout,
+           "git checkout -- .codex/config.toml" in hout), (True, False, True))
         _, code = run(ready, fill_only=True, node="v18.0.0", npx=True, chrome="/c", importable=lambda m: True)
         t("--fill with Node 18 exits 2", code, 2)
 
@@ -704,6 +810,15 @@ def selftest() -> int:
         _make(broken, filled=True)
         (broken / "scripts" / "config.py").write_text("OPERATOR_NAME = (\n", encoding="utf-8")
         t("config.py syntax error blocks", check_config(broken)["status"], BLOCK)
+        (broken / "scripts" / "config.py").write_text('TIMEZONE = "Mars/Olympus_Mons"\n', encoding="utf-8")
+        typo = check_config(broken)
+        t("a TIMEZONE this Python can't use warns, names the value and says what happens instead",
+          (typo["status"], "Mars/Olympus_Mons" in typo["message"], "local time" in typo["message"], "tzdata" in typo["fix"]),
+          (WARN, True, True, True))
+        (broken / "scripts" / "config.py").write_text('TIMEZONE = "UTC"\n', encoding="utf-8")
+        t("a usable TIMEZONE is OK", check_config(broken)["status"], OK)
+        (broken / "scripts" / "config.py").write_text("TIMEZONE = None\n", encoding="utf-8")
+        t("no TIMEZONE is OK", check_config(broken)["status"], OK)
         (broken / ".mcp.json").write_text("{not json", encoding="utf-8")
         t("malformed .mcp.json is not counted as configured",
           _mcp_has_server(_read(broken / ".mcp.json")), False)

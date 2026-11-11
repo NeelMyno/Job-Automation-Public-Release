@@ -15,9 +15,8 @@ diary if you ever need to see what changed and when.
 
 ## Current status
 
-- **My status:** [In your own words, and be specific: for example "U.S. Citizen", "Permanent
-  Resident (Green Card)", or the name of your visa or work permit with its end date
-  ("<status name>, valid through <date>"). Whatever is actually true.]
+- **My status:** [In your own words, and be specific: what it is and, if it ends, the date it
+  ends. Whatever is actually true.]
 - **Do I need an employer to sponsor a visa, ever, for this to work?** [Yes / No / Not right now but
   will eventually / Unsure (if unsure, that's worth resolving before you apply anywhere, not after).]
 - **Any runway or deadline that matters?** [e.g. "My work permit ends <date>, I would need an

@@ -9,10 +9,11 @@ ways to get there. Both end in the same place.
 2. Open the repo in Claude Code (`claude` in this folder) or Codex (`codex` in this folder).
 3. Type **`/setup`** (Codex: **`$setup`**).
 
-The agent asks a few short questions (your résumé, the job titles you want, where you're based, your
-work-authorization situation in your own words, and two optional ones: your hard stops and a few
-samples of your own writing), then writes every file itself: the knowledge
-base, your résumé source, the crawler settings. It finds company job boards that match your titles,
+The agent asks a few short questions (your résumé, the job titles you want, where you're based and
+what kind of work you'd take, your years of experience, and your work-authorization situation in
+your own words, plus four you can skip: companies you already want, your hard stops, a few samples
+of your own writing, and whether it should commit its work locally), then writes every file itself:
+the knowledge base, your résumé source, the crawler settings. It finds company job boards that match your titles,
 runs a health check, fixes what it can, and tells you plainly what is still open. You never have to
 edit a file by hand unless you want to.
 
@@ -36,22 +37,36 @@ repo uses a placeholder; you provide the real content.
   and run `git clone <that URL>`, or pick **Download ZIP** and unzip it. Your job-search facts will live in this
   folder, so keep your copy private (a private fork or just a local folder); never push your filled-in
   copy to a public repo. Open a terminal (macOS: Terminal; Windows: PowerShell) and `cd` into the
-  folder. Every command in this guide runs from there. On Windows, type `py` where this guide says
+  folder. Every command in this guide runs from there. With a ZIP copy and Codex, always start
+  `codex` from this top folder, not a subfolder: without git, that is how its checks find the repo. On Windows, type `py` where this guide says
   `python3`.
-- **Claude Code or Codex**, whichever agent you use.
+- **Claude Code or Codex**, whichever agent you use. You install it once and sign in with your own
+  account. **Claude Code:** follow [its install page](https://code.claude.com/docs/en/setup). In a
+  terminal on macOS or Linux run `curl -fsSL https://claude.ai/install.sh | bash`; in Windows
+  PowerShell run `irm https://claude.ai/install.ps1 | iex`. Then open a new terminal. It needs a paid
+  Claude plan (Pro, Max, Ultra, Team or Enterprise) or an Anthropic Console account; the free
+  claude.ai plan doesn't include it. **Codex:** follow [its install page](https://github.com/openai/codex).
+  On macOS or Linux run `curl -fsSL https://chatgpt.com/codex/install.sh | sh`; on Windows run
+  `powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"`. OpenAI
+  recommends signing in with ChatGPT on a Plus, Pro, Business, Edu or Enterprise plan; an API key also
+  works but takes extra setup. The first time you start either one, it walks you through signing in.
 - **Python 3.9+** (from [python.org](https://www.python.org/downloads/) if `python3 --version` fails)
   with `pip`.
 - **Python packages, one line:**
   `python3 -m pip install -r pipeline/job-crawler/requirements.txt weasyprint pymupdf`
+  (if pip answers `externally-managed-environment`, use the short recipe in Troubleshooting)
   - PyYAML (from `requirements.txt`) is the crawler's one dependency.
   - weasyprint renders your résumé and cover letter to PDF. It needs a couple of system libraries
     on some platforms; see
     [weasyprint's install docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation).
   - PyMuPDF (`pymupdf`) lets the résumé gate and the grounding gate read the rendered PDFs. Without
     it `resume_gate.py` fails and `verify_claims.py` refuses any dossier that holds a PDF.
-- **Optional: `pdftotext`** (part of poppler: macOS `brew install poppler`, Ubuntu/Debian
-  `apt install poppler-utils`). The five-pass review reads your PDF with it; without it the
-  reviewers read the PDF another way.
+- **Optional: `pdftotext` and `pdfinfo`** (both part of poppler: macOS `brew install poppler`,
+  Ubuntu/Debian `apt install poppler-utils`). The five-pass review reads your PDF with `pdftotext`,
+  and `render_cover.py` counts the cover letter's pages with `pdfinfo`. Without them the reviewers
+  read the PDF another way and the page count comes from the PDF itself.
+- **Optional: a recent git.** On commit, a git hook local to your copy checks your records. A git
+  too old for config-based hooks goes without it, and the same checks still run when a chat ends.
 - **Node.js 20.19+ or 22.12+** (from [nodejs.org](https://nodejs.org/)) **and Google Chrome**
   (from [google.com/chrome](https://www.google.com/chrome/)). Node runs the browser tool the agent
   uses to fill application forms, and that tool drives Google Chrome (it needs the current stable
@@ -75,7 +90,7 @@ python3 scripts/doctor.py --fill   # only what form filling needs
 ## 2. The by-hand way: the files the agent would fill for you
 
 Files 1 to 4 are required; files 5 and 6 are strongly recommended (`/setup` fills both when you
-answer its two optional questions). Everything else in `knowledge-base/` is optional depth.
+answer its hard-stops and writing-samples questions). Everything else in `knowledge-base/` is optional depth.
 
 1. **`knowledge-base/01-profile-and-identity.md`**: your name, contact info, education, positioning.
 2. **`knowledge-base/02-work-authorization.md`**: your legal work-eligibility status, in your own
@@ -97,7 +112,7 @@ Check your work:
 ```
 python3 scripts/doctor.py
 python3 scripts/canon.py            # should exit 0
-python3 scripts/visa_gate.py        # says plainly if §3 isn't filled in yet, or checks it if it is
+python3 scripts/visa_gate.py        # exit 3 until §3 is filled in and an application records answers
 ```
 
 ## 3. Your résumé's source file
@@ -140,6 +155,9 @@ the agent's own web search covers the fourth:
    your tracker as a `lead` row, ranks it with everything else, and still fills the application form
    for you.
 
+To edit `pipeline/job-crawler/filters.yaml` by hand, open it in a plain text editor, such as TextEdit on a Mac
+(`open -e pipeline/job-crawler/filters.yaml`) or Notepad on Windows (`notepad pipeline\job-crawler\filters.yaml`).
+
 The one setting that really matters is **`pipeline/job-crawler/filters.yaml` `include_titles`**: the
 job titles you want, in plain words. Where you'll work goes in the same file: `remote_ok`
 (true/false), `onsite_ok` (`anywhere`, `home_metros` or `none`) and `home_metros` (the cities that
@@ -161,8 +179,11 @@ why. `pipeline/job-crawler/README.md` has the full detail.
 - `knowledge-base/08-application-playbook.md`: ships filled in already; read it, don't skip it.
 - `knowledge-base/10-tooling-stack.md`: ships mostly filled in; add anything extra you use.
 - `knowledge-base/13-` to `16-`: advanced, useful once the basics work.
+- `knowledge-base/18-in-your-own-words.md`: your own stories and reasons, in your own words. Letters
+  and "why us" answers are built from it; while it's blank they stay short rather than invent any.
 - `scripts/config.py`: optional settings (your time zone, follow-up pacing, years of experience for
-  the seniority check, extra sites the account guard should block). Every value has a safe default.
+  the seniority check, how long a silent company waits before it is marked ghosted, extra sites the
+  account guard should block). Every value has a safe default.
   `/setup` sets `TIMEZONE` and `YOUR_YEARS_OF_EXPERIENCE` from your answers; until the years are set,
   `seniority_gate.py` says it did not check, which is not a pass. If you keep your own private copy
   of this repo on GitHub, set `PUSH_REMOTE` to that remote's name and `throughput.py` will remind you
@@ -187,7 +208,7 @@ For outreach (referrals, follow-ups), run `/outreach` in a **separate** session;
 python3 scripts/doctor.py
 python3 scripts/hooks.py --session-start
 for f in scripts/*.py; do python3 "$f" --selftest >/dev/null 2>&1 && echo "ok   $f" || echo "FAIL $f"; done
-(cd pipeline/job-crawler && for t in test_*.py; do python3 "$t"; done; for s in discover locations sources titles; do python3 "$s.py" --selftest; done)
+(cd pipeline/job-crawler && for t in test_*.py; do python3 "$t"; done; for s in config_files discover locations sources titles; do python3 "$s.py" --selftest; done)
 ```
 Every selftest passes on a fresh clone, before you've written a single real fact about yourself;
 they're built from fully synthetic fixtures. A failure on a completely fresh clone is a bug in the
@@ -202,7 +223,8 @@ repo, not something wrong with your setup.
   `chrome-devtools`, or quit, run `claude mcp reset-project-choices`, start `claude` again and
   approve it. Then restart the agent session. You finish a form yourself only for a named reason
   (a CAPTCHA, a login only you may do, a site whose terms ban automation, a site that rejects an
-  automated submit, LinkedIn Easy Apply, or an apply-by-email posting; the full list is in
+  automated submit, a bot check that walls the automation browser after the agent has tried,
+  LinkedIn Easy Apply, or an apply-by-email posting; the full list is in
   `.claude/rules/application-protocol.md` §14). Even then the agent fills everything up to that
   point and says which reason applies.
 - **The agent says it only searches certain job boards.** It shouldn't. Ask it to run
@@ -217,13 +239,30 @@ repo, not something wrong with your setup.
   the role, widen `--hours`, run `discover.py --sweep` for more boards, and read the JSON's `errors`
   array.
 - **`ModuleNotFoundError: No module named 'yaml'`** → `python3 -m pip install PyYAML`.
+- **`error: externally-managed-environment` from pip** (Homebrew's Python, recent Linux) → your
+  system's Python won't take packages directly, so give this project its own. From this folder, on
+  macOS or Linux:
+  ```
+  python3 -m venv ~/job-engine-venv
+  source ~/job-engine-venv/bin/activate
+  python3 -m pip install -r pipeline/job-crawler/requirements.txt weasyprint pymupdf
+  ```
+  If the first line says something is missing, install what it names and run it again. In every new
+  terminal, run the `source` line before you start `claude`, `codex` or a script here; the agent and
+  its checks then use those packages.
 - **`weasyprint` fails to import or render** → PDFs are rendered with the `weasyprint` command, so
   a working command on your PATH is enough even if `import weasyprint` fails in your Python
   (`doctor.py` says which you have). If the command fails, it needs Pango/Cairo/GDK-PixBuf: on macOS
   `brew install pango` (or `brew install weasyprint` for the command alone), on Ubuntu/Debian
   `apt install libpango-1.0-0 libpangocairo-1.0-0`.
+- **A commit is refused.** The message names the row to fix and the shape it should have
+  (`.claude/rules/records-format.md`). Fix that row, `git add` the file, and commit again. Nothing
+  was lost; the commit just didn't happen.
+- **A company you still hear from was marked ghosted.** Tell the agent; it sets the status back and
+  records the reply. To keep a row from being ghosted at all, put "no auto-ghost" in its `next` field.
 - **`visa_gate.py` says "not filled in yet"** → correct until you finish
-  `knowledge-base/12-application-answers.md` §3.
+  `knowledge-base/12-application-answers.md` §3. After that it says no answer was read until your
+  first application records one; that is also exit 3, a skip, not a pass.
 - **A gate fails on your real content** → read what it says; every gate here names the file to fix.
 - **The agent won't open LinkedIn for you.** That's on purpose (`CLAUDE.md` §0.2): automated
   activity can get your account restricted. It writes the messages; you send them.

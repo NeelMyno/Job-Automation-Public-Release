@@ -52,6 +52,15 @@ free feeds above are mostly remote jobs, heavy on tech. So web search ("<title> 
 employers' own career pages) is a fourth source in its own right, not a fallback. `pipeline/job-crawler/README.md` has the full detail and how to add a new
 ATS or source.
 
+## What fills the forms and builds the PDFs, also shipped
+
+The browser tool (`chrome-devtools-mcp`, listed in `.mcp.json` for Claude Code and
+`.codex/config.toml` for Codex; no keys, needs Node.js and Google Chrome) is how the agent fills every
+application form, in its own Chrome profile. If a session has no browser tool,
+`python3 scripts/doctor.py --fill` prints the steps to switch it on, and the agent fills the form
+after the restart. `weasyprint` renders your résumé and cover letter to PDF (`resume/README.md`,
+`scripts/render_cover.py`).
+
 ## Optional: deepens research if you add it
 
 Everything below is an option, not a requirement; the crawler and the tailoring engine both work
@@ -62,7 +71,6 @@ here that isn't real yet belongs in "Considered & deferred," not this table.
 |---|---|---|---|
 | Company/market research | A web-search MCP server | Pulls recent news, funding, and culture context beyond what a JD alone tells you | Usually an API key |
 | Finding referral nodes | A people-search tool | Surfaces real names and titles at a target company worth researching before outreach, though never a substitute for confirming the person is real | Usually an API key, often paid |
-| Rendering the résumé/cover letter | A local HTML-to-PDF renderer | Turns `resume/resume.html` into the actual PDF you attach; see `resume/README.md` for the exact `weasyprint` command this repo uses | None, local install only |
 
 ## Considered & deferred
 
@@ -90,4 +98,4 @@ or run it and see if it actually resolves.
 - `knowledge-base/09-current-search.md`: where a lead the crawler or a research tool surfaces
   actually gets recorded
 - `pipeline/job-crawler/README.md`: the crawler this file's second section documents
-- `resume/README.md`: the PDF-rendering command referenced in the table above
+- `resume/README.md`: the exact `weasyprint` command this repo uses

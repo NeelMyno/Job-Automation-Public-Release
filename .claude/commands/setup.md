@@ -122,7 +122,8 @@ Once they confirm, set two values in `scripts/config.py` (every other value ther
   If the sweep ran out of time or the index did not answer, say so in one line and tell them the
   next `/wave` sweeps again and widens the list.
   3. Postings the crawler cannot read: many employers (hospitals, school districts, government,
-     retailers, local firms) post on Workday, iCIMS, Taleo or their own careers site. Web-search
+     retailers, local firms) post on iCIMS, Taleo or their own careers site. (A Workday board is
+     read: pass its URL to `discover.py --urls -` like any other.) Web-search
      "<title> jobs <city>" and the employers' career pages, and add each live posting you find as
      an APPLICATIONS row in `pipeline/tracker.html` with `status:"lead"`, its `jd:` and `apply:`
      URLs and `source:"web search"` (shape: `.claude/rules/records-format.md` §1). `/wave` ranks
@@ -151,14 +152,26 @@ Then:
   `sponsorship-now-or-future`, `restricted-authorization`), each `YES` or `NO` with a one-line reason
   in their words. Use the section's own comment to map their answer to each key. If any key does not
   follow clearly from what they said, ask that one question; do not resolve it yourself.
+- In the same block, add two `wording:` lines from their answer, one per status, so forms that ask
+  about citizenship can be checked:
+  `wording: u.s. citizen; us citizen; united states citizen; citizen of the united states => YES | <their words>`
+  `wording: permanent resident; green card => NO | <their words>`
+  Each ends `YES` only if they said that status is theirs: a citizen is `YES` then `NO`, a permanent
+  resident `NO` then `YES`, anyone else `NO` and `NO`. If their answer does not say, ask that one
+  question. Keep the reason in their words; write no visa or permit type here. Add the same two rows
+  to the "Other wordings" table under the block (the question, the answer, why it is true), as that
+  section's comment asks, so a person reading the file sees them too.
 - **Read it back** as the four questions a form actually prints, each with the answer you recorded,
   word for word from what you just wrote in KB-12 §3 (the question as the section's comment phrases
-  it, then the answer you recorded). Ask: "Are all four right?" Write nothing as final until they say yes. If they say they are not sure, leave §3
+  it, then the answer you recorded), plus "Are you a U.S. citizen?" and "Are you a permanent
+  resident?" with the two `wording:` answers. Ask: "Are all of these right?" Write nothing as final until they say yes. If they say they are not sure, leave §3
   unfilled, tell them form filling waits on it, and suggest they confirm with an immigration
   professional if the situation is complex. This repo is not legal advice.
-- Run `python3 scripts/visa_gate.py`. With §3 confirmed it must exit 0; if it does not, fix what it
-  names. If the user was not sure and §3 stays unfilled, it says so, and that is an open item with
-  its reason, not a failure to hide.
+- Run `python3 scripts/visa_gate.py`. Right after setup no application records an answer yet, so with
+  §3 confirmed the expected result is exit 3 ("no work-authorization answer was read"): a skip, not a
+  pass and not a failure. Exit 1 means fix what it names. Exit 0 only comes once an application
+  records its answers. If the user was not sure and §3 stays unfilled, it says so (also exit 3), and
+  that is an open item with its reason, not a failure to hide.
 
 ### 5. Two short questions: hard stops and voice samples (both skippable)
 
@@ -195,6 +208,8 @@ OK:
   When `doctor.py` reports the `weasyprint` command as found, PDF rendering works; install nothing.
 - `pymupdf` missing: it is a Python package like the ones above; ask once and install it on a yes
   (`python3 -m pip install pymupdf`). The résumé and grounding gates need it.
+- `pdftotext` or `pdfinfo` missing: optional. Install nothing unless they ask; name it in the
+  hand-over list with `doctor.py`'s fix line.
 - Node.js or Google Chrome missing or old, or the browser tool not in your tool list (check it even
   when `doctor.py --fill` says all OK): give the user the steps `doctor.py --fill` prints under "If
   your tool list has no browser tool". Installing Node and Chrome and approving the
@@ -234,8 +249,9 @@ https://learn.chatgpt.com/docs/extend/mcp?surface=cli -->
 
 Every remaining open item is named and explained, and nothing is called done that a command did
 not show this turn (`CLAUDE.md` "the definition of done"). For an honest user with everything
-answered, that means `python3 scripts/doctor.py --fill`, `python3 scripts/canon.py` and
-`python3 scripts/visa_gate.py` exit 0. Some items can stay open for honest reasons the user owns: a
+answered, that means `python3 scripts/doctor.py --fill` and `python3 scripts/canon.py` exit 0, and
+`python3 scripts/visa_gate.py` exits 3 because no application records an answer yet (exit 1 is the
+one to fix). Some items can stay open for honest reasons the user owns: a
 work-authorization answer they are not sure of (form filling waits on it), a short résumé page
 they have no more real material for, a question they skipped, Node or the browser tool still to be
 installed or approved by them. Each of those is reported by name with its reason and what clears

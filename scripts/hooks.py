@@ -2,12 +2,12 @@
 """hooks.py: the harness-level enforcement layer. Runs whether or not an agent remembers to.
 
 WHY THIS EXISTS
----------------
 "A rule that isn't a gate does not exist." A decision recorded in one file and enforced by nothing
 is a decision that eventually gets violated, not through bad faith, just because prose doesn't
 execute. So the checks run from the harness, not from an agent choosing to type a command:
 
-  SessionStart  -> print the TRUE state (re-derived, never quoted from a record that may be stale).
+  SessionStart  -> set up the commit-time record check, mark silent companies ghosted, and print the
+                   TRUE state (re-derived, never quoted from a record that may be stale).
                    On a fresh copy whose required knowledge-base files are still templates, it
                    prints a short welcome pointing at /setup and scripts/doctor.py instead.
   PostToolUse   -> after any Write/Edit, check that file for retired claims and visa answers
@@ -22,7 +22,6 @@ MODES
     python3 scripts/hooks.py --selftest
 
 DESIGN NOTE: why Stop blocks on CHANGED files only
----------------------------------------------------
 Blocking on every pre-existing finding would halt every turn until the whole backlog is clean, and
 a gate that always says no is a gate that gets disabled. Blocking on files THIS session touched is
 the proportionate rule: you cannot make the repo worse, and you are never held hostage by history.
@@ -42,17 +41,39 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+if __name__ == "__main__" and "--selftest" in sys.argv:  # a throwaway copy that holds none of your files
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
+
+def _config_error(module: str = "config") -> str:
+    """Why scripts/config.py cannot be loaded, in plain words, or "" when it loads or does not exist."""
+    import importlib
+    try:
+        importlib.import_module(module)
+    except ImportError:
+        return ""
+    except SyntaxError as e:
+        return f"scripts/config.py line {e.lineno}: {e.msg}"
+    except Exception as e:  # noqa: BLE001, the file is the user's and can raise anything
+        return f"scripts/config.py: {type(e).__name__}: {e}"
+    return ""
+
+
+CONFIG_ERROR = _config_error()
+
+# `except Exception`: a broken config.py must never stop this file from loading (CONFIG_ERROR names it).
 try:
     from config import OPERATOR_NAME
-except ImportError:
+except Exception:
     OPERATOR_NAME = None
 try:
     from config import RECORD_REFLEX
-except ImportError:
+except Exception:
     RECORD_REFLEX = True
 try:
     from config import TIMEZONE, local_stamp
-except ImportError:  # an older config.py without the helper: this machine's local zone
+except Exception:  # an older config.py without the helper: this machine's local zone
     TIMEZONE = None
 
     def local_stamp() -> str:
@@ -61,14 +82,28 @@ except ImportError:  # an older config.py without the helper: this machine's loc
         return f"{t:%Y-%m-%d} {t.strftime('%I:%M %p').lstrip('0')} {t.tzname() or ''}".rstrip()
 
 
+def _zone_usable(name) -> bool:
+    """Can this Python turn the name into a time zone? When it can't, local_now() uses the local clock."""
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
 def now_line() -> str:
     """The session's clock line: the time every record written this session is stamped in."""
     try:
         stamp = local_stamp()
     except Exception:
         return "  Now: unknown (the clock could not be read). Run `date` before writing a time into a record."
-    zone = (f"TIMEZONE {TIMEZONE} from scripts/config.py" if TIMEZONE
-            else "this machine's local zone; set TIMEZONE in scripts/config.py to choose one")
+    if TIMEZONE and not _zone_usable(TIMEZONE):
+        zone = (f"this computer's local time, because TIMEZONE {TIMEZONE} in scripts/config.py could not be used; "
+                "python3 scripts/doctor.py says how to fix it")
+    else:
+        zone = (f"TIMEZONE {TIMEZONE} from scripts/config.py" if TIMEZONE
+                else "this machine's local zone; set TIMEZONE in scripts/config.py to choose one")
     return f"  Now: {stamp} ({zone}). Write every record date and time in this zone, with its label."
 
 
@@ -80,9 +115,7 @@ def sh(cmd: list[str], cwd: Path = REPO, timeout: int = 25) -> tuple[int, str]:
         return -1, f"{type(e).__name__}: {e}"
 
 
-# --------------------------------------------------------------------------------------
 # Setup state: is this copy filled in yet?
-# --------------------------------------------------------------------------------------
 
 KB_MINIMUM = ("knowledge-base/01-profile-and-identity.md", "knowledge-base/02-work-authorization.md",
               "knowledge-base/07-master-resume.md", "knowledge-base/12-application-answers.md")
@@ -138,9 +171,7 @@ def _setup_missing() -> list[str]:
     return _SETUP_CACHE
 
 
-# --------------------------------------------------------------------------------------
 # SessionStart: the true state, re-derived, never quoted
-# --------------------------------------------------------------------------------------
 
 def tracker_counts() -> dict:
     """Re-derive the application + network counts from pipeline/tracker.html, the source of truth.
@@ -178,11 +209,13 @@ def headline_counts(tally: dict) -> dict:
     interview = tally.get("interview", 0)
     offer = tally.get("offer", 0)
     rejected = tally.get("rejected", 0)
-    live = applied + interview + offer          # everything still in play (not rejected/passed)
+    ghosted = tally.get("ghosted", 0)           # submitted, then the company went silent
+    live = applied + interview + offer          # everything still in play (not rejected/passed/ghosted)
     return {
-        "submitted": live + rejected,           # everything that ever reached an employer
+        "submitted": live + rejected + ghosted,  # everything that ever reached an employer
         "live": live,
         "rejected": rejected,
+        "ghosted": ghosted,
         "interview": interview,
         "offer": offer,
         "lead": tally.get("lead", 0),
@@ -295,7 +328,7 @@ GATE_SCRIPTS = (
     "verify_claims", "canon", "visa_gate", "account_guard", "resume_gate", "voice_check", "fill_ready",
     "injection_scan", "seniority_gate", "tracker_check", "commitments", "records", "records_check",
     "cold", "outreach_queue", "outreach_format", "outreach_bundle", "presubmit_check", "check_law", "adr_debt", "doctor",
-    "codex_hook_adapter",
+    "codex_hook_adapter", "why_check", "slop_check", "work_history_check", "ghost", "commit_guard", "open_tab_sweep", "render_cover",
 )
 
 
@@ -315,7 +348,20 @@ def _gate_cmds() -> tuple[list[tuple[str, list[str]]], list[str]]:
     return run, missing
 
 
-def _gate_summary(results: list[tuple[str, int]], missing: list[str], add) -> None:
+# Modules whose pip package has a different name.
+_PIP_NAME = {"fitz": "PyMuPDF", "yaml": "pyyaml"}
+
+
+def _failure_cause(output: str) -> str:
+    """A missing Python module named in a failed self-test's output, with the line that installs it."""
+    m = re.search(r"No module named '([\w.]+)'", output or "")
+    if not m:
+        return ""
+    top = m.group(1).split(".")[0]
+    return f"cause: No module named '{m.group(1)}'; install it: python3 -m pip install {_PIP_NAME.get(top, top)}"
+
+
+def _gate_summary(results: list[tuple[str, int]], missing: list[str], add, outputs: dict | None = None) -> None:
     """One line when every self-test passes; each failing one named otherwise. Never a wall.
 
     These are the self-tests OF the check scripts (do the checks themselves still work, on
@@ -328,7 +374,8 @@ def _gate_summary(results: list[tuple[str, int]], missing: list[str], add) -> No
         line += f" (not installed yet, skipped: {', '.join(missing)})"
     add(line)
     for n in bad:
-        add(f"    x {n} selftest failing (run: python3 scripts/{n}.py --selftest)")
+        cause = _failure_cause((outputs or {}).get(n, ""))
+        add(f"    x {n} selftest failing ({cause + '; then ' if cause else ''}run: python3 scripts/{n}.py --selftest)")
 
 
 def _live_summary(findings: list[str], notes: list[str], add) -> None:
@@ -345,7 +392,42 @@ def _live_summary(findings: list[str], notes: list[str], add) -> None:
         add(l)
 
 
+def _has_script(name: str) -> bool:
+    """A check that is not in this copy is skipped, never reported as a failure (a copy can be mid-upgrade)."""
+    return (REPO / "scripts" / f"{name}.py").is_file()
+
+
+def _install_commit_guard() -> None:
+    """The commit-time record gates and autostash off (scripts/commit_guard.py). Repeatable and silent."""
+    if not _has_script("commit_guard"):
+        return
+    try:
+        subprocess.run([sys.executable, str(REPO / "scripts" / "commit_guard.py"), "--install"], cwd=REPO,
+                       capture_output=True, timeout=20)
+    except Exception:  # noqa: BLE001, a session must start whatever git does
+        pass
+
+
+def _ghost_lines() -> list[str]:
+    """Mark applications whose company has gone silent, and name each one (scripts/ghost.py owns the
+    rule and its guards). Fail-open: a missing or broken ghost.py never stops a session."""
+    note = "  ! auto-ghost unavailable ({}: {}); run scripts/ghost.py --dry-run by hand."
+    try:
+        import ghost as _gh
+        return list(_gh.session_lines())
+    except ModuleNotFoundError as e:
+        return [] if e.name == "ghost" else [note.format(type(e).__name__, e)]
+    except Exception as e:  # noqa: BLE001
+        return [note.format(type(e).__name__, e)]
+
+
 def session_start() -> int:
+    if CONFIG_ERROR:
+        print("Job search engine: scripts/config.py can't be read")
+        print(f"  {CONFIG_ERROR}")
+        print("  Every check reads that file, so none of them ran. Fix that line, then start a new session.")
+        return 0
+    _install_commit_guard()
     lines: list[str] = []
     add = lines.append
 
@@ -375,18 +457,21 @@ def session_start() -> int:
     # a wall of warnings on a first run teaches a new user to ignore this readout.
     missing = _setup_missing()
     if missing:
-        add("=== Job search engine: not set up yet ===")
+        add("Job search engine: not set up yet")
         add(f"  Welcome. {len(missing)} of the {len(KB_MINIMUM)} required knowledge-base files are "
             f"still the template: {', '.join(m.split('/')[-1] for m in missing)}.")
         add("  Next: run /setup ($setup in Codex): the agent fills them in with you, from your answers and your résumé,")
         add("  then run `python3 scripts/doctor.py` to confirm everything is ready.")
         add("  Until then there is nothing else to report here.")
         flush()
-        _gate_summary([(label, f.result()[0]) for label, f in gate_futs], gate_missing, add)
-        add("=" * 60)
+        _gate_summary([(label, f.result()[0]) for label, f in gate_futs], gate_missing, add,
+                      {label: f.result()[1] for label, f in gate_futs})
         flush()
         pool.shutdown(wait=False)
         return 0
+
+    # Before the live scans start and before the counts, so both see the same tracker.
+    ghost_lines = _ghost_lines()
 
     f = {
         "adr_debt": bg(["scripts/adr_debt.py"]),
@@ -403,15 +488,17 @@ def session_start() -> int:
     if (REPO / "scripts" / "cold.py").is_file():
         f["cold"] = bg(["scripts/cold.py", "--brief"])
 
-    add("=== JOB SEARCH ENGINE: live state, re-derived this second (never quoted from a record) ===")
+    add("Job search engine: live state, re-derived this second (never quoted from a record)")
     add(now_line())
+    for _l in ghost_lines:
+        add(_l)
 
     c = tracker_counts()
     if c.get("APPLICATIONS", {}).get("rows"):
         a = c["APPLICATIONS"]
         h = headline_counts(a["tally"])
         add(f"  Applications: {h['submitted']} submitted "
-            f"({h['live']} live · {h['rejected']} rejected) "
+            f"({h['live']} live · {h['rejected']} rejected · {h['ghosted']} ghosted) "
             f"of {a['rows']} tracker rows · {h['lead']} leads · {h['passed']} passed")
         add(f"  Interviews: {h['interview']} · Offers: {h['offer']}  (the north star; "
             f"counted in submitted + live)")
@@ -439,11 +526,11 @@ def session_start() -> int:
     if "cold" in f:
         rc_cold, out_cold = f["cold"].result()
         cl = [l for l in out_cold.splitlines() if l.strip()]
-        if rc_cold in (0, 1) and cl:
+        if rc_cold in (0, 1, 3) and cl:
             add("")
             for _l in cl[:16]:
                 add(_l if _l.startswith(" ") else "  " + _l)
-        elif rc_cold not in (0, 1):
+        elif rc_cold not in (0, 1, 3):
             add("  ! cold.py could not run; run `python3 scripts/cold.py` by hand.")
 
     flush()
@@ -526,13 +613,16 @@ def session_start() -> int:
             if _q.holds:
                 add(f"     hold stamps live: {', '.join(h[0] for h in _q.holds)}; you lift these, "
                     f"never the agent.")
+    except FileNotFoundError as e:  # outreach_queue.NoTracker: nothing to derive from, so not checked
+        add(f"  outreach_queue: {e}")
     except Exception as e:  # noqa: BLE001
         add(f"  ! outreach_queue unavailable ({type(e).__name__}: {e}); run it by hand.")
 
     flush()
 
     add("")
-    _gate_summary([(label, fut.result()[0]) for label, fut in gate_futs], gate_missing, add)
+    _gate_summary([(label, fut.result()[0]) for label, fut in gate_futs], gate_missing, add,
+                  {label: fut.result()[1] for label, fut in gate_futs})
     live: list[str] = []
     live_notes: list[str] = []
     rc_i, out_i = f["census"].result()
@@ -561,22 +651,35 @@ def session_start() -> int:
         live.append(f"    ! canon: {n_c} retired claim(s) still asserted on live surfaces "
             f"(run: python3 scripts/canon.py)")
     if rc_v == 3:
-        # exit 3 = not checked (§3 of the answers file is still the template); a skip, not a pass.
-        live_notes.append("    - visa_gate: NOT checked (knowledge-base/12-application-answers.md §3 is "
-                          "not filled in yet); a skip, not a pass.")
+        # exit 3 = not checked: §3 of the answers file is still the template, or no dossier records an
+        # answer yet. A skip, not a pass.
+        why = ("knowledge-base/12-application-answers.md §3 is not filled in yet"
+               if re.search(r"not filled|template", out_v, re.I) else "no application records a work-authorization answer yet")
+        live_notes.append(f"    - visa_gate: NOT checked ({why}); a skip, not a pass.")
     if rc_v == 1:
         crit = out_v.count("[CRITICAL]")
         high = out_v.count("[HIGH]")
-        sev = f"{crit} CRITICAL" + (f" + {high} HIGH" if high else "")
+        unsure = out_v.count("[UNVERIFIED]")
+        sev = f"{crit} CRITICAL" + (f" + {high} HIGH" if high else "") + (f" + {unsure} UNVERIFIED" if unsure else "")
         live.append(f"    ! visa_gate: {sev} work-authorization defect(s) (run: python3 scripts/visa_gate.py)")
     rc_s, out_s = f["seniority"].result()
     m_s = re.search(r"=>\s*(\d+)\s+UNHANDLED", out_s)
-    if rc_s == 3 or "is not set" in out_s or "not checked" in out_s.lower():
+    m_nojd = re.search(r"=>\s*NOT CHECKED:\s*(\d+)\s+unsubmitted dossier", out_s)
+    if m_nojd:
+        live_notes.append(f"    - seniority_gate: {m_nojd.group(1)} unsubmitted dossier(s) NOT checked (no jd-*.md "
+                          "with the posting's text); save the posting's full text as jd-<slug>.md (run: python3 scripts/seniority_gate.py --all --unsubmitted)")
+    elif "is not set" in out_s or "YOUR_YEARS_OF_EXPERIENCE" in out_s and rc_s == 3:
         live_notes.append("    - seniority_gate: NOT checked (YOUR_YEARS_OF_EXPERIENCE is unset in "
                           "scripts/config.py); a skip, not a pass.")
+    elif "no dossier yet" in out_s:
+        live_notes.append("    - seniority_gate: NOT checked (no dossier yet); a skip, not a pass.")
+    elif rc_s == 3 or "not checked" in out_s.lower():
+        why = next((ln.strip() for ln in out_s.splitlines() if "not checked" in ln.lower()), "see its output")
+        live_notes.append(f"    - seniority_gate: NOT checked ({why}); a skip, not a pass.")
     if m_s and int(m_s.group(1)) > 0:
         live.append(f"    ! seniority_gate: {m_s.group(1)} unhandled dossier(s) exceed your target seniority "
-            f"band; drop them (run: python3 scripts/seniority_gate.py --all --unsubmitted)")
+            f"band; show each to the user: on yes mark it passed, on no add 'Seniority: KEPT <date>' to its README "
+            f"(run: python3 scripts/seniority_gate.py --all --unsubmitted)")
     # A record row out of its shape is an item no script will ever surface as cold.
     if "records" in f:
         rc_rc, out_rc = f["records"].result()
@@ -584,10 +687,12 @@ def session_start() -> int:
             first = next((l.strip() for l in out_rc.splitlines() if l.startswith("records_check:")),
                          out_rc.strip()[:120])
             live.append(f"    ! records_check: {first[:150]} (run: python3 scripts/records_check.py)")
+        elif rc_rc == 3:
+            live.append(f"    ! {out_rc.strip()[:150]}")
     # One malformed tracker row can throw a JS error that blanks the whole tracker in a browser,
     # while every tolerant parser here keeps working. Surface it loudly.
     rc_tc, out_tc = f["tracker"].result()
-    if rc_tc == 1:
+    if rc_tc != 0 and "BROKEN" in out_tc:
         live.append(f"    ! tracker_check: pipeline/tracker.html has a JS error and renders BLANK; "
             f"{out_tc.strip()[:160]} (run: python3 scripts/tracker_check.py)")
 
@@ -595,16 +700,13 @@ def session_start() -> int:
     add("")
     add("  North star: interview calls. If this session is a wave, the deliverable is a FILLED FORM, "
         "not a dossier.")
-    add("=" * 88)
 
     flush()
     pool.shutdown(wait=False)
     return 0
 
 
-# --------------------------------------------------------------------------------------
 # PostToolUse: check the file that was just written
-# --------------------------------------------------------------------------------------
 
 LIVE_SURFACE = ("knowledge-base/", "resume/", "pipeline/", "CLAUDE.md",
                 "STRUCTURE.md", "README.md", ".claude/", ".codex/",
@@ -640,9 +742,15 @@ _DRAFT_CUE = re.compile(
     r"|the (?:response|message|dm|note|cover|answer) to send", re.I)
 
 
+# The files slop_check reads: a dossier's form answers and its cover note.
+_SLOP_SURFACE = r"(applications/[^/]+)/(?:application\.md|cover-letter/cover-note\.md)$"
+# Only these lines block, and only on exit 1. A "second look" line is printed for a re-read and never blocks.
+_SLOP_TO_FIX = "      TO FIX: "
+
 # Categories voice_check flags that the Stop gate does NOT block on; an agent running voice_check
 # by hand still sees them. em/en-dash: a pause marker in a spoken narration is not a fact error.
-_VOICE_ADVISORY = {"em/en-dash"}
+# filler question: a person can mean one, so it is shown for a re-read and never stops the turn.
+_VOICE_ADVISORY = {"em/en-dash", "filler question (17-writing.md)"}
 
 
 def _voice_block_findings(text: str) -> list[tuple[str, str]]:
@@ -840,7 +948,8 @@ def post_edit() -> int:
         hits = [l.strip() for l in out.splitlines() if " is missing: " in l]
         if hits:
             msgs.append(f"outreach_format: {len(hits)} person(s) in {rel} lack part of the "
-                        f"three-part handover (profile URL + connection note + DM). "
+                        f"three-part handover (a profile line + the DM, plus the connection note "
+                        f"unless the person has no LinkedIn or is already connected). "
                         f"Don't hand it over partial.")
         if rel.endswith("referrals.md"):
             bad = []
@@ -862,9 +971,27 @@ def post_edit() -> int:
 
     if re.search(r"applications/[^/]+/application\.md$", rel):
         rc, out = sh([sys.executable, "scripts/visa_gate.py", rel])
-        if rc == 1 and ("[CRITICAL]" in out or "[HIGH]" in out):
-            msgs.append(f"visa_gate: a work-authorization answer in {rel} is WRONG; "
+        if rc == 1:  # exit 1 is always a finding, tagged or not
+            msgs.append(f"visa_gate: a work-authorization answer in {rel} is wrong or could not be read; "
                         f"run `python3 scripts/visa_gate.py {rel}`")
+
+    # Said now, while the writer still has the text open. Scaffolding dossiers hold placeholders.
+    if not _SCAFFOLD.match(rel):
+        if re.search(r"applications/[^/]+/application\.md$", rel) and _has_script("why_check"):
+            rc, out = sh([sys.executable, "scripts/why_check.py", rel])
+            hits = [l.strip() for l in out.splitlines() if " pitches: " in l]
+            if hits:
+                msgs.append(f"why_check: {len(hits)} why-them answer(s) in {rel} recite your own work. A 'why us' "
+                            f"answer is about the employer and why you want it (knowledge-base/12-application-answers.md). "
+                            f"Stop will block. " + "; ".join(hits[:2]))
+        m_d = re.search(_SLOP_SURFACE, rel)
+        if m_d and _has_script("slop_check"):
+            rc, out = sh([sys.executable, "scripts/slop_check.py", m_d.group(1)])
+            if rc == 1:
+                first = [l.strip() for l in out.splitlines() if l.startswith(_SLOP_TO_FIX)][:2]
+                msgs.append(f"slop_check: {m_d.group(1)} has a sentence shape to fix. Rewrite "
+                            f"them plainly from your own stories and reasons (knowledge-base/17-writing.md); never "
+                            f"just reword past the check. Stop will block. " + "; ".join(first))
 
     if RECORD_FILE.search(rel) and (REPO / "scripts" / "records_check.py").is_file():
         rc, out = sh([sys.executable, "scripts/records_check.py", "--files", rel], timeout=30)
@@ -886,9 +1013,7 @@ def post_edit() -> int:
     return 0
 
 
-# --------------------------------------------------------------------------------------
 # Stop: block only on defects this session introduced
-# --------------------------------------------------------------------------------------
 
 def _upstream_ref() -> str:
     """The branch's upstream (e.g. origin/main), else origin/main."""
@@ -1461,14 +1586,45 @@ def stop(changed: list[str] | None = None, last_message: str | None = None,
                     blocking.append("canon " + l.strip())
                     _flag(l, live)
 
+    # Sentence shapes that read as machine-written, in form answers and cover notes.
+    slop_files = [f for f in changed if re.search(_SLOP_SURFACE, f)]
+    writing_finding = False
+    if slop_files and _has_script("slop_check"):
+        slop_ds = sorted({re.search(_SLOP_SURFACE, f).group(1) for f in slop_files})
+        rc, out = sh([sys.executable, "scripts/slop_check.py"] + slop_ds)
+        _ran(rc, "slop_check", examined=slop_files)
+        cur = ""
+        for l in out.splitlines():
+            if re.match(r"^\s{2}\S", l) and "[" in l:
+                cur = l.strip()
+            elif rc == 1 and l.startswith(_SLOP_TO_FIX):
+                writing_finding = True
+                blocking.append("slop " + cur[:90] + " :: " + l.strip()[:160])
+                _flag(cur, slop_files)
+
     apps = [f for f in changed if re.search(r"applications/[^/]+/application\.md$", f)]
     if apps:
         rc, out = sh([sys.executable, "scripts/visa_gate.py"] + apps)
         _ran(rc, "visa_gate", examined=apps)
         if rc == 1:
+            tagged = [l for l in out.splitlines() if "[CRITICAL]" in l or "[HIGH]" in l or "[UNVERIFIED]" in l]
+            for l in tagged:
+                blocking.append("visa " + l.strip())
+                _flag(l, apps)
+            if not tagged:
+                # Exit 1 is always a finding (wrong, unreadable, or not checkable until §3 is filled in).
+                # An output with no tagged line must still block, or the turn passes on a finding.
+                blocking.append("visa visa_gate exited 1 with no tagged line; run `python3 scripts/visa_gate.py "
+                                + " ".join(apps) + "` and fix what it reports")
+                _flag("", apps)
+        # A why-them answer that recites the applicant's own work instead of saying why this employer.
+        if _has_script("why_check"):
+            rc, out = sh([sys.executable, "scripts/why_check.py"] + apps)
+            _ran(rc, "why_check", examined=apps)
             for l in out.splitlines():
-                if "[CRITICAL]" in l or "[HIGH]" in l:
-                    blocking.append("visa " + l.strip())
+                if " pitches: " in l:
+                    writing_finding = True
+                    blocking.append("why " + l.strip())
                     _flag(l, apps)
 
     reach = [f for f in changed
@@ -1612,13 +1768,22 @@ def stop(changed: list[str] | None = None, last_message: str | None = None,
                 + "\n\nFix these, or if a finding is genuinely documentation of a ban, add "
                   "`<!-- canon:allow <rule-id> - reason -->` on that line. Do NOT edit the "
                   "checker to make a finding disappear."
+                + (OUTREACH_STOP_HELP if any(b.startswith("outreach ") for b in blocking) else "")
+                + ("\n\nFor a 'slop' or 'why' finding: rewrite the sentence plainly from the user's own stories "
+                   "and reasons (knowledge-base/17-writing.md). A 'why us' answer is about the employer. Do not "
+                   "just reword it past the check. A sentence that is true and is how the user would say it "
+                   "can stay, with `<!-- slop:allow <family> | reason -->`." if writing_finding else "")
             ),
         }))
         return 0
     return 0
 
 
-# --------------------------------------------------------------------------------------
+
+OUTREACH_STOP_HELP = ("\n\nFor an 'outreach' finding: fill in the missing part, or record the marker it names "
+                      "(`Req: none on posting`, `Profile: none found`). A person still being researched gets "
+                      "NOT DRAFTED in their block, with the reason.")
+
 
 def _run_stop(**kw) -> str:
     import io
@@ -1657,6 +1822,17 @@ def selftest() -> int:
     nl = now_line()
     t("now_line() stamps a labelled time (config.TIMEZONE or the local zone)",
       bool(re.match(r"^  Now: \d{4}-\d\d-\d\d \d{1,2}:\d\d [AP]M \S+ \(", nl)))
+    global TIMEZONE
+    saved_zone = TIMEZONE
+    TIMEZONE = "Mars/Olympus_Mons"
+    bad_zone = now_line()
+    TIMEZONE = "UTC"
+    good_zone = now_line()
+    TIMEZONE = saved_zone
+    t("now_line() says it fell back when TIMEZONE can't be used, and does not claim that zone is in force",
+      "this computer's local time" in bad_zone and "Mars/Olympus_Mons from" not in bad_zone
+      and "doctor.py" in bad_zone)
+    t("now_line() names a usable TIMEZONE", "TIMEZONE UTC from scripts/config.py" in good_zone)
     saved_repo = REPO
     with tempfile.TemporaryDirectory() as td:
         REPO = Path(td)
@@ -1667,9 +1843,10 @@ def selftest() -> int:
         REPO = saved_repo
     t("aging_debt(): a repo with no ops/DEBT.md reports nothing and does not crash", no_debt == [])
 
-    hc = headline_counts({"applied": 30, "rejected": 10, "interview": 2, "lead": 15, "passed": 5})
-    t("interview/offer count as submitted+live",
-      hc == {"submitted": 42, "live": 32, "rejected": 10, "interview": 2, "offer": 0, "lead": 15, "passed": 5})
+    hc = headline_counts({"applied": 30, "rejected": 10, "interview": 2, "lead": 15, "passed": 5, "ghosted": 4})
+    t("interview/offer count as submitted+live; ghosted counts as submitted, never live",
+      hc == {"submitted": 46, "live": 32, "rejected": 10, "ghosted": 4, "interview": 2, "offer": 0,
+             "lead": 15, "passed": 5})
 
     # Setup detection: the fallback heuristic on synthetic text.
     template = ("<!-- fill this in -->\n# Profile\n[Write your own here.]\n- **Name:** [Full legal name]\n"
@@ -1692,13 +1869,62 @@ def selftest() -> int:
                 self.chunks.append(s)
             return super().write(s)
 
+    # A selftest never writes the user's world. The env flag stops the auto-ghost, the spy fails the
+    # selftest if anything still tried, and the commit-guard install is replaced so this leaves git
+    # config alone. All of it is restored in `finally`.
+    import os as _os
+    import types as _types
+    try:
+        import ghost as _gh_t
+        _gh_fake = False
+    except Exception:  # not in this copy: a stand-in, so the wiring below is still tested
+        _gh_t = _types.ModuleType("ghost")
+        _gh_t.apply = lambda *a, **k: ([], "")
+        _gh_t.session_lines = lambda *a, **k: []
+        sys.modules["ghost"] = _gh_t
+        _gh_fake = True
+    _spied: list[str] = []
+    _ghost_calls: list[int] = []
+    _installs: list[int] = []
+    _saved_apply, _saved_lines, _saved_install = _gh_t.apply, _gh_t.session_lines, globals()["_install_commit_guard"]
+    _saved_env = _os.environ.get("JOB_GHOST_NO_APPLY")
+
+    def _lines_counted(*a, **k):
+        _ghost_calls.append(1)
+        return _saved_lines(*a, **k)
+
+    _gh_t.apply = lambda *a, **k: (_spied.append("ghost.apply"), ([], "spied"))[1]
+    _gh_t.session_lines = _lines_counted
+    globals()["_install_commit_guard"] = lambda: _installs.append(1)
+    _os.environ["JOB_GHOST_NO_APPLY"] = "1"
+
     # Fresh copy: short, friendly, points at /setup and doctor.py, no alarm wall.
     saved_cache = _SETUP_CACHE
     _SETUP_CACHE = ["knowledge-base/01-profile-and-identity.md"]
     rec = _Rec()
-    with contextlib.redirect_stdout(rec):
-        rc = session_start()
-    fresh = rec.getvalue()
+    try:
+        with contextlib.redirect_stdout(rec):
+            rc = session_start()
+        _ghost_on_fresh = len(_ghost_calls)
+        fresh = rec.getvalue()
+        _rec_fresh, rec = rec, _Rec()
+        _SETUP_CACHE = []
+        with contextlib.redirect_stdout(rec):
+            rc_setup = session_start()
+    finally:
+        _gh_t.apply, _gh_t.session_lines = _saved_apply, _saved_lines
+        globals()["_install_commit_guard"] = _saved_install
+        if _saved_env is None:
+            _os.environ.pop("JOB_GHOST_NO_APPLY", None)
+        else:
+            _os.environ["JOB_GHOST_NO_APPLY"] = _saved_env
+        if _gh_fake:
+            sys.modules.pop("ghost", None)
+    t("the selftest's SessionStart ghosts nothing and writes no git config" + (": " + ", ".join(_spied) if _spied else ""),
+      not _spied)
+    t("--session-start installs the commit guard, on a fresh copy too", len(_installs) == 2)
+    t("a fresh copy never runs the auto-ghost; a set-up copy does, once",
+      _ghost_on_fresh == 0 and len(_ghost_calls) == 1)
     t(f"--session-start on a fresh copy runs clean (exit {rc})", rc == 0)
     t("fresh copy: points at /setup and scripts/doctor.py",
       "/setup" in fresh and "scripts/doctor.py" in fresh)
@@ -1706,14 +1932,43 @@ def selftest() -> int:
       len(fresh.splitlines()) <= 14 and "\U0001F534" not in fresh and "FINISHED" not in fresh)
 
     # Set-up copy: the critical block flushes before the gate sweep.
-    _SETUP_CACHE = []
-    rec = _Rec()
-    with contextlib.redirect_stdout(rec):
-        rc = session_start()
-    t(f"--session-start on a set-up copy runs clean (exit {rc})", rc == 0)
+    t(f"--session-start on a set-up copy runs clean (exit {rc_setup})", rc_setup == 0)
+    t("no tracker: the outreach queue says not checked, not 'unavailable'",
+      "outreach_queue: no tracker yet" in rec.getvalue() and "outreach_queue unavailable" not in rec.getvalue())
     crit = next((i for i, ch in enumerate(rec.chunks) if "live state" in ch), -1)
     gates = next((i for i, ch in enumerate(rec.chunks) if "Self-tests of the checks" in ch), -1)
     t("critical block is flushed BEFORE the gate sweep (survives a timeout kill)", 0 <= crit < gates)
+
+    # The auto-ghost's failure paths, with stand-ins: none can stop a session.
+    _saved_mod = sys.modules.get("ghost")
+    try:
+        _m = _types.ModuleType("ghost")
+        _m.session_lines = lambda *a, **k: ["  Marked ghosted: Acme"]
+        sys.modules["ghost"] = _m
+        t("_ghost_lines passes ghost.py's lines through", _ghost_lines() == ["  Marked ghosted: Acme"])
+        def _boom(*a, **k):
+            raise ValueError("bad row")
+        _m.session_lines = _boom
+        t("a broken ghost.py is named, never raised", "auto-ghost unavailable" in _ghost_lines()[0])
+        sys.modules["ghost"] = None  # import now raises ImportError, like a broken install
+        t("an unimportable ghost.py never raises", isinstance(_ghost_lines(), list))
+    finally:
+        if _saved_mod is None:
+            sys.modules.pop("ghost", None)
+        else:
+            sys.modules["ghost"] = _saved_mod
+
+    t("the session self-test list covers the form-answer and cover-letter scripts",
+      {"work_history_check", "render_cover"} <= set(GATE_SCRIPTS))
+    # A filler question is advisory: voice_check still names it, the Stop gate does not block on it.
+    try:
+        import voice_check as _vc_t
+        _filler = "Could you let me know who I'll be speaking with at the depot?"
+        t("a filler question is flagged by voice_check but never blocks the turn",
+          any(c == _vc_t.FILLER_CAT for c, _, _ in _vc_t.check(_filler))
+          and not any(c == _vc_t.FILLER_CAT for c, _ in _voice_block_findings(_filler)))
+    except ImportError:
+        pass
 
     # A missing gate script is skipped with a note, not reported as a failure.
     saved_gates = globals()["GATE_SCRIPTS"]
@@ -1727,6 +1982,34 @@ def selftest() -> int:
     lines = []
     _gate_summary([("canon", 0), ("visa_gate", 1)], [], lines.append)
     t("a failing selftest is named on its own line", any("visa_gate selftest failing" in l for l in lines))
+    lines = []
+    _gate_summary([("verify_claims", 1)], [], lines.append,
+                  {"verify_claims": "ModuleNotFoundError: No module named 'fitz'\n"})
+    t("a selftest failing on a missing module names the cause and the install line",
+      "No module named 'fitz'" in lines[1] and "pip install PyMuPDF" in lines[1])
+    t("a selftest failing for another reason adds no invented cause", _failure_cause("1 FAILED") == "")
+    with tempfile.TemporaryDirectory() as _td:
+        (Path(_td) / "hooks_selftest_badcfg.py").write_text("TIMEZONE = (\n", encoding="utf-8")
+        (Path(_td) / "hooks_selftest_raisescfg.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+        sys.path.insert(0, _td)
+        try:
+            bad = _config_error("hooks_selftest_badcfg")
+            t("a syntax error in config.py is named in plain words, with its line",
+              bad.startswith("scripts/config.py line "))
+            t("config.py raising at import is named too", "RuntimeError: boom" in _config_error("hooks_selftest_raisescfg"))
+            t("a config.py that does not exist is no error", _config_error("hooks_selftest_absentcfg") == "")
+        finally:
+            sys.path.remove(_td)
+    _saved_cfg = CONFIG_ERROR
+    globals()["CONFIG_ERROR"] = "scripts/config.py line 3: invalid syntax"
+    _buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(_buf):
+            _rc = session_start()
+    finally:
+        globals()["CONFIG_ERROR"] = _saved_cfg
+    t("a broken config.py: session start says so plainly and exits 0",
+      _rc == 0 and "line 3: invalid syntax" in _buf.getvalue() and "Traceback" not in _buf.getvalue())
     t("the self-test line says it tests the check scripts, not your files",
       "not your files" in lines[0] and "Self-checks:" not in lines[0])
     lines = []
@@ -1803,6 +2086,14 @@ def selftest() -> int:
         rout = _run_stop(changed=[rrel])
         t("--stop BLOCKS a flagged DM in a referrals.md this tree wrote",
           _blocks(rout) and "voice_check: " + rrel in rout)
+        rfile.write_text("## The messages\n\n### 1 · Sam Lee · Shift Lead\n"
+                         "**Connection note:**\n> Hi Sam, a short note.\n\n", encoding="utf-8")
+        half = _run_stop(changed=[rrel])
+        t("--stop on a half handover offers NOT DRAFTED as a way out", _blocks(half) and "NOT DRAFTED" in half)
+        rfile.write_text("## The messages\n\n### 1 · [Name], [Role] at [Company]\n\n"
+                         "Profile: [linkedin.com/in/... URL]\n\n**Connection note:**\n```\n[note]\n```\n", encoding="utf-8")
+        t("--stop stays silent on a referrals.md still holding the template's [Name]",
+          "outreach " not in _run_stop(changed=[rrel]))
         rfile.unlink()
     finally:
         for leftover in tmpdir.glob("*"):
@@ -1858,6 +2149,65 @@ def selftest() -> int:
     has_rc = (REPO / "scripts" / "records_check.py").is_file()
     t("--stop BLOCKS a record row out of shape (records_check)",
       (not has_rc) or (_blocks(rr) and "records_check" in rr))
+
+    # why_check and slop_check, with their real output shapes. The file-present check is stubbed so
+    # the routing is exercised in every copy.
+    _dossier = "applications/northwind-nurse/application.md"
+    _why_out = f"  {_dossier}  [why northwind?]  pitches: Globex\nwhy_check: 1 why-them answer(s)\n"
+    _slop_out = (f"  {_dossier} [why northwind?]\n      TO FIX: posting-motive: echoes the posting: \"your mission\"  -> say why\n"
+                 "slop_check: 1 to fix, 0 second look(s).\n")
+    _slop_soft = (f"  {_dossier} [why northwind?]\n      second look: ai-vocab: stock word: \"leverage\"  -> plain word\n"
+                  "slop_check: 0 to fix, 1 second look(s).\n")
+    _saved_has = globals()["_has_script"]
+    globals()["_has_script"] = lambda name: True
+    try:
+        globals()["sh"] = _fake("why_check.py", 1, _why_out)
+        r_why = _run_stop(changed=[_dossier])
+        t("--stop BLOCKS a why-them answer that recites the applicant's work",
+          _blocks(r_why) and "why " + _dossier in r_why and "about the employer" in r_why)
+        globals()["sh"] = _fake("why_check.py", 7, "Traceback\n")
+        t("--stop FAILS CLOSED when why_check cannot run", "why_check could NOT run" in _run_stop(changed=[_dossier]))
+        globals()["sh"] = _fake("slop_check.py", 1, _slop_out)
+        r_slop = _run_stop(changed=[_dossier])
+        t("--stop BLOCKS a slop shape in application.md", _blocks(r_slop) and "slop " in r_slop and "posting-motive" in r_slop)
+        t("--stop BLOCKS a slop shape in a cover note",
+          _blocks(_run_stop(changed=["applications/northwind-nurse/cover-letter/cover-note.md"])))
+        globals()["sh"] = _fake("slop_check.py", 0, _slop_soft)
+        t("--stop does NOT block on a second look", not _blocks(_run_stop(changed=[_dossier])))
+        globals()["sh"] = _fake("slop_check.py", 0, _slop_out)
+        t("--stop does NOT block when the blocking switch made slop_check exit 0",
+          not _blocks(_run_stop(changed=[_dossier])))
+        globals()["sh"] = _fake("slop_check.py", 3, "not checked\n")
+        t("--stop does NOT block on slop_check exit 3", "slop_check" not in _run_stop(changed=[_dossier]))
+
+        def _post(path):
+            _in, sys.stdin = sys.stdin, io.StringIO(json.dumps({"tool_input": {"file_path": str(REPO / path)}}))
+            _buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(_buf):
+                    post_edit()
+            finally:
+                sys.stdin = _in
+            return _buf.getvalue()
+
+        globals()["sh"] = _fake("why_check.py", 1, _why_out)
+        t("--post-edit warns on a why-them recital", "why_check: 1" in _post(_dossier))
+        globals()["sh"] = _fake("slop_check.py", 1, _slop_out)
+        t("--post-edit warns on a slop shape", "slop_check: applications/northwind-nurse" in _post(_dossier))
+        t("--post-edit leaves TEMPLATE- scaffolding alone",
+          "slop_check" not in _post("applications/TEMPLATE-company-role/application.md"))
+        globals()["sh"] = _fake("outreach_format.py", 1, "  1 \u00b7 Sam Lee is missing: the DM\n")
+        _partial = _post("applications/northwind-nurse/referrals.md")
+        t("--post-edit names a partial handover without demanding a profile URL from someone with no LinkedIn",
+          "outreach_format: 1" in _partial and "profile URL +" not in _partial and "no LinkedIn" in _partial)
+        globals()["_has_script"] = lambda name: False
+        globals()["sh"] = lambda *a, **k: (2, "can't open file\n")
+        _gone = _run_stop(changed=["applications/northwind-nurse/cover-letter/cover-note.md"])
+        t("a missing why_check or slop_check is skipped, never a failure",
+          "slop_check" not in _gone and "why_check" not in _gone)
+    finally:
+        globals()["sh"] = _orig_sh2
+        globals()["_has_script"] = _saved_has
 
     d = REPO / "knowledge-base" / ".hooks-selftest-newdir"
     try:
@@ -1963,6 +2313,22 @@ def selftest() -> int:
             rc_codex = _run_stop(changed=[crel], payload={"transcript_path": str(codex), "session_id": "c1"})
             t("--stop with a Codex transcript BLOCKS a planted CRITICAL visa answer",
               _blocks(rc_codex) and "visa" in rc_codex)
+            globals()["sh"] = _fake("visa_gate.py", 1, f"  [UNVERIFIED] {crel}:1\n      line:     an answer it could not read\n")
+            rc_unsure = _run_stop(changed=[crel], payload={"transcript_path": str(codex), "session_id": "c3"})
+            t("--stop BLOCKS a work-authorization answer the gate could not read",
+              _blocks(rc_unsure) and "visa" in rc_unsure)
+            # §3 unfilled and the file records an answer: exit 1. The old output carried no tag per file,
+            # and the turn passed. Exit 1 blocks whatever the output looks like.
+            globals()["sh"] = _fake("visa_gate.py", 1, "visa_gate.py: not checked: §3 is not filled in yet.\n\n"
+                                    "UNVERIFIED: 1 file(s) record work-authorization answers that cannot be\n"
+                                    f"checked until §3 is filled in. This is not a pass:\n  {crel}  (1 recorded answer(s))\n")
+            rc_unconf = _run_stop(changed=[crel], payload={"transcript_path": str(codex), "session_id": "c4"})
+            t("--stop BLOCKS visa_gate exit 1 with no tagged line (section 3 unfilled, an answer recorded)",
+              _blocks(rc_unconf) and "visa" in rc_unconf)
+            globals()["sh"] = _fake("visa_gate.py", 1, f"  [UNVERIFIED] {crel}  (1 recorded answer(s); §3 not filled in)\n")
+            rc_unconf2 = _run_stop(changed=[crel], payload={"transcript_path": str(codex), "session_id": "c5"})
+            t("--stop BLOCKS the tagged section-3-unfilled line visa_gate now prints",
+              _blocks(rc_unconf2) and crel in rc_unconf2)
             globals()["sh"] = _orig_sh3
             rc_draft = _run_stop(changed=[], payload={
                 "transcript_path": str(codex), "session_id": "c2",

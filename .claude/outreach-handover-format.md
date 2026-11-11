@@ -73,6 +73,13 @@ message by hand.
     <Your name>
     ```
 
+**Two markers, recorded in the person's block in `referrals.md`:**
+- `Req: none on posting`: the posting has no req or job ID. Never invent one.
+- A `Profile:` line with any other profile or staff-page URL, or `Profile: none found (where you
+  looked)`: this person has no LinkedIn on record. They get no connection note and no InMail
+  verdict, and their block in the handover says "No LinkedIn on record" and how the message goes
+  instead (email, the employer's contact page). `outreach_format.py` prints these names.
+
 Separate each person with a `---`, and each company block with `---` then `---`.
 
 **Bottom of the file:** a one-line "as you send, tell me and I log each" note.

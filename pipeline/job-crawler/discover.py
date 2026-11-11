@@ -51,6 +51,7 @@ from pathlib import Path
 from http_util import read_url, UA, OutOfTime  # sibling module: gzip, retry, time budget
 import locations  # sibling module: the location rule crawl.py applies, shared so both agree
 import titles as title_rule  # sibling module: the title rule crawl.py applies, shared so both agree
+import config_files  # sibling module: reads the settings files, with plain errors
 
 HERE = Path(__file__).resolve().parent
 TRACKER = HERE.parent / "tracker.html"   # present only in the full release, never in the crawler-only repo
@@ -80,11 +81,12 @@ INDEX_MAX_PAGES = 20          # per domain: bounds one harvest
 INDEX_MAX_5XX = 4             # consecutive 5xx / timeouts from the index for one domain: skip it this run
 DEFAULT_MAX_MINUTES = 3.0     # a sweep's whole time budget (index harvest + board checks)
 HARVEST_SHARE = 2 / 3         # the index harvest may use at most this share of the budget
+WITHOUT_INDEX = ("To add boards without the index: discover.py --company \"Name\" \"Other Name\", "
+                 "or discover.py --queries, run those searches, and pipe the result URLs into "
+                 "discover.py --urls -")
 FALLBACK_ADVICE = ("The Common Crawl index is not answering right now (it is often overloaded). "
                    "Boards already harvested are still checked, and the sweep tries the index again "
-                   "next run. To add boards without it: discover.py --company \"Name\" \"Other Name\", "
-                   "or discover.py --queries, run those searches, and pipe the result URLs into "
-                   "discover.py --urls -")
+                   "next run. " + WITHOUT_INDEX)
 INDEX_REUSE_DAYS = 45         # a harvested index is reused this long when collinfo is unreachable
 RECHECK_DAYS = 14             # a board checked against the same titles is skipped this long
 DEAD_RECHECK_DAYS = 45        # a board that 404'd or had no postings is skipped this long
@@ -99,9 +101,7 @@ NAME_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "t
                  "technology", "labs", "group", "holdings", "hq", "the", "plc", "gmbh"}
 
 
-# ============================================================================================
 # HTTP (one small class, so the selftest can swap in a fake with no network)
-# ============================================================================================
 class IndexDown(Exception):
     """The index failed INDEX_MAX_5XX times in a row for one domain."""
 
@@ -142,9 +142,7 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-# ============================================================================================
 # URL -> (ats, slug).  The same parser serves --urls and the Common Crawl harvest.
-# ============================================================================================
 _LOCALE = re.compile(r"^[a-z]{2}(-[A-Za-z]{2})?$")
 
 
@@ -245,9 +243,7 @@ def extract_urls(text):
     return out
 
 
-# ============================================================================================
 # Board probes: read one board's public API, return what is really there
-# ============================================================================================
 def _pretty(slug):
     s = urllib.parse.unquote(slug.split("/")[0])
     s = re.sub(r"[-_]+", " ", s).strip()
@@ -393,13 +389,10 @@ def excluded_company(name, F):
     return any(x and str(x).lower() in n for x in (F.get("exclude_companies") or []))
 
 
-# ============================================================================================
 # boards.yaml: read, and append only (never rewrite a row the user wrote)
-# ============================================================================================
 def read_boards(path):
-    import yaml
     text = path.read_text() if path.exists() else "boards:\n"
-    data = yaml.safe_load(text) or {}
+    data = config_files.parse_yaml(text, path) or {}
     rows = data.get("boards") if isinstance(data, dict) else data
     return text, [r for r in (rows or []) if isinstance(r, dict)]
 
@@ -447,13 +440,11 @@ def append_rows(path, new_rows):
     return True, f"added {len(new_rows)} row(s) to {path.name}"
 
 
-# ============================================================================================
 # Config + cache
-# ============================================================================================
 def load_filters(path=FILTERS):
-    import yaml
-    F = yaml.safe_load(path.read_text()) or {}
-    F["include_titles"] = [str(t).strip().lower() for t in (F.get("include_titles") or []) if str(t).strip()]
+    F = config_files.listify(config_files.read_yaml(path))
+    F["include_titles"] = [str(t).strip().lower() for t in F["include_titles"]
+                           if t is not None and str(t).strip()]
     return F
 
 
@@ -495,7 +486,7 @@ class Ctx:
         self.advised = False          # FALLBACK_ADVICE already printed this run
         self.now = now or datetime.now(timezone.utc)
         self.F = F
-        self.today = datetime.now().astimezone().date().isoformat()  # the user's own local date
+        self.today = config_files.local_now().date().isoformat()  # the user's own local date
 
     @property
     def deadline(self):
@@ -557,6 +548,8 @@ def _retry(ctx, fn, tries=3, waits=(5, 20), until=None, strikes=None):
             last = e
         if strikes is not None:
             strikes[0] += 1
+            if len(strikes) > 1:
+                strikes[1] += 1  # every failure this run, for the summary
             if strikes[0] >= INDEX_MAX_5XX:
                 raise IndexDown(f"{last} ({strikes[0]} failures in a row)")
         if k < tries - 1:
@@ -570,9 +563,7 @@ def _retry(ctx, fn, tries=3, waits=(5, 20), until=None, strikes=None):
     raise last
 
 
-# ============================================================================================
 # --sweep: Common Crawl harvest -> probe -> add matches
-# ============================================================================================
 def _best_case(found):
     """One board, several spellings of case: keep the most common one (ties: the lowercase one)."""
     best = {}
@@ -614,22 +605,29 @@ def harvest(ctx, atses, refresh=False, crawl_id=None, until=None):
     state = cached
     notes = []
     progress = {"pages_read": 0, "pages_total": 0, "complete": False, "stopped_for_time": False,
-                "domains_down": []}
+                "domains_down": [], "index_errors": 0}
 
     def save():
         _jsave(path, state)
     try:
+        cstrikes = [0, 0]
         ids = [crawl_id] if crawl_id else [c["id"] for c in _retry(
             ctx, lambda: ctx.http.get_json(COLLINFO, timeout=ctx.cap(60, until)), tries=2, waits=(3,),
-            until=until)[:3]]
+            until=until, strikes=cstrikes)[:3]]
     except OutOfTime:
         progress["stopped_for_time"] = True
+        progress["index_errors"] += cstrikes[1]
         notes.append("the time budget ran out before the index answered; used the boards already harvested")
         return _slugs_from(state, atses), notes, progress
     except Exception as e:
         ctx.advise()
         progress["domains_down"].append("index.commoncrawl.org")
         notes.append(f"Common Crawl index list unreachable ({e}); used the boards already harvested")
+        return _slugs_from(state, atses), notes, progress
+    if not ids:
+        ctx.advise()
+        progress["domains_down"].append("index.commoncrawl.org")
+        notes.append("the Common Crawl index list came back empty; used the boards already harvested")
         return _slugs_from(state, atses), notes, progress
     newest = ids[0]
     if state.get("crawl_id") != newest or refresh:
@@ -642,7 +640,7 @@ def harvest(ctx, atses, refresh=False, crawl_id=None, until=None):
             st = state["domains"].setdefault(domain, {})
             if _domain_done(st) or progress["stopped_for_time"]:
                 continue
-            strikes = [0]
+            strikes = [0, 0]  # failures in a row, failures in all
             order = ([st["cid"]] if st.get("cid") in ids else []) + [c for c in ids if c != st.get("cid")]
             for cid in order:
                 try:
@@ -658,6 +656,7 @@ def harvest(ctx, atses, refresh=False, crawl_id=None, until=None):
                     break
                 except Exception as e:
                     log(f"[sweep] index {cid} {domain}: {e}")
+            progress["index_errors"] += strikes[1]
             if not _domain_done(st) and not progress["stopped_for_time"]:
                 progress["domains_down"].append(domain)
                 notes.append(f"{domain}: the Common Crawl index did not answer (it is often overloaded); "
@@ -678,6 +677,12 @@ def harvest(ctx, atses, refresh=False, crawl_id=None, until=None):
     for a in atses:
         log(f"[sweep] index: {len(out[a])} {a} boards so far")
     return out, notes, progress
+
+
+def _index_errors_note(progress):
+    """" (the index returned N errors along the way)" when it did, else ""."""
+    k = progress.get("index_errors", 0)
+    return f" (the index returned {k} error{'s' if k != 1 else ''} along the way)" if k else ""
 
 
 def _harvest_domain(ctx, cid, domain, want_ats, st, until, strikes, save):
@@ -825,9 +830,9 @@ def sweep(ctx, args):
             summary = ("The Common Crawl index did not answer this run, so no boards were checked. "
                        + FALLBACK_ADVICE + ".")
         else:
-            summary = ("The index harvest used this run's time budget before any board names came in. "
-                       "Run --sweep again to continue it (the first run is the slowest), or raise "
-                       "--max-minutes.")
+            summary = ("The index harvest used this run's time budget before any board names came in"
+                       + _index_errors_note(progress) + ". Run --sweep again to continue it (the first "
+                       "run is the slowest), or raise --max-minutes. " + WITHOUT_INDEX + ".")
     else:
         summary = (f"Checked {checked_n} boards: {len(new_rows)} had postings matching your titles in a "
                    f"place you can work and {'would be' if args.dry_run else 'were'} added to boards.yaml, "
@@ -840,6 +845,10 @@ def sweep(ctx, args):
                         f"(--max-minutes).")
         if progress["domains_down"]:
             summary += " Part of the index did not answer: " + FALLBACK_ADVICE + "."
+        elif progress["stopped_for_time"] or counts["skipped"]:
+            # the sweep ended early: point past the index, as the not-answering message does
+            summary += (" The sweep ended early" + _index_errors_note(progress) + ". "
+                        + WITHOUT_INDEX + ".")
     summary += f" ({elapsed}s.)"
     return {
         "mode": "sweep", "index_notes": notes,
@@ -849,13 +858,11 @@ def sweep(ctx, args):
             {"company": r["company"], "ats": r["ats"], "slug": r["slug"], "open_postings": r["_open"],
              "matching_titles": r["_matching"]} for r in new_rows],
         "skipped": skipped, "remaining_unchecked": remaining, "boards_yaml": write[1], "ok": write[0],
-        "summary": summary,
+        "nothing_checked": not any(slugs.get(a) for a in atses), "summary": summary,
     }
 
 
-# ============================================================================================
 # --urls and --company: check specific boards and add the live ones
-# ============================================================================================
 def _add_checked(ctx, args, candidates, mode, F):
     """candidates: [(ats, slug, origin, expected_name_or_None)]. Probes each unique board once."""
     _, rows = read_boards(ctx.boards)
@@ -954,7 +961,12 @@ def company_mode(ctx, args):
     found = {r["company"].lower() for r in firsts}
     failed = [m for m in res["misses"] if m["why"] not in ("no board there", "board exists but has no open postings")
               and "belongs to" not in m["why"]]
-    not_found = [n for n in args.company if " ".join(n.split())[:80].lower() not in found]
+    # a company already in boards.yaml (by a guessed slug, or by name from an earlier --urls) is listed, not missing
+    _, have_rows = read_boards(ctx.boards)
+    have_names = {" ".join(str(r.get("company") or "").split()).lower() for r in have_rows if isinstance(r, dict)}
+    listed = [n for n in args.company if n in {a["origin"] for a in res["already_listed"]}
+              or " ".join(n.split())[:80].lower() in have_names]
+    not_found = [n for n in args.company if " ".join(n.split())[:80].lower() not in found and n not in listed]
     unsure = sorted({m["origin"] for m in failed if m["origin"] in not_found})
     rows = [dict({"company": r["company"], "ats": r["ats"], "slug": r["slug"], "source": "discover:company",
                   "added": ctx.today},
@@ -965,8 +977,10 @@ def company_mode(ctx, args):
     return {"mode": "company", "ok": write[0], "boards_yaml": write[1], "added": firsts,
             "already_listed": res["already_listed"], "wrong_company_boards": wrong,
             "not_found": not_found, "check_failed": failed,
-            "summary": (f"{len(firsts)} board(s) found for {len(args.company) - len(not_found)} of "
-                        f"{len(args.company)} companies. Not found on any guessable ATS: "
+            "summary": (f"{len(firsts)} board(s) found for {len(args.company) - len(not_found) - len(listed)} of "
+                        f"{len(args.company)} companies. "
+                        + (f"{len(listed)} already listed in boards.yaml: {', '.join(listed)}. " if listed else "")
+                        + "Not found on any guessable ATS: "
                         f"{', '.join(not_found) or 'none'}"
                         + (f" (some checks for {', '.join(unsure)} failed on the network, so run again "
                            f"before concluding)" if unsure else "")
@@ -987,7 +1001,12 @@ def off_ats_advice(tracker=None):
 
 def urls_mode(ctx, args):
     F = ctx.filters_loaded()
-    text = sys.stdin.read() if args.urls == "-" else Path(args.urls).read_text()
+    try:
+        text = sys.stdin.read() if args.urls == "-" else Path(args.urls).read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        why = getattr(e, "strerror", None) or "it is not a text file"
+        raise config_files.ConfigError(f"Can't read the URL list {args.urls}: {why}. Give a text file of "
+                                       f"job URLs, or - to read them from standard input.") from e
     cands, unresolved = [], []
     for u in extract_urls(text):
         ats, slug, why = parse_board_url(u)
@@ -1004,9 +1023,7 @@ def urls_mode(ctx, args):
     return res
 
 
-# ============================================================================================
 # --queries
-# ============================================================================================
 QUERY_SITES = ("boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com",
                "jobs.smartrecruiters.com", "apply.workable.com", "myworkdayjobs.com")
 
@@ -1047,9 +1064,7 @@ def queries_mode(ctx, args):
     return {"mode": "queries", "note": note, "queries": qs + plain, "plain_queries": plain}
 
 
-# ============================================================================================
 # Output + CLI
-# ============================================================================================
 def print_human(res):
     if res["mode"] == "queries":
         print("# " + res["note"])
@@ -1111,11 +1126,23 @@ def main(argv=None):
     if mode in ("sweep", "urls") and args.company:
         ap.error("--company is its own mode (or a modifier of --queries)")
     if mode == "selftest":
-        return _selftest()
+        try:
+            return _selftest()
+        except config_files.ConfigError as e:
+            print(f"discover: {e}", file=sys.stderr)
+            return 2
+    if not 0 <= args.max_minutes < float("inf"):
+        print("discover: --max-minutes must be 0 (no limit) or a positive number of minutes, like "
+              "--max-minutes 3.", file=sys.stderr)
+        return 2
     if args.limit is None:
         args.limit = DEFAULT_SWEEP_LIMIT if mode == "sweep" else 200
     ctx = Ctx()
-    F = ctx.filters_loaded()
+    try:
+        F = ctx.filters_loaded()
+    except config_files.ConfigError as e:
+        print(f"discover: {e}", file=sys.stderr)
+        return 2
     try:
         locations.settings(F)
     except ValueError as e:
@@ -1127,6 +1154,9 @@ def main(argv=None):
         return 2
     try:
         res = {"sweep": sweep, "urls": urls_mode, "company": company_mode, "queries": queries_mode}[mode](ctx, args)
+    except config_files.ConfigError as e:
+        print(f"discover: {e}", file=sys.stderr)
+        return 2
     except RuntimeError as e:
         print(f"discover: {e}", file=sys.stderr)
         return 1
@@ -1134,12 +1164,12 @@ def main(argv=None):
         print(json.dumps(res, indent=2))
     else:
         print_human(res)
+    if res.get("nothing_checked"):
+        return 3  # no board could be checked this run (the index did not answer): never exit 0, like crawl.py
     return 0 if res.get("ok", True) else 1
 
 
-# ============================================================================================
 # Offline selftest: synthetic fixtures, a fake HTTP layer, a temp boards.yaml. No network.
-# ============================================================================================
 class FakeHttp:
     """url-substring -> response (dict/list/str) or an int HTTP status. Any URL not listed is a 404.
     Real network is never touched."""
@@ -1271,7 +1301,7 @@ def _selftest():
         routes["showNumPages=true"] = 504
         ctx = ctx_for(routes)
         res = sweep(ctx, ns(ats="ashby"))
-        assert res["checked"] == 0 and "did not answer" in res["summary"], res
+        assert res["checked"] == 0 and "did not answer" in res["summary"] and res["nothing_checked"], res
         assert not _jload(ctx.cache / "cc-index.json", {})["domains"]["jobs.ashbyhq.com"].get("pages")
         # 3c) fail fast: a domain is given up after INDEX_MAX_5XX failures in a row, across crawl
         #     ids, and the fallback advice is printed the moment the index fails, not at the end
@@ -1302,6 +1332,19 @@ def _selftest():
         again = [c for c in ctx2.http.calls if "&fl=url&page=" in c]
         assert len(again) == 6 - read_first, again        # resumed, no page read twice
         assert res["index_boards"]["lever"] == 6
+        # 3d2) an index error, then the budget runs out (fewer than INDEX_MAX_5XX failures): the
+        #      summary still points at --company / --queries / --urls, not only "run it again"
+        routes = _fixture_routes()
+        routes["showNumPages=true"] = 503
+        clock = FakeClock()
+        b.write_text(FIXTURE_BOARDS)
+        ctx = Ctx(boards=b, cache=tmp / "cache-err", http=FakeHttp(routes, clock, 10.0), sleep=lambda s: None,
+                  now=datetime(2099, 1, 2, tzinfo=timezone.utc), F=dict(F), clock=clock)
+        res = sweep(ctx, ns(ats="lever", max_minutes=1))
+        prog = res["index_progress"]
+        assert prog["stopped_for_time"] and not prog["domains_down"] and prog["index_errors"] >= 1, prog
+        assert "--queries" in res["summary"] and "--urls" in res["summary"], res["summary"]
+        assert "returned 1 error along the way" in res["summary"], res["summary"]
         # 3e) the location rule: a board whose only matching postings are somewhere you can't work
         #     is not added (and is counted as such); the same rule crawl.py applies
         routes = _fixture_routes()
@@ -1343,6 +1386,10 @@ def _selftest():
         assert [(r["ats"], r["slug"]) for r in res["added"]] == [("greenhouse", "globex")], res
         assert res["not_found"] == ["Nonexistent Widgets"]
         assert any("belongs to" in m["why"] for m in res["wrong_company_boards"])
+        # 6b) a second run: a company already in boards.yaml is listed, not "not found" (Acme by name, Globex by slug)
+        again = company_mode(ctx, ns(company=["Globex", "Acme", "Nonexistent Widgets"]))
+        assert again["not_found"] == ["Nonexistent Widgets"], again
+        assert "2 already listed in boards.yaml: Globex, Acme" in again["summary"], again["summary"]
         # 7) a file whose boards: is not last is refused, untouched
         bad = tmp / "bad.yaml"
         bad.write_text("boards:\n  - {company: A, ats: lever, slug: a}\nother: 1\n")

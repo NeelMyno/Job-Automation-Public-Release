@@ -2,7 +2,6 @@
 """throughput.py: the gates that guard the GOAL, not the truth.
 
 WHY THIS EXISTS
----------------
 The other gates in this repo (canon, visa_gate, check_law, verify_claims) all guard **honesty**,
 whether a claim is true. None of them guard the actual **goal**: getting interview calls. A repo
 can be perfectly honest and still be losing you applications, in ways a truth-only gate would never
@@ -21,6 +20,9 @@ catch:
 USAGE
     python3 scripts/throughput.py            # exit 1 if anything is losing you applications
     python3 scripts/throughput.py --selftest
+
+Exit 0 = nothing found. 1 = something is costing you applications. 3 = NOT CHECKED: there is no
+tracker yet, or scripts/config.py has an error in it (a warning, never a pass).
 """
 
 from __future__ import annotations
@@ -37,28 +39,59 @@ from pathlib import Path
 # placement) so `import config` also resolves if this module is ever imported rather than run
 # directly, matching the pattern outreach_queue.py already uses for its own sibling import.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+if __name__ == "__main__" and "--selftest" in sys.argv:  # a throwaway copy that holds none of your files
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
+
+def _config_problem(e: Exception) -> str:
+    """Which line of scripts/config.py is wrong, in plain words."""
+    line, msg = getattr(e, "lineno", None), getattr(e, "msg", None) or f"{type(e).__name__}: {e}"
+    tb = e.__traceback__
+    while tb is not None:
+        if Path(tb.tb_frame.f_code.co_filename).name == "config.py":
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return f"scripts/config.py{f' line {line}' if line else ''}: {msg}"
+
+
+CONFIG_ERROR = None
 try:
     import config
-except ImportError:
+except Exception as _e:  # noqa: BLE001, the file is the user's and can raise anything
+    if not (isinstance(_e, ModuleNotFoundError) and _e.name == "config"):
+        CONFIG_ERROR = _config_problem(_e)
+
     class config:  # type: ignore[no-redef]
-        """Fallback when scripts/config.py has not been created yet: safe defaults only."""
+        """Fallback when scripts/config.py is missing or cannot be loaded: safe defaults only."""
         OPERATOR_NAME = None
         SITE_CHECKOUT_PATH = None
         RECRUITER_PLATFORM_KEYWORDS = []
         PASTE_KIT_ATS_HOSTS = ()
         STALE_WORK_SOURCES = ()
 
+
+
+def _cfg_text(name: str) -> str | None:
+    """A text setting from scripts/config.py, or None when it is unset, blank or not text."""
+    value = getattr(config, name, None)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+_OPERATOR_NAME = _cfg_text("OPERATOR_NAME")
+_SITE_CHECKOUT_PATH = _cfg_text("SITE_CHECKOUT_PATH")
 REPO = Path(__file__).resolve().parents[1]
 # The checkout of your published site/portfolio repo, the one a recruiter actually downloads your
 # résumé from, if you keep one separate from this repo. Optional: set SITE_CHECKOUT_PATH in
 # scripts/config.py to enable the live-site-drift check; left unset (the default), that check is
 # silently skipped rather than crashing or guessing at a path (see site_matches_repo() below).
-SITE = Path(config.SITE_CHECKOUT_PATH).expanduser().resolve() if config.SITE_CHECKOUT_PATH else None
+SITE = Path(_SITE_CHECKOUT_PATH).expanduser().resolve() if _SITE_CHECKOUT_PATH else None
 
 # "by <you>" if OPERATOR_NAME is set in config.py, else name-independent fallback phrasing, used
 # as ONE alternative among several inside _Submitted.search's positive-evidence window (a date or
 # a ✅ still count on their own). Sharpens with zero configuration required.
-_OPERATOR_BY = (r"\bby " + re.escape(config.OPERATOR_NAME) + r"\b") if config.OPERATOR_NAME \
+_OPERATOR_BY = (r"\bby " + re.escape(_OPERATOR_NAME) + r"\b") if _OPERATOR_NAME \
     else r"\bby (?:hand|me)\b"
 
 _SUBMITTED_TOKEN = re.compile(
@@ -87,8 +120,8 @@ class _Submitted:
             # losing game: the first version missed "nothing was submitted", "no field was
             # filled… submitted", and "before this is submitted", and flagged four correct
             # dossiers as self-contradicting. Every REAL submission record in this repo carries a
-            # date or an explicit confirmation ("SUBMITTED 2026-07-21 by <you>", "✅ SUBMITTED",
-            # "Applied on: 2026-07-22"). Prose *about* submitting does not. Anchor on that.
+            # date or an explicit confirmation ("SUBMITTED 2031-04-10 by <you>", "✅ SUBMITTED",
+            # "Applied on: 2031-04-11"). Prose *about* submitting does not. Anchor on that.
             window = text[max(0, m.start() - 30):m.end() + 40]
             if re.search(r"20\d\d-\d\d-\d\d|✅|" + _OPERATOR_BY, window, re.I):
                 return m
@@ -99,13 +132,49 @@ SUBMITTED = _Submitted
 NOT_APPLIED = re.compile(r"\bNOT[ _]APPLIED\b|\bnot yet applied\b|\bawaiting (?:the )?form\b", re.I)
 # For the self-contradiction check ONLY: a NOT-APPLIED that is THIS dossier's OWN status, not prose
 # ABOUT a sibling req ("the other posting, deliberately NOT applied to") or a correction timeline
-# ("the fix, not applied until 2026-07-21"). Those two prose shapes are real false positives a
+# ("the patch, held and not applied until 2031-04-10"). Those two prose shapes are false positives a
 # whole-doc co-occurrence check can produce, so the bare "NOT APPLIED" branch refuses a
 # to/until/for/... continuation while the self-status forms ("not yet applied", "awaiting form") stay.
 _SELF_NOT_APPLIED = re.compile(
     r"\bnot yet applied\b|\bawaiting (?:the )?form\b"
     r"|\bNOT[ _]APPLIED\b(?!\s+(?:to|until|for|before|since|as of|by|in|when|elsewhere)\b)", re.I)
-DEAD = re.compile(r"\brejected\b|\bwithdrawn\b|\bclosed\b|\bpassed\b|\bdead\b", re.I)
+# A dossier's own statement that this application is over: a status or outcome line, a status heading
+# or line of its own, a dated rejected/withdrawn/closed/ghosted, or a sentence whose subject is the
+# role. Never the bare word, since "all gates passed", "dead link" and "closed captions" are ordinary
+# things for a live dossier to say, and reading them as dead hides an unsent application from every
+# check below. "passed" is the most exposed word, so it counts only on a status line of its own, a
+# dated line, an upper-case heading, or as "passed on this role".
+_DEAD_WORD = r"(?:rejected|withdrawn|closed|dead|ghosted)"
+_DEAD_START = r"^[ \t>*_#\-]*(?:[^\w\s]+[ \t]*)?"
+_DEAD_END = r"[*_` \t]*(?:$|[.,;(\u2013\u2014]|-[ \t]|:?[ \t]*20\d\d-\d\d-\d\d|on[ \t]+20\d\d-)"
+_NOT_IF = r"(?<!\bnot )(?<!never )(?<!\bif )(?<!when )(?<!once )(?<!unless )"
+_NOT_IF_DET = r"(?<!\bif the )(?<!when the )(?<!once the )(?<!\bif this )(?<!when this )(?<!once this )"
+_STATUS_LABEL = (_DEAD_START + r"(?:(?:current|application|final|dossier|role)[ \t]+)?(?:status|outcome)\b"
+                 r"[*_` \t]*[:=\-\u2013\u2014]+[*_` \t]*")
+DEAD = re.compile(
+    _STATUS_LABEL + r"[^\n]{0,40}?" + _NOT_IF + r"\b" + _DEAD_WORD + r"\b"
+    r"|" + _STATUS_LABEL + r"(?:[^\w\s]+[ \t]*)?passed\b(?=" + _DEAD_END + r"|[ \t]+on\b)"
+    r"|" + _DEAD_START + _DEAD_WORD + r"\b(?=" + _DEAD_END + r")"
+    r"|" + _DEAD_START + r"passed[ \t]+(?:on[ \t]+)?20\d\d-\d\d-\d\d"
+    r"|^#{1,6}[ \t]*(?:[^\w\s]+[ \t]*)?(?-i:PASSED)\b(?=" + _DEAD_END + r"|[ \t]+on\b)"
+    r"|" + _NOT_IF + r"\b(?:rejected|withdrawn|closed|ghosted)\b[*_`]*[ \t]*(?:on[ \t]+)?[:\-]?[ \t]*20\d\d-\d\d-\d\d"
+    r"|" + _NOT_IF + _NOT_IF_DET + r"\b(?:(?:this|the|my|our)[ \t]+)?"
+    r"(?:dossier|application|candidacy|role|posting|job|req|requisition|opening|position)s?[ \t]+"
+    r"(?:(?:is|was|has been|got|went|now|already)[ \t]+){0,2}" + _DEAD_WORD + r"\b(?![-\s]*(?:loop|door|caption|beta))"
+    r"|\bpassed on (?:(?:this|that|the)[ \t]+(?:role|job|posting|opening|position|req|one|company|offer)|it)\b",
+    re.I | re.M)
+# On a line that already carries a dated submission marker the question is narrower (was this a
+# submission that later died?), so the bare words count there, except a check that "passed".
+_SUBMIT_LINE_DEAD = re.compile(
+    r"\brejected\b|\bwithdrawn\b|\bclosed\b|\bdead\b|\bghosted\b|\bpassed\s+on\b|\bpassed\s+20\d\d", re.I)
+
+
+def _visible(text: str) -> str:
+    """A dossier as its reader sees it. The starter README's comment explains what to do "when this
+    dossier is dead (rejected/withdrawn)", and a status check must not read that as the status."""
+    return re.sub(r"(?s)<!--.*?-->", "", text)
+
+
 # A RECRUITER RÉSUMÉ-SEND is a legitimate terminal state that is NOT a portal application: an inbound
 # recruiter asks for a résumé, you send it, and there is no form and no cover-letter field at all.
 # Such a dossier has a rendered résumé PDF but will never have an "applied" tracker row or a cover
@@ -143,7 +212,6 @@ def sh(cmd: list[str]) -> tuple[int, str]:
         return -1, f"{type(e).__name__}: {e}"
 
 
-# --------------------------------------------------------------------------------------
 
 def ready_but_never_sent() -> list[Finding]:
     """A finished résumé PDF that never reached an employer.
@@ -164,7 +232,7 @@ def ready_but_never_sent() -> list[Finding]:
         for rec in re.split(r"\n\s*\{", src):
             fm = re.search(r'folder:\s*"(applications/[^"]+)"', rec)
             sm = re.search(r'status:\s*"([^"]+)"', rec)
-            if fm and sm and sm.group(1) in {"applied", "rejected", "interview", "offer", "passed"}:
+            if fm and sm and sm.group(1) in {"applied", "rejected", "interview", "offer", "passed", "ghosted"}:
                 sent_folders.add(fm.group(1).rstrip("/"))
 
     out: list[Finding] = []
@@ -179,7 +247,7 @@ def ready_but_never_sent() -> list[Finding]:
         blob = ""
         for f in (app, readme):
             if f.is_file():
-                blob += f.read_text(encoding="utf-8", errors="replace")
+                blob += _visible(f.read_text(encoding="utf-8", errors="replace"))
         if not blob:
             # A rendered résumé with NO application.md and NO README is MORE suspicious, not less:
             # it means no record of this application exists anywhere. The first version of this
@@ -198,6 +266,21 @@ def ready_but_never_sent() -> list[Finding]:
     return out
 
 
+def _tracker_dead_folders() -> set[str]:
+    """Dossier folder names whose tracker row says the application is over. The tracker is the source
+    of truth for status, so a dead row is dead whatever the dossier's prose says."""
+    dead: set[str] = set()
+    tracker = REPO / "pipeline" / "tracker.html"
+    if tracker.is_file():
+        src = tracker.read_text(encoding="utf-8", errors="replace")
+        for rec in re.split(r"\n\s*\{", src):
+            fm = re.search(r'folder:\s*"applications/([^"/]+)', rec)
+            sm = re.search(r'status:\s*"([^"]+)"', rec)
+            if fm and sm and sm.group(1) in {"rejected", "passed", "withdrawn", "closed", "ghosted"}:
+                dead.add(fm.group(1))
+    return dead
+
+
 def cover_missing() -> list[Finding]:
     """A dossier with a rendered résumé PDF but NO cover-letter PDF.
 
@@ -207,14 +290,15 @@ def cover_missing() -> list[Finding]:
     cover PDF. Dead dossiers (rejected/withdrawn/closed/passed, never applying) are exempt.
     """
     out: list[Finding] = []
+    dead_folders = _tracker_dead_folders()
     for pdf in sorted(REPO.glob("applications/*/resume/*.pdf")):
         d = pdf.parent.parent
-        if is_scaffold_dossier(d.name):
+        if is_scaffold_dossier(d.name) or d.name in dead_folders:
             continue
         blob = ""
         for f in (d / "application.md", d / "README.md"):
             if f.is_file():
-                blob += f.read_text(encoding="utf-8", errors="replace")
+                blob += _visible(f.read_text(encoding="utf-8", errors="replace"))
         if DEAD.search(blob) or _RESUME_SENT.search(blob):
             continue  # a dead dossier, or a recruiter résumé-send (no form, no cover field), needs no cover
         cover_dir = d / "cover-letter"
@@ -239,8 +323,14 @@ def _norm_ats_url(u: str) -> str:
         return ""
     u = u.strip().lower()
     u = re.sub(r"^https?://", "", u)
-    u = re.sub(r"[?#].*$", "", u)
-    u = u.rstrip("/")
+    # The job id can live in the QUERY (a company page that embeds its hiring system: /jobs/search?gh_jid=1234567).
+    # Stripping the whole query would make every posting on that page one key. Keep a query id when the path
+    # carries no id of its own.
+    qid = re.search(r"[?&](?:gh_jid|jid|jobid|job_id|token)=([0-9a-z-]{5,})", u)
+    path = re.sub(r"[?#].*$", "", u)
+    if qid and not re.search(r"\d{3,}|[0-9a-f]{8}-[0-9a-f]{4}", path):
+        path = path.rstrip("/") + "/jid-" + qid.group(1)
+    u = path.rstrip("/")
     # Collapse every Greenhouse board-host variant to one token in a SINGLE pass. Two sequential
     # str.replace()s cannot: "job-boards.greenhouse.io" contains "boards.greenhouse.io", so replacing
     # the latter re-introduces the "job-job-" typo it was meant to remove (the selftest caught this).
@@ -298,9 +388,12 @@ def duplicate_application() -> list[Finding]:
         return []
     src = tracker.read_text(encoding="utf-8", errors="replace")
 
-    APPLIED = {"applied", "rejected", "passed", "interview", "offer"}
+    APPLIED = {"applied", "rejected", "passed", "interview", "offer", "ghosted"}
     applied_url: dict[str, tuple[str, str, str]] = {}
     applied_cr: dict[tuple[str, str], tuple[str, str, str]] = {}
+    # every req key seen under one company+title, so a same-title row on a DIFFERENT, known req is not a
+    # duplicate (a large employer posts many openings under one title).
+    applied_cr_keys: dict[tuple[str, str], list[str]] = {}
     rows: list[dict] = []
     for rec in re.split(r"\n\s*\{", src):
         co = re.search(r'co:\s*"([^"]*)"', rec)
@@ -322,6 +415,8 @@ def duplicate_application() -> list[Finding]:
                     applied_url[k] = (row["co"], row["role"], row["status"])
             applied_cr[(row["co"].lower().strip(), row["role"].lower().strip())] = (
                 row["co"], row["role"], row["status"])
+            applied_cr_keys.setdefault((row["co"].lower().strip(), row["role"].lower().strip()), []).append(
+                _req_key(row["apply"]) or _req_key(row["jd"]))
 
     out: list[Finding] = []
     for row in rows:
@@ -338,6 +433,9 @@ def duplicate_application() -> list[Finding]:
                 "If it is genuinely a different req, the apply URL is wrong; fix it."))
             continue
         crhit = applied_cr.get((row["co"].lower().strip(), row["role"].lower().strip()))
+        other_keys = applied_cr_keys.get((row["co"].lower().strip(), row["role"].lower().strip()), [])
+        if crhit and key and other_keys and all(k and k != key for k in other_keys):
+            crhit = None  # same title, but every earlier row is a known, different req: a new posting
         if crhit:
             out.append(Finding(
                 "MEDIUM", "duplicate-application",
@@ -365,21 +463,13 @@ def status_contradicts_itself() -> list[Finding]:
     header still says "active" and a passed one whose body still reads "in progress" are the standing
     examples of the shape this exemption covers.
     """
-    dead_folders: set[str] = set()
-    tracker = REPO / "pipeline" / "tracker.html"
-    if tracker.is_file():
-        src = tracker.read_text(encoding="utf-8", errors="replace")
-        for rec in re.split(r"\n\s*\{", src):
-            fm = re.search(r'folder:\s*"applications/([^"/]+)', rec)
-            sm = re.search(r'status:\s*"([^"]+)"', rec)
-            if fm and sm and sm.group(1) in {"rejected", "passed", "withdrawn", "closed"}:
-                dead_folders.add(fm.group(1))
+    dead_folders = _tracker_dead_folders()
 
     out: list[Finding] = []
     for f in sorted(REPO.glob("applications/*/README.md")) + sorted(REPO.glob("applications/*/application.md")):
         if f.parent.name in dead_folders or is_scaffold_dossier(f.parent.name):
             continue
-        text = f.read_text(encoding="utf-8", errors="replace")
+        text = _visible(f.read_text(encoding="utf-8", errors="replace"))
         # BIDIRECTIONAL, whole-doc. A head/body split only catches NOT-APPLIED-in-header +
         # SUBMITTED-in-body. In real use a fill wave can produce the REVERSE just as easily: a
         # dated "applied" banner near the top while a status ROW further down still reads "NOT YET
@@ -415,13 +505,13 @@ _FUTURE_LEADIN = re.compile(
 
 def _own_status_line(blob: str, m) -> bool:
     """True when the dated marker sits at the START of its own line's meaningful content, a
-    heading/status line the dossier declares about ITSELF ('## ✅ SUBMITTED 2026-08-19 by hand',
+    heading/status line the dossier declares about ITSELF ('## ✅ SUBMITTED 2031-05-14 by hand',
     '**Status: SUBMITTED …**', '**Applied on:** …'), NOT a submission attributed to a SIBLING role
     in mid-sentence prose.
 
-    In real use, a dossier that cross-references a sibling role in prose can carry that sibling's
-    own dated submission mid-sentence: '(a related role, submitted 2026-08-27)', or
-    '$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets a different posting.' Every such
+    A dossier that cross-references a sibling role in prose can carry that sibling's own dated
+    submission mid-sentence: '(the weekday post, submitted 2031-05-24)', or
+    'the Tulsa depot opening, SUBMITTED 2031-05-14. **This** one is the Reno depot.' Every such
     marker is buried MID-LINE inside a reference to a DIFFERENT role; every REAL submission record
     BEGINS its line with the marker (a `##`/`**Status:` heading). Anchoring to the line start
     separates the two.
@@ -438,8 +528,8 @@ def _own_status_line(blob: str, m) -> bool:
 def _dated_submission(blob: str):
     """The first REAL dated-submission marker in a dossier, or None.
 
-    A submission record here is a heading or status line carrying a date: '✅ SUBMITTED 2026-08-27
-    by hand', '**Applied on:** 2026-07-22', 'applied_on: 2026-07-23'. Future-tense prose ('To be
+    A submission record here is a heading or status line carrying a date: '✅ SUBMITTED 2031-05-24
+    by hand', '**Applied on:** 2031-04-11', 'applied_on: 2031-04-12'. Future-tense prose ('To be
     submitted by hand once it's ready') is not one, so a ~24-char future lead-in vetoes the match;
     and a SIBLING role's submission mentioned in this dossier's prose is not one either, so the
     marker must sit at the start of its own status/heading line (`_own_status_line`).
@@ -452,11 +542,11 @@ def _dated_submission(blob: str):
         # A submission marker on a line that ALSO records rejected/withdrawn/closed/passed/dead is
         # describing a DEAD role, a sibling thread, or a submit-then-reject, never an undercount to
         # flip to "applied". A dossier can restate its own dead sibling's status line-start as
-        # "**Submitted 2026-07-21, rejected 2026-07-23.** Dead, read-only, never rebuilt", which the
+        # "**Submitted 2031-03-04, rejected 2031-03-09.** Dead, read-only, not touched again", which the
         # line-start anchor alone would misread as a live submission.
         ls = blob.rfind("\n", 0, m.start()) + 1
         le = blob.find("\n", m.end())
-        if DEAD.search(blob[ls: le if le != -1 else len(blob)]):
+        if _SUBMIT_LINE_DEAD.search(blob[ls: le if le != -1 else len(blob)]):
             continue
         return m
     return None
@@ -465,7 +555,7 @@ def _dated_submission(blob: str):
 def tracker_behind_dossier() -> list[Finding]:
     """A dossier that records a REAL submission while its tracker row still says lead/active.
 
-    This guards against a real failure mode: a tracker regeneration that reverts `applied → lead`
+    This guards against a failure mode: a tracker regeneration that reverts `applied → lead`
     without reading the dossiers first, so real submissions sit mislabeled as leads: an undercount of
     the ONE metric §0 cares about, and it makes throughput's own `ready-but-never-sent` flag fire on
     applications that had ALREADY gone out. There is no script that reverts a status (crawl.py only
@@ -485,7 +575,7 @@ def tracker_behind_dossier() -> list[Finding]:
         return []
     src = tracker.read_text(encoding="utf-8", errors="replace")
     PRESUBMIT = {"lead", "sponsor", "active"}
-    SUBMITTED_STATUS = {"applied", "rejected", "interview", "offer", "passed"}
+    SUBMITTED_STATUS = {"applied", "rejected", "interview", "offer", "passed", "ghosted"}
     # Guard 2: a folder already linked to a submitted-status row is NOT undercounted, a SEPARATE
     # lead/active row for the SAME folder is a stale DUPLICATE row (the tracker carries both an
     # "applied" row and a "lead" row for one dossier), so its own submission record is real but the
@@ -511,7 +601,7 @@ def tracker_behind_dossier() -> list[Finding]:
         blob = ""
         for f in (d / "application.md", d / "README.md"):
             if f.is_file():
-                blob += f.read_text(encoding="utf-8", errors="replace")
+                blob += _visible(f.read_text(encoding="utf-8", errors="replace"))
         m = _dated_submission(blob)
         if not m:
             continue
@@ -527,7 +617,7 @@ def tracker_behind_dossier() -> list[Finding]:
 def tracker_renders() -> list[Finding]:
     """The tracker's embedded <script> must PARSE, or the page is blank in a browser.
 
-    A real defect this guards against: an unescaped double quote inside one NETWORK row's name (a
+    What this guards against: an unescaped double quote inside one NETWORK row's name (a
     nickname written in quotes) terminates the JS string, throws inside the <script>, and renders
     the whole tracker BLANK. hooks.py reads the arrays by regex and never executes the JS, so every
     session's counts stay correct and the break is invisible to all of them. The fix is one
@@ -724,7 +814,7 @@ def unpushed() -> list[Finding]:
 # "<you> filled/typed" if OPERATOR_NAME is set in config.py, else name-independent first-person
 # phrasing ("filled it myself"), sharpens with zero configuration required, same pattern as
 # _OPERATOR_BY above.
-_OPERATOR_FILLED = (re.escape(config.OPERATOR_NAME) + r" (?:filled|typed)") if config.OPERATOR_NAME \
+_OPERATOR_FILLED = (re.escape(_OPERATOR_NAME) + r" (?:filled|typed)") if _OPERATOR_NAME \
     else r"(?:filled|typed) it myself"
 
 AGENT_FILL = re.compile(r"agent (?:filled|drove)|chrome-devtools|automation (?:chrome|browser)", re.I)
@@ -786,7 +876,6 @@ def agent_fill_without_dom_evidence() -> list[Finding]:
     return out
 
 
-# --------------------------------------------------------------------------------------
 # Recruiter-list availability is an AUTH-WALLED-surface claim.
 #
 # A recruiter's own curated shortlist platform, of the kind several exist in the market, is something only the
@@ -805,11 +894,11 @@ _AVAIL_POS = re.compile(
 # degrades to name-agnostic phrasing, so a fresh clone's selftest exercises exactly what a default
 # install actually recognizes.
 _OPERATOR_VERIFY_WORDS = (
-    r"|\bper " + re.escape(config.OPERATOR_NAME) + r"\b"
-    r"|\b" + re.escape(config.OPERATOR_NAME) + r" (?:confirmed|could not|cannot|couldn'?t)\b"
-    r"|" + re.escape(config.OPERATOR_NAME) + r"'?s (?:live )?(?:check|screenshot)\b"
-    r"|\bconfirmed (?:by|via) " + re.escape(config.OPERATOR_NAME) + r"\b"
-) if config.OPERATOR_NAME else (
+    r"|\bper " + re.escape(_OPERATOR_NAME) + r"\b"
+    r"|\b" + re.escape(_OPERATOR_NAME) + r" (?:confirmed|could not|cannot|couldn'?t)\b"
+    r"|" + re.escape(_OPERATOR_NAME) + r"'?s (?:live )?(?:check|screenshot)\b"
+    r"|\bconfirmed (?:by|via) " + re.escape(_OPERATOR_NAME) + r"\b"
+) if _OPERATOR_NAME else (
     r"|\bper (?:me|the operator)\b"
     r"|\b(?:I|the operator) (?:confirmed|could not|cannot|couldn'?t)\b"
     r"|\bmy (?:live )?(?:check|screenshot)\b"
@@ -830,7 +919,9 @@ _AVAIL_VERIFIED = re.compile(
 # scripts/config.py), empty by default. "recruiter" is checked unconditionally below as the
 # generic fallback that already covers most cases; add your own platform's name in config.py
 # only if you use one by name and want the check to recognize it too.
-_RECRUITER_KEYWORDS = [kw.lower() for kw in config.RECRUITER_PLATFORM_KEYWORDS]
+_recruiter_setting = getattr(config, "RECRUITER_PLATFORM_KEYWORDS", ())
+_RECRUITER_KEYWORDS = ([str(kw).lower() for kw in _recruiter_setting]
+                       if isinstance(_recruiter_setting, (list, tuple, set)) else [])
 
 
 def _availability_claim_unsourced(source: str, freetext: str) -> bool:
@@ -872,7 +963,6 @@ def recruiter_availability_unsourced() -> list[Finding]:
     return out
 
 
-# --------------------------------------------------------------------------------------
 # A paste kit must be complete, and an ATS known to reject automation-browser submits needs one.
 #
 # Some ATS forms refuse a submit that comes from the automation browser (an "error verifying your
@@ -915,7 +1005,7 @@ def paste_kit_incomplete() -> list[Finding]:
     for app in sorted(REPO.glob("applications/*/application.md")):
         if is_scaffold_dossier(app.parent.name):
             continue
-        why = _paste_kit_problem(app.read_text(encoding="utf-8", errors="replace"), hosts)
+        why = _paste_kit_problem(_visible(app.read_text(encoding="utf-8", errors="replace")), hosts)
         if why:
             out.append(Finding(
                 "HIGH", "paste-kit-incomplete", f"{app.parent.name}: {why}",
@@ -926,7 +1016,6 @@ def paste_kit_incomplete() -> list[Finding]:
     return out
 
 
-# --------------------------------------------------------------------------------------
 # A work image sent to a person must have a recorded source, and must not be an outdated one.
 #
 # An image of your work attached to an application or a message (a screenshot, a snippet) is a
@@ -997,10 +1086,9 @@ CHECKS = [
 ]
 
 
-# --------------------------------------------------------------------------------------
 
 def selftest() -> int:
-    """Every case is a real shape from this repo. Includes a coverage assertion so a rule cannot
+    """Every case is a synthetic record shape. Includes a coverage assertion so a rule cannot
     be silently neutered while this still prints OK, the failure a red team proved on the other
     gates by deleting a fixture and watching the denominator shrink to match."""
     import tempfile, os, shutil
@@ -1012,41 +1100,59 @@ def selftest() -> int:
         passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
         results.append((label, ok, ""))
 
-    # SUBMITTED / NOT-APPLIED detection against the REAL strings found in this repo.
+    # SUBMITTED / NOT-APPLIED detection against the shapes a record takes.
     real_submitted = [
-        "SUBMITTED 2026-07-21 by hand", "**Applied on:** 2026-07-22 (early AM PT) \u2014 SUBMITTED",
-        "SUBMITTED 2026-07-22 (Ashby \u2014 success c", "applied_on: 2026-07-23",
+        "SUBMITTED 2031-04-10 by hand", "**Applied on:** 2031-03-05 (morning) \u2014 SUBMITTED",
+        "SUBMITTED 2031-04-11 (portal \u2014 thank-you p", "applied_on: 2031-04-12",
     ]
     for s in real_submitted:
         check(f"reads as submitted: {s[:38]!r}", bool(SUBMITTED.search(s)))
     check("reads as NOT applied: 'NOT APPLIED'", bool(NOT_APPLIED.search("Status: NOT APPLIED")))
     check("'not yet applied' also reads as not applied",
           bool(NOT_APPLIED.search("Status: not yet applied")))
-    check("a rejected dossier is not 'never sent'", bool(DEAD.search("Status: rejected 2026-07-14")))
+    check("a rejected dossier is not 'never sent'", bool(DEAD.search("Status: rejected 2031-04-03")))
+    check("a ghosted dossier is not 'never sent'", bool(DEAD.search("Status: ghosted 2031-04-03")))
+    for s in ("**Status:** REJECTED", "Status: passed", "Status: passed on this role, pay too low",
+              "Status: applied, then rejected", "## Rejected", "## \u274c REJECTED 2031-03-09", "## PASSED (too far)",
+              "Dead, read-only, not touched again.", "PASSED 2031-03-09", "Submitted 2031-03-04, rejected 2031-03-09.",
+              "We passed on this role.", "This posting is closed.", "The role was closed by Globex.",
+              "Application withdrawn"):
+        check(f"a real dead status: {s!r}", bool(DEAD.search(s)))
+    for s in ("All gates passed", "verify_claims passed on the final copy", "Result: passed", "Gate status: passed",
+              "Status: all gates passed", "Passed all five review lenses", "Closed captions on the training video",
+              "Closed-loop referral process", "Dead link fixed on page 2", "**Rejected:** the second opening line",
+              "Reviewed three drafts and rejected the second", "The ATS rejected my first upload",
+              "If the posting is closed, mark it here", "When the role is closed, say so",
+              "Status: posting not closed", "Deadline is 2031-03-09"):
+        check(f"not a dead status: {s!r}", not DEAD.search(s))
+    check("a dated submission line that says the gates passed is still a submission",
+          bool(_dated_submission("## SUBMITTED 2031-03-04 after all gates passed")))
+    check("a live paste-kit record saying 'all gates passed' is still checked for its handover",
+          _paste_kit_problem("All gates passed.\n## Paste kit\nNo link yet.\n", ("example.com",)) is not None)
     check("plain prose does not read as submitted",
           not SUBMITTED.search("We will submit once the operator confirms the salary field."))
-    # 🔴 the two fail-open bugs this gate shipped on its first live run, pinned permanently.
+    # 🔴 two fail-open shapes: a negated or future submission must not count as one.
     check("'NOT SUBMITTED' does NOT read as submitted",
-          not SUBMITTED.search("**NOT SUBMITTED.** Blocked on a pending go/no-go (sponsorship)."))
+          not SUBMITTED.search("**NOT SUBMITTED.** Waiting on the hiring manager to confirm the shift pattern."))
     check("'not yet submitted' does NOT read as submitted",
           not SUBMITTED.search("Status: not yet submitted"))
-    # 🔴 the four real dossier lines this check WRONGLY flagged on its first live run.
+    # Lines that mention submitting without recording a submission.
     check("'Nothing was submitted' is not a submission",
-          not SUBMITTED.search("Read-only in the browser. No field was filled. Nothing was submitted."))
+          not SUBMITTED.search("Only looked at the page. Every box is still blank and nothing was submitted."))
     check("'before this is submitted' is future tense, not a record",
           not SUBMITTED.search("Re-point into the platform team req before this is submitted"))
     check("an em dash right before 'NOT SUBMITTED' after a date does not read as submitted",
-          not SUBMITTED.search("form answers (as filled, 2026-07-21, REBUILD #2) \u2014 NOT SUBMITTED"))
+          not SUBMITTED.search("shift-lead form (typed in on 2031-04-10, draft two) \u2014 NOT SUBMITTED"))
     check("a real dated record still reads as submitted",
-          bool(SUBMITTED.search("✅ SUBMITTED 2026-07-22 by hand \u2014 success confirmation seen")))
+          bool(SUBMITTED.search("✅ SUBMITTED 2031-04-11 by hand \u2014 thank-you page shown")))
 
-    # The self-contradiction shape, exactly as it appears in real dossiers.
+    # The self-contradiction shape.
     with tempfile.TemporaryDirectory() as td:
         d = Path(td) / "applications" / "probe"
         d.mkdir(parents=True)
         (d / "README.md").write_text(
             "# Probe \u2014 Operations Analyst\nStatus: **NOT APPLIED**\n" + "\n" * 12 +
-            "✅ SUBMITTED 2026-07-22 by hand\n", encoding="utf-8")
+            "✅ SUBMITTED 2031-04-11 by hand\n", encoding="utf-8")
         global REPO
         saved = REPO
         REPO = Path(td)
@@ -1054,25 +1160,25 @@ def selftest() -> int:
             hits = status_contradicts_itself()
             check("catches header NOT APPLIED over body SUBMITTED", len(hits) == 1)
             (d / "README.md").write_text(
-                "# Probe\nStatus: **SUBMITTED 2026-07-22**\n" + "\n" * 12 + "All good.\n",
+                "# Probe\nStatus: **SUBMITTED 2031-04-11**\n" + "\n" * 12 + "All good.\n",
                 encoding="utf-8")
             check("a consistent dossier is not flagged", len(status_contradicts_itself()) == 0)
             # a DEAD dossier (tracker rejected/passed) is exempt: read-only per CLAUDE.md §13.8 rule 3,
             # and a wave never re-works it, so its internal contradiction is harmless once dead.
             (d / "README.md").write_text(
-                "# Probe\nStatus: **NOT APPLIED**\n" + "\n" * 12 + "✅ SUBMITTED 2026-07-22 by hand\n",
+                "# Probe\nStatus: **NOT APPLIED**\n" + "\n" * 12 + "✅ SUBMITTED 2031-04-11 by hand\n",
                 encoding="utf-8")
             pl = Path(td) / "pipeline"
             pl.mkdir(parents=True, exist_ok=True)
             (pl / "tracker.html").write_text(
                 'APPLICATIONS=[\n  {co:"P", role:"D", status:"rejected", folder:"applications/probe"}\n]\n',
                 encoding="utf-8")
-            check("a DEAD (rejected) dossier's header/body contradiction is exempt (wall #3)",
+            check("a DEAD (rejected) dossier's header/body contradiction is exempt",
                   len(status_contradicts_itself()) == 0)
         finally:
             REPO = saved
 
-    # The agent-fill evidence rule, against the real vocabulary these dossiers use.
+    # The agent-fill evidence rule.
     check("an agent-driven fill WITHOUT evidence is flagged",
           bool(AGENT_FILL.search("The agent filled this form in the automation Chrome."))
           and not DOM_EVIDENCE.search("The agent filled this form in the automation Chrome."))
@@ -1083,18 +1189,18 @@ def selftest() -> int:
                          "## Paste kit\nhttps://jobs.example.com/acme/123/apply"))
     check("a paste kit whose ATS rejects automation-browser submits is exempt",
           not_agent_fill("Paste kit: this ATS rejects a submit from the automation browser "
-                         "(\"There was an error verifying your application\")."))
+                         "(it answers \"submission could not be verified\")."))
     check("a BARE paste-kit mention with no reason is NOT exempt (the fill law changed)",
           not not_agent_fill("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
     check("...so that bare paste-kit record with no DOM evidence is still flagged",
           bool(AGENT_FILL.search("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
           and not DOM_EVIDENCE.search("Agent filled via chrome-devtools. PASTE KIT below for the operator."))
     check("'no agent filled this form' is exempt, not a claim",
-          not_agent_fill("No agent filled this form, so there is no agent-side fill to verify"))
+          not_agent_fill("No agent filled this form; the applicant typed every box"))
 
     # Paste kit completeness, and the configured ATS hosts that need one.
-    _filled = ("- Apply URL: https://jobs.example-ats.com/globex/149b3408-3334/apply\n"
-               "## Exact form answers (as filled 2026-01-02; NOT submitted, the user submits)\n"
+    _filled = ("- Apply URL: https://jobs.example-ats.com/globex/aaaa1111-2222/apply\n"
+               "## Exact form answers (as filled 2031-02-11; NOT submitted, the user submits)\n"
                "- Full name: Jordan Rivera\n")
     _hosts = ("example-ats.com",)
     check("paste-kit: a filled, unsent form on a configured host with no kit is flagged",
@@ -1103,7 +1209,7 @@ def selftest() -> int:
           _paste_kit_problem(_filled, ()) is None)
     check("paste-kit: a kit with the direct link and a named reason passes",
           _paste_kit_problem(_filled + "\n## Paste kit\nReason: this ATS rejects submits from the automation "
-                             "browser.\nhttps://jobs.example-ats.com/globex/149b3408-3334/apply\n", _hosts) is None)
+                             "browser.\nhttps://jobs.example-ats.com/globex/aaaa1111-2222/apply\n", _hosts) is None)
     check("paste-kit: a kit heading with no URL in it is flagged",
           _paste_kit_problem(_filled + "\n## Paste kit\nReason: CAPTCHA.\n- Full name: Jordan Rivera\n", _hosts)
           is not None)
@@ -1111,7 +1217,7 @@ def selftest() -> int:
           _paste_kit_problem(_filled + "\n## Paste kit\nhttps://jobs.example-ats.com/globex/1/apply\n", ())
           is not None)
     check("paste-kit: a submitted record is quiet",
-          _paste_kit_problem("**Status: ✅ APPLIED 2026-01-03**\n" + _filled, _hosts) is None)
+          _paste_kit_problem("**Status: ✅ APPLIED 2031-02-12**\n" + _filled, _hosts) is None)
     check("paste-kit: an unfilled record on a configured host is quiet",
           _paste_kit_problem("https://jobs.example-ats.com/globex/abc/apply\n"
                              "## Exact form answers: NOT captured yet\n", _hosts) is None)
@@ -1119,7 +1225,7 @@ def selftest() -> int:
     # Work samples: provenance required, configured outdated sources flagged.
     _stale_pats = (r"example\.com/old-case/",)
     _old = "- `2-dashboard.png`\n  source: https://example.com/old-case/dashboard.png (live page)\n"
-    _new = ("- `2-dashboard-new.png`\n  source: local build v2, captured 2026-01-02\n"
+    _new = ("- `2-dashboard-new.png`\n  source: local build v2, captured 2031-02-11\n"
             "  replaces: https://example.com/old-case/dashboard.png\n"
             "- `1-report.png`\n  source: https://example.com/case/report.webp\n")
     check("samples: an image from a configured outdated source is flagged",
@@ -1147,11 +1253,42 @@ def selftest() -> int:
             (d / "cover-letter" / "Cover.pdf").write_text("pdf", encoding="utf-8")
             check("a bundle WITH a cover PDF is not flagged", len(cover_missing()) == 0)
             (d / "cover-letter" / "Cover.pdf").unlink()
-            (d / "README.md").write_text("# Probe\nStatus: rejected 2026-07-14\n", encoding="utf-8")
+            # The starter dossier as shipped: its README comment says "dead", "rejected", "withdrawn".
+            # A copy that has removed it still tests the rule with the same comment shape.
+            tpl = Path(__file__).resolve().parents[1] / "applications" / "TEMPLATE-company-role"
+            for name, fallback in (("README.md", "# Probe\n<!-- When this dossier is dead (rejected/withdrawn), say so. -->\n"),
+                                   ("application.md", "**Status: dossier built; form NOT filled, NOT submitted.**\n")):
+                src = tpl / name
+                (d / name).write_text(src.read_text(encoding="utf-8") if src.is_file() else fallback, encoding="utf-8")
+            check("the shipped starter dossier with a résumé PDF is cover-missing, not read as dead",
+                  len(cover_missing()) == 1)
+            check("the shipped starter dossier with a résumé PDF is ready-but-never-sent",
+                  len(ready_but_never_sent()) == 1)
+            (d / "README.md").write_text("# Probe\n<!-- rejected -->\nStatus: rejected 2031-04-03\n", encoding="utf-8")
+            check("a status outside the comment still reads as dead", len(cover_missing()) == 0)
+            (d / "application.md").unlink()
+            (d / "README.md").write_text("# Probe\nStatus: rejected 2031-04-03\n", encoding="utf-8")
             check("a DEAD dossier needs no cover (exempt)", len(cover_missing()) == 0)
+            (d / "README.md").write_text("# Probe\nFinished.\n", encoding="utf-8")
+            (d / "application.md").write_text("# Application\nAll gates passed. Form not opened yet.\n", encoding="utf-8")
+            check("an unsent dossier saying 'all gates passed' is still ready-but-never-sent",
+                  len(ready_but_never_sent()) == 1)
+            check("an unsent dossier saying 'all gates passed' is still cover-missing", len(cover_missing()) == 1)
+            (d / "application.md").write_text("# Application\n**Status:** REJECTED 2031-03-09\n", encoding="utf-8")
+            check("a really rejected dossier is not ready-but-never-sent", len(ready_but_never_sent()) == 0)
+            check("a really rejected dossier needs no cover", len(cover_missing()) == 0)
+            (d / "application.md").write_text("# Application\nAll gates passed.\n", encoding="utf-8")
+            tracker_probe = Path(td) / "pipeline" / "tracker.html"
+            tracker_probe.parent.mkdir(parents=True, exist_ok=True)
+            tracker_probe.write_text(
+                f'APPLICATIONS=[\n  {{co:"P", role:"D", status:"rejected", folder:"applications/{d.name}"}}\n]\n',
+                encoding="utf-8")
+            check("a tracker-rejected dossier needs no cover whatever its prose says", len(cover_missing()) == 0)
+            tracker_probe.unlink()
+            (d / "application.md").unlink()
             # A recruiter résumé-send (no form, so no cover, and it WAS sent) is exempt from both.
             (d / "README.md").write_text(
-                "# Probe\n> ✅ RÉSUMÉ SENT 2026-08-01 \u2014 recruiter résumé-send, not a portal application\n",
+                "# Probe\n> ✅ RÉSUMÉ SENT 2031-05-06 \u2014 sent straight to the agency, no form\n",
                 encoding="utf-8")
             check("a recruiter RÉSUMÉ-SEND needs no cover (exempt)", len(cover_missing()) == 0)
             check("a recruiter RÉSUMÉ-SEND is not flagged 'never sent' (it was sent)",
@@ -1170,7 +1307,7 @@ def selftest() -> int:
         newurl = "https://jobs.ashbyhq.com/beta/7c1c-2f44"
         # A shared NON-REQ value must never collide two distinct roles into a "do NOT re-apply"
         # HIGH: a shared login page, a generic careers landing page, and a free-text recruiter
-        # placeholder are the three real false-positive shapes this key is designed against.
+        # placeholder are the three false-positive shapes this key is designed against.
         loginwall = "https://account.example-platform.com/authenticate?continue=x"
         careers = "https://www.example-health.com/about-us/careers"
         placeholder = "via a recruiter, do not cold-apply"
@@ -1184,6 +1321,10 @@ def selftest() -> int:
             '{co:"Northwind", role:"Nurse Educator", status:"active", apply:"' + careers + '", jd:"", folder:"applications/northwind-co"}',
             '{co:"Umbrella", role:"Founding Analyst", status:"applied", apply:"' + placeholder + '", jd:"", folder:"applications/umbrella-co"}',
             '{co:"Hooli", role:"Data Analyst", status:"active", apply:"' + placeholder + '", jd:"", folder:"applications/hooli-co"}',
+            '{co:"Umbrella", role:"Registered Nurse", status:"passed", apply:"https://umbrella.wd5.myworkdayjobs.com/External/job/X/Registered-Nurse_R-1001", jd:"", folder:""}',
+            '{co:"Umbrella", role:"Registered Nurse", status:"lead", apply:"https://umbrella.wd5.myworkdayjobs.com/External/job/X/Registered-Nurse_R-2002", jd:"", folder:"applications/umbrella-new-req"}',
+            '{co:"Initech", role:"Warehouse Lead", status:"ghosted", apply:"", jd:"", folder:"applications/initech-old"}',
+            '{co:"Initech", role:"Warehouse Lead", status:"lead", apply:"https://jobs.ashbyhq.com/initech/1a2b3c4d-1111-2222-3333-444455556666", jd:"", folder:"applications/initech-new"}',
         ]
         (pl / "tracker.html").write_text("APPLICATIONS=[\n  " + ",\n  ".join(rows) + "\n]\n", encoding="utf-8")
         saved = REPO
@@ -1192,6 +1333,14 @@ def selftest() -> int:
             hits = duplicate_application()
             check("a re-application to an already-applied req is caught by URL (HIGH), across host/typo/query normalization",
                   any(h.severity == "HIGH" and "acme-dup" in h.what for h in hits))
+            check("two postings that differ only in ?gh_jid= are different reqs",
+                  _req_key("https://example.com/jobs/search?gh_jid=1234567") != _req_key("https://example.com/jobs/search?gh_jid=7654321"))
+            check("a job id in the path still wins: a tracking query id does not split one req",
+                  _req_key("https://boards.greenhouse.io/acme/jobs/123?gh_jid=99999") == _req_key("https://job-boards.greenhouse.io/acme/jobs/123"))
+            check("same company+title on a DIFFERENT known req is not a duplicate",
+                  not any("umbrella-new-req" in h.what for h in hits))
+            check("same company+title where the earlier (ghosted) row has no req URL still warns (MEDIUM)",
+                  any(h.severity == "MEDIUM" and "initech-new" in h.what for h in hits))
             check("a genuinely new req is NOT flagged as a duplicate",
                   not any("beta-new" in h.what for h in hits))
             check("two companies sharing a login/auth wall URL do NOT collide into a HIGH duplicate",
@@ -1207,65 +1356,65 @@ def selftest() -> int:
     src_para = "recruiter (Jordan Rivera / Acme Staffing, curated list)"
     check("an unsourced 'AVAILABLE on a recruiter list' claim is caught",
           _availability_claim_unsourced(src_para,
-              "AVAILABLE 2026-08-20 on the curated list; in the recruiter's next-round set. Optional second submission alongside Beta Co."))
-    check("a corrected row (the operator's own live check, NOT FOUND) is clean",
+              "AVAILABLE 2031-05-15 on the curated list; part of the agency's spring batch. Could go in beside Beta Co."))
+    check("a corrected row (NOT FOUND in the portal) is clean",
           not _availability_claim_unsourced(src_para,
-              "NOT FOUND on the list per the operator's live check (2026-08-26) \u2014 could not find this role on the list."))
+              "NOT FOUND in the agency's portal on 2031-05-23 \u2014 could not find this opening there."))
     check("a 'NOT ON THE LIST (operator screenshot)' row is clean",
           not _availability_claim_unsourced(src_para,
-              "NOT ON THE CURRENT LIST (operator's 2026-08-20 screenshot shows three other companies). Replaced by Beta Co."))
+              "NOT ON THE CURRENT LIST (a 2031-05-15 screenshot shows other clinics). Swapped for Beta Co."))
     check("a descriptive 'skill-match on the recruiter's list' (no availability claim) is clean",
-          not _availability_claim_unsourced(src_para, "TRUEST skill-match on the recruiter's list. Pursuing their next set."))
+          not _availability_claim_unsourced(src_para, "Closest fit on the recruiter's list. Waiting for the next batch."))
     check("an availability claim WITH an operator screenshot source is clean",
-          not _availability_claim_unsourced("recruiter (Jordan, Acme Staffing)", "AVAILABLE on the list (operator screenshot 2026-08-20)."))
+          not _availability_claim_unsourced("recruiter (Jordan, Acme Staffing)", "AVAILABLE on the list (screenshot from 2031-05-15)."))
     check("a non-recruiter source is out of scope (no false positive on crawl finds)",
-          not _availability_claim_unsourced("crawl-jobs", "role AVAILABLE now, still open"))
+          not _availability_claim_unsourced("crawl-jobs", "opening AVAILABLE now, taking names"))
 
     # tracker-behind-dossier. The tight detector must accept a dated record and REJECT the
     # not-yet-submitted shape ("To be submitted by hand once ready", a genuinely-unsent dossier) that
     # the looser SUBMITTED reads as sent because "by hand" is in its matched range.
-    check("a dated 'SUBMITTED 2026-08-27 by hand' reads as a real submission",
-          bool(_dated_submission("## ✅ SUBMITTED 2026-08-27 by hand (DOM-confirmed).")))
-    check("'**Applied on:** 2026-07-22' reads as a real submission",
-          bool(_dated_submission("**Applied on:** 2026-07-22 (early AM PT)")))
+    check("a dated 'SUBMITTED 2031-05-24 by hand' reads as a real submission",
+          bool(_dated_submission("## ✅ SUBMITTED 2031-05-24 by hand (read back on the page).")))
+    check("'**Applied on:** 2031-04-11' reads as a real submission",
+          bool(_dated_submission("**Applied on:** 2031-03-05 (morning)")))
     check("the not-yet-submitted shape 'To be submitted by hand once ready' does NOT read as submitted",
           not _dated_submission("- Not yet applied. To be submitted by hand once ready"))
-    check("'will be submitted 2026-09-01' (future tense + a date) does NOT read as submitted",
-          not _dated_submission("The form will be submitted 2026-09-01 once the operator reviews it."))
-    check("'NOT SUBMITTED: dossier building' does NOT read as submitted",
-          not _dated_submission("**Status: NOT SUBMITTED \u2014 dossier building.**"))
+    check("'will be submitted 2031-06-02' (future tense + a date) does NOT read as submitted",
+          not _dated_submission("The form goes in later and will be submitted 2031-06-02 after a last read."))
+    check("'NOT SUBMITTED: still drafting' does NOT read as submitted",
+          not _dated_submission("**Status: NOT SUBMITTED \u2014 still drafting.**"))
     # A SIBLING role's dated submission mentioned in this dossier's PROSE is not THIS dossier's
-    # submission. The real false positives all had the marker buried MID-LINE inside a cross-
-    # reference to a different role; a real submission record BEGINS its own line.
-    check("a sibling '(a related role, submitted 2026-08-27)' mid-line is NOT this dossier's submission",
-          not _dated_submission("This role is distinct from `sibling-role` (a related role, submitted 2026-08-27)."))
-    check("a sibling '(Growth Analytics,\" SUBMITTED 2026-08-19)' mid-line is NOT a submission",
-          not _dated_submission('Different from `applications/x-growth` (Growth Analytics," SUBMITTED 2026-08-19).'))
-    check("'$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets ...' is NOT a submission",
-          not _dated_submission("$190K-$290K, SUBMITTED 2026-08-19. **This** dossier targets a different posting."))
-    check("'Submitted 2026-07-21, rejected 2026-07-23. Dead,' mid-prose is NOT a submission",
-          not _dated_submission("A prior thread there, Submitted 2026-07-21, rejected 2026-07-23. Dead,"))
-    check("'**Submitted 2026-07-21, rejected ...** Dead, read-only' (line-start but DEAD) is NOT a submission",
-          not _dated_submission("**Submitted 2026-07-21, rejected 2026-07-23.** Dead, read-only, never rebuilt."))
-    check("the dossier's OWN heading '## ✅ SUBMITTED 2026-08-19 - submitted via the ATS' still reads as one",
-          bool(_dated_submission("## ✅ SUBMITTED 2026-08-19 - submitted via the ATS; success page seen")))
+    # submission: the marker sits MID-LINE inside a cross-reference to a different role, while a
+    # record of a submission BEGINS its own line.
+    check("a sibling '(the weekday post, submitted ...)' mid-line is NOT this dossier's submission",
+          not _dated_submission("Separate from `acme-days` (the weekday post, submitted 2031-05-24)."))
+    check("a sibling '(Night Charge Nurse,\" SUBMITTED ...)' mid-line is NOT a submission",
+          not _dated_submission('Not the opening at `applications/x-nights` (Night Charge Nurse," SUBMITTED 2031-05-14).'))
+    check("'the Tulsa depot opening, SUBMITTED ... **This** one ...' is NOT a submission",
+          not _dated_submission("the Tulsa depot opening, SUBMITTED 2031-05-14. **This** one is the Reno depot."))
+    check("'Submitted 2031-03-04, rejected 2031-03-09. Dead,' mid-prose is NOT a submission",
+          not _dated_submission("An older thread with Hooli, Submitted 2031-03-04, rejected 2031-03-09. Dead,"))
+    check("'**Submitted 2031-03-04, rejected ...** Dead, read-only' (line-start but DEAD) is NOT a submission",
+          not _dated_submission("**Submitted 2031-03-04, rejected 2031-03-09.** Dead, read-only, not touched again."))
+    check("the dossier's OWN heading '## ✅ SUBMITTED ... - sent through the portal' still reads as one",
+          bool(_dated_submission("## ✅ SUBMITTED 2031-05-14 - sent through the portal; thank-you page shown")))
     with tempfile.TemporaryDirectory() as td:
         pl = Path(td) / "pipeline"
         pl.mkdir(parents=True)
         for name, body in (
             # the folder:null-decoy shape: a lead row whose object carries a folder:null key BEFORE
             # the real folder key: the exact structure a naive "has a folder key" check would miss.
-            ("acme-analyst", "**Status: SUBMITTED 2026-08-27 by hand (DOM-confirmed).**\n"),
+            ("acme-analyst", "**Status: SUBMITTED 2031-05-24 by hand (read back on the page).**\n"),
             ("beta-analyst", "**Status: NOT SUBMITTED.**\n- To be submitted by hand once ready.\n"),
-            ("globex-analyst", "✅ SUBMITTED 2026-08-01 by hand \u2014 success page seen\n"),
+            ("globex-analyst", "✅ SUBMITTED 2031-05-06 by hand \u2014 thank-you page shown\n"),
             # Guard 1: this dossier's own status is NOT submitted; the only dated marker is a
             # SIBLING role's submission in prose. Must NOT be flagged.
             ("delta-analyst",
              "**Status: DOSSIER BUILT ONLY, NOT submitted.**\n"
-             "Distinct from `applications/delta-growth` (Growth Analytics, SUBMITTED 2026-08-19).\n"),
+             "Not the opening at `applications/delta-nights` (Night Shift Lead, SUBMITTED 2031-05-14).\n"),
             # Guard 2: this dossier DID submit (own status line) but its folder ALSO carries an
             # `applied` row: a stale duplicate lead row, not an undercount.
-            ("northwind-analyst", "## ✅ SUBMITTED 2026-08-20 by hand (Ashby)\n"),
+            ("northwind-analyst", "## ✅ SUBMITTED 2031-05-15 by hand (portal)\n"),
         ):
             dd = Path(td) / "applications" / name
             dd.mkdir(parents=True)
@@ -1369,6 +1518,34 @@ def selftest() -> int:
     missing = registered - exercised
     check(f"every registered check is exercised (missing: {sorted(missing) or 'none'})", not missing)
 
+    # No tracker, or a broken config.py: said plainly, exit 3, never CLEAN and never a traceback.
+    import subprocess
+    def _run_copy(config_body: str | None, tracker: bool) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as td:
+            scripts = Path(td) / "scripts"
+            scripts.mkdir()
+            shutil.copy(Path(__file__), scripts / "throughput.py")
+            if config_body is not None:
+                (scripts / "config.py").write_text(config_body, encoding="utf-8")
+            if tracker:
+                (Path(td) / "pipeline").mkdir()
+                (Path(td) / "pipeline" / "tracker.html").write_text("APPLICATIONS=[\n]\nNETWORK=[\n]\n", encoding="utf-8")
+            r = subprocess.run([sys.executable, str(scripts / "throughput.py")], capture_output=True, text=True)
+            return r.returncode, r.stdout + r.stderr
+    rc, out = _run_copy(None, False)
+    check("no tracker: says not checked and exits 3, no CLEAN, no traceback",
+          rc == 3 and out.strip() == NO_TRACKER)
+    rc, out = _run_copy(None, True)
+    check("a tracker with no rows and no config.py still runs the checks (exit 0)", rc == 0 and "CLEAN" in out)
+    rc, out = _run_copy("X = 1\nOPERATOR_NAME = = 'Jordan'\n", True)
+    check("broken config.py (syntax): exit 3, names the file and line 2, no traceback",
+          rc == 3 and "scripts/config.py line 2" in out and "Traceback" not in out)
+    rc, out = _run_copy("X = 1\n\nY = undefined_name\n", True)
+    check("broken config.py (error while it runs): exit 3, names line 3, no traceback",
+          rc == 3 and "scripts/config.py line 3" in out and "Traceback" not in out)
+    rc, out = _run_copy("OPERATOR_NAME = 5\nSITE_CHECKOUT_PATH = 7\n", True)
+    check("settings of the wrong type or missing ones do not crash it", rc == 0 and "Traceback" not in out)
+
     print("throughput.py selftest: real shapes from this repo\n")
     for label, ok, _ in results:
         print(f"  {'✓' if ok else '✗'} {label}")
@@ -1389,9 +1566,19 @@ def live_site_status() -> str:
     return "live site: checked against " + (LIVE_RESUME_URL or str(SITE))
 
 
+NO_TRACKER = "throughput: no tracker yet: not checked (pipeline/tracker.html is missing)"
+
+
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
+    if CONFIG_ERROR:
+        print(f"throughput: not checked: {CONFIG_ERROR}")
+        print("  Fix that line and run this again. NOT a pass: nothing was checked.")
+        return 3
+    if not (REPO / "pipeline" / "tracker.html").is_file():
+        print(NO_TRACKER)
+        return 3
     findings: list[Finding] = []
     for _, fn in CHECKS:
         findings.extend(fn())

@@ -2,7 +2,6 @@
 """canon.py: the retired-claim checker. Guards the WELL, not just the door.
 
 WHY THIS EXISTS
----------------
 A career-automation repo generates outbound copy (resumes, cover letters, positioning notes)
 from a knowledge base about you. When a fact changes (a project's real scope gets corrected, a
 claim turns out to be an overclaim, a title turns out to map to the wrong job family), the fix
@@ -18,7 +17,6 @@ This file checks the source surfaces directly: the knowledge base, the résumé,
 own instruction files.
 
 THE HARD PART: assertion vs prohibition
-----------------------------------------
 A naive substring search is wrong, because the retired string appears constantly in CORRECT text
 too: a prohibition ("never say X"), a documented correction ("X is retired; say Y instead"), a
 historical record of the mistake itself. A checker that flags every occurrence fires mostly on
@@ -33,7 +31,6 @@ So every hit is classified:
                 warns.
 
 THE OTHER HARD PART: one claim has infinite spellings
-------------------------------------------------------
 A line-oriented ASCII regex guards exactly one spelling of a claim. In ordinary use, no exotic
 attack required, a retired claim keeps reappearing through mundane text transformations:
 
@@ -73,7 +70,6 @@ normalisation:
       legitimate and common markdown shape.
 
 SCOPE: stated out loud, because a silent scope is a lie by omission
---------------------------------------------------------------------
 SCANNED (the live surfaces an agent generates copy from): see `SCAN_GLOBS` below.
 NOT SCANNED, deliberately:
     ops/**            immutable history. Decision records legitimately quote the strings they
@@ -103,11 +99,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
+
 REPO = Path(__file__).resolve().parents[1]
 
-# --------------------------------------------------------------------------------------
 # THE REGISTRY
-# --------------------------------------------------------------------------------------
 # One entry per retired claim about YOU: a fact, framing, or number that used to be true (or used
 # to be your best phrasing) and has since been corrected. `pattern` is a case-insensitive regex,
 # matched against the NORMALISED view of the text (see `normalise()` below), so it catches the
@@ -130,9 +128,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 RETIRED: list[dict] = []
 
-# --------------------------------------------------------------------------------------
 # Context classification
-# --------------------------------------------------------------------------------------
 
 # Negation must be ABOUT the retired string, not merely on the same line. A checker that matched
 # any "not" anywhere in the line would MISS defects where the "not" belongs to a different clause
@@ -218,7 +214,6 @@ ASSERTION = re.compile(
     re.I,
 )
 
-# --------------------------------------------------------------------------------------
 # NORMALISATION: guard the CLAIM, not one spelling of it. See the module docstring for the
 # eight bypass classes this normalisation closes.
 #
@@ -226,10 +221,9 @@ ASSERTION = re.compile(
 # finding that cannot name the ORIGINAL line number is not actionable. So this is a hand-rolled
 # left-to-right pass rather than `unicodedata.normalize` + `html.unescape`: those give you a
 # string with no offset map, and a finding at "normalised offset 4127" is useless to a human.
-# --------------------------------------------------------------------------------------
 
 # Inline tags close up (`<b>Wid</b>get` IS "Widget"); everything else becomes a space, so
-# `<li>2019</li><li>75 million users` keeps the `\b` in front of 75. An unknown tag is treated as
+# `<li>2024</li><li>1 million active users` keeps the `\b` in front of 1. An unknown tag is treated as
 # block-level, the conservative choice, since joining across it could destroy a word boundary.
 INLINE_TAGS = {
     "a", "abbr", "b", "bdi", "bdo", "big", "cite", "code", "data", "del", "dfn", "em", "font",
@@ -395,7 +389,11 @@ class Finding:
 
 
 def _excluded(p: Path) -> bool:
-    s = "/" + str(p).replace("\\", "/").lstrip("/")
+    try:  # repo-relative, so a clone living under a folder named projects/ or archive/ is still swept
+        where = str(Path(p).resolve().relative_to(REPO.resolve()))
+    except ValueError:
+        where = str(p)
+    s = "/" + where.replace("\\", "/").lstrip("/")
     if any(part in s for part in EXCLUDE_PARTS):
         return True
     return any(s.endswith("/" + f) for f in EXCLUDE_FILES)
@@ -612,7 +610,6 @@ def live_surface() -> list[Path]:
     return sorted(seen.values())
 
 
-# --------------------------------------------------------------------------------------
 # Self-test: every rule must catch the claim it exists for, and must NOT fire on the correct
 # wording that legitimately sits beside it. A test that only proves the happy path is not a test;
 # a rule with no negative control is a false-positive generator.
@@ -622,7 +619,6 @@ def live_surface() -> list[Path]:
 # classes, the assertion/negation/banner classifier), the selftest below temporarily registers a
 # handful of CLEARLY FICTIONAL example claims, runs CASES against them, then restores RETIRED to
 # empty. These example entries are never present outside `--selftest`.
-# --------------------------------------------------------------------------------------
 
 _EXAMPLE_RETIRED: list[dict] = [
     {
@@ -665,13 +661,13 @@ _EXAMPLE_RETIRED: list[dict] = [
 CASES: list[tuple[str, str, str, bool]] = [
     # (label, fake-path, text, should_flag)
 
-    # --- the assertion override ---
+    # the assertion override
     ("an assertion label overrides a nearby warning",
      "knowledge-base/06-projects-portfolio.md",
      '- **Résumé-ready:** "Built the entire platform solo, end to end."', True),
 
-    # --- the banner mechanism: a genuine dated correction excuses the line below it, but an
-    # unrelated strong word does NOT (it needs an ADR/date to count as an actual correction) ---
+    # the banner mechanism: a genuine dated correction excuses the line below it, but an
+    # unrelated strong word does NOT (it needs an ADR/date to count as an actual correction)
     ("a dated correction banner two lines up excuses the bare claim below it",
      "knowledge-base/06-projects-portfolio.md",
      "> Corrected 2025-01-01 (ADR-0001): this framing is retired.\n"
@@ -685,7 +681,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      "| `02-work-auth.md` | Visa and authorization details |\n"
      "| `03-narrative.md` | The story arc; says the founder built the entire platform solo |", True),
 
-    # --- controls: prohibitions, marked-up or not, must never fire ---
+    # controls: prohibitions, marked-up or not, must never fire
     ("a prohibition that is itself marked up must still be allowed",
      "resume/resume.html",
      'Never say <b>"built the entire platform solo"</b> in outbound copy.', False),
@@ -704,7 +700,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      'Kept for the record: "built the entire platform solo." '
      '<!-- canon:allow example-user-count - wrong id, must not excuse example-solo-build -->', True),
 
-    # --- scope / scope_any narrowing ---
+    # scope / scope_any narrowing
     ("scope_any narrows to specific folders: a non-matching path is not flagged",
      "knowledge-base/03-narrative.md",
      "Internally this was called Project Nightingale before it shipped.", False),
@@ -712,7 +708,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      "portfolio/case-study.md",
      "Internally this was called Project Nightingale before it shipped.", True),
 
-    # --- same-line retirement verb, and the "different claim nearby" guard ---
+    # same-line retirement verb, and the "different claim nearby" guard
     ("a retirement verb attached to THIS claim, on the same line, still excuses it",
      "knowledge-base/06-projects-portfolio.md",
      '"built the entire platform solo" is retired wording.', False),
@@ -721,18 +717,16 @@ CASES: list[tuple[str, str, str, bool]] = [
      'The launch page says the founder built the entire platform solo (auto-deploy is retired '
      'wording, say "automatic deploys").', True),
 
-    # ==================================================================================
     # THE EIGHT UNICODE-BYPASS CLASSES: each one character or one tag away from a string the
     # registry already knows. A rule that guards a single spelling is a rule that expires the
     # first time someone edits the sentence.
-    # ==================================================================================
 
-    # --- 1. line split: the claim wraps across a markdown line break ---
+    # 1. line split: the claim wraps across a markdown line break
     ("BYPASS line-split: the claim wraps across a markdown line break",
      "knowledge-base/06-projects-portfolio.md",
      "- Built the entire platform\n  solo, from data model to deploy.", True),
 
-    # --- 2. HTML interpolation: an inline tag lands mid-phrase ---
+    # 2. HTML interpolation: an inline tag lands mid-phrase
     ("BYPASS html-inline: a <b> tag lands mid-phrase",
      "resume/resume.html",
      "<li>She built the entire <b>platform</b> solo, end to end.</li>", True),
@@ -743,12 +737,12 @@ CASES: list[tuple[str, str, str, bool]] = [
      "resume/resume.html",
      "<li>2024</li><li>1 million active users this year</li>", True),
 
-    # --- 3. HTML entity ---
+    # 3. HTML entity
     ("BYPASS html-entity: a non-breaking space via &nbsp;",
      "resume/resume.html",
      "<li>Reached 1&nbsp;million active users in year one.</li>", True),
 
-    # --- 4. unicode dash variants ---
+    # 4. unicode dash variants
     ("BYPASS unicode: auto‑deploy (U+2011 non-breaking hyphen)",
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old auto‑deploy step.", True),
@@ -759,22 +753,22 @@ CASES: list[tuple[str, str, str, bool]] = [
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old auto\u2013deploy step.", True),
 
-    # --- 5. zero-width / invisible ---
+    # 5. zero-width / invisible
     ("BYPASS unicode: auto-​deploy (U+200B zero-width space inside the word)",
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old auto-​deploy step.", True),
 
-    # --- 6. confusable letters ---
+    # 6. confusable letters
     ("BYPASS unicode: аuto-deploy (U+0430 Cyrillic а, renders as Latin a)",
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old аuto-deploy step.", True),
 
-    # --- 7. fullwidth ASCII ---
+    # 7. fullwidth ASCII
     ("BYPASS unicode: auto－deploy (U+FF0D fullwidth hyphen-minus)",
      "knowledge-base/06-projects-portfolio.md",
      "The pipeline still runs the old auto－deploy step.", True),
 
-    # --- 8. whitespace slack ---
+    # 8. whitespace slack
     ("BYPASS slack: doubled internal space",
      "resume/resume.html",
      "<li>The app reached 1  million active users within a year.</li>", True),
@@ -782,17 +776,15 @@ CASES: list[tuple[str, str, str, bool]] = [
      "resume/resume.html",
      "<li>Reached 1 million+ active users by launch.</li>", True),
 
-    # --- the replacement wording must not fire ---
+    # the replacement wording must not fire
     ("the correct replacement wording must NOT fire",
      "knowledge-base/06-projects-portfolio.md",
      "A three-person team built the platform; each owned one layer of the stack.", False),
 
-    # ==================================================================================
     # 'correct*' IS NOT A RETRACTION ON ITS OWN. A real audit of this file found it
     # excusing an ASSERTION dressed as a correction ("the correction here is that X"),
     # not a genuine retraction. It now needs a corroborating cue (a date, an ADR-style
     # reference, "old", or the quoted old claim): the shape of a real correction note.
-    # ==================================================================================
     ("an ASSERTION dressed as a 'correction' does NOT excuse the retired claim",
      "knowledge-base/06-projects-portfolio.md",
      "The correction here is that she built the entire platform solo.", True),
@@ -801,10 +793,10 @@ CASES: list[tuple[str, str, str, bool]] = [
      'The real number is 200,000 active users. This corrects the old "1 million+ active users" '
      'figure.', False),
 
-    # --- SAME-LINE correction banner: a record can carry its correction AND the quoted OLD
+    # SAME-LINE correction banner: a record can carry its correction AND the quoted OLD
     # value in ONE sentence, so the correcting words sit on the match's own line, past the
     # 80-char before-window. It must be excused; a bare ADR mention with no correction verb
-    # beside an ASSERTED claim must not be. ---
+    # beside an ASSERTED claim must not be.
     ("a same-line correction banner (correction + quoted old value on ONE line) must NOT fire",
      "applications/some-role/application.md",
      '> Corrected (ADR-0001): the résumé file now carries the real figure. **What was actually '
@@ -814,9 +806,9 @@ CASES: list[tuple[str, str, str, bool]] = [
      "applications/some-role/application.md",
      "She built the entire platform solo, see ADR-0001 for context.", True),
 
-    # --- multi-id canon:allow: one escape naming several rule-ids excuses each of them. Framed
+    # multi-id canon:allow: one escape naming several rule-ids excuses each of them. Framed
     # as a historical record (no negation wording) so the ALLOW mechanism, not plain negation,
-    # is what has to do the excusing. ---
+    # is what has to do the excusing.
     ("multi-id canon:allow excuses every id in its list",
      "knowledge-base/11-preferences-and-conventions.md",
      'This paragraph is the historical record of two fictional overclaims, kept for reference: '
@@ -824,8 +816,8 @@ CASES: list[tuple[str, str, str, bool]] = [
      'time. <!-- canon:allow example-solo-build, example-auto-deploy - this line IS the '
      'canonical historical record and must stay verbatim -->', False),
 
-    # --- "instead of X" / "rather than X" excuses X only when X is the IMMEDIATE object,
-    # never a later, separate clause. ---
+    # "instead of X" / "rather than X" excuses X only when X is the IMMEDIATE object,
+    # never a later, separate clause.
     ("'instead of' with the retired claim as a LATER clause (not its object) MUST still fire",
      "knowledge-base/06-projects-portfolio.md",
      "Instead of a slow rollout, the team decided to use auto-deploy for every commit.", True),
@@ -833,7 +825,7 @@ CASES: list[tuple[str, str, str, bool]] = [
      "knowledge-base/06-projects-portfolio.md",
      "Instead of auto-deploy, the pipeline now runs a manual review step before shipping.", False),
 
-    # --- a lookbehind in a rule keeps the TRUE neighbouring wording quiet ---
+    # a lookbehind in a rule keeps the TRUE neighbouring wording quiet
     ("a lookbehind rule: 'its one integration' must fire",
      "knowledge-base/06-projects-portfolio.md",
      "Acme Sync's one integration is the Globex ledger.", True),
@@ -853,7 +845,7 @@ CASES: list[tuple[str, str, str, bool]] = [
 
 
 def selftest() -> int:
-    global RETIRED
+    global RETIRED, REPO
     saved = RETIRED
     RETIRED = _EXAMPLE_RETIRED
     passed = failed = 0
@@ -871,33 +863,50 @@ def selftest() -> int:
             print(f"  {mark}  {label}")
     finally:
         RETIRED = saved
-    # SCOPE: the default sweep skips gitignored scratch, and only that. Needs git; outside a
-    # git checkout the sweep scans everything (stated, never a silent pass or fail).
-    ign = _gitignored(["pipeline/outreach-bundle-2099-01-01.md", "knowledge-base/INDEX.md"])
-    if ign is None:
-        print("  - scope checks skipped: git could not answer (not a git checkout?); the live "
-              "sweep then scans every file, ignored or not")
-    else:
-        gi = (REPO / ".gitignore").read_text(encoding="utf-8", errors="replace") \
-            if (REPO / ".gitignore").exists() else ""
-        live = {str(p.resolve().relative_to(REPO)) for p in live_surface()}
-        scope_checks = [
-            ("scope: tracked live files are NOT treated as ignored",
-             "knowledge-base/INDEX.md" not in ign),
-            ("scope: the live sweep still reaches knowledge-base/",
-             any(x.startswith("knowledge-base/") for x in live)),
-            ("scope: no gitignored file is left in the live sweep",
-             not (_gitignored(sorted(live)) or set())),
-        ]
-        if "outreach-bundle" in gi:
-            scope_checks.insert(0, ("scope: a gitignored outreach bundle is recognised as ignored",
-                                    "pipeline/outreach-bundle-2099-01-01.md" in ign))
-        for label, good in scope_checks:
-            if good:
-                passed += 1
+    # SCOPE: the default sweep skips gitignored scratch, and only that. Checked in a fixture git
+    # repo, never your own tree. Without git the sweep scans everything (stated, never a silent
+    # pass or fail). The fixture sits under a folder named projects/ on purpose: a clone in
+    # ~/projects/ must still be swept.
+    import os
+    import subprocess
+    import tempfile
+    live_file, scratch = "knowledge-base/INDEX.md", "knowledge-base/scratch-2099-01-01.md"
+    saved_repo = REPO
+    with tempfile.TemporaryDirectory() as tmp:
+        REPO = Path(tmp).resolve() / "projects" / "clone"
+        try:
+            (REPO / "knowledge-base").mkdir(parents=True)
+            (REPO / ".gitignore").write_text("knowledge-base/scratch-*.md\n", encoding="utf-8")
+            for rel in (live_file, scratch):
+                (REPO / rel).write_text("# fixture\n", encoding="utf-8")
+            try:
+                subprocess.run(["git", "init", "-q"], cwd=REPO, capture_output=True, timeout=20,
+                               env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")})
+            except (OSError, subprocess.SubprocessError):
+                pass
+            ign = _gitignored([scratch, live_file])
+            if ign is None:
+                print("  - scope checks skipped: git could not answer (is git installed?); the "
+                      "live sweep then scans every file, ignored or not")
             else:
-                failed += 1
-            print(f"  {'✓ scope  ' if good else '✗ SCOPE  '}  {label}")
+                live = {str(p.resolve().relative_to(REPO)) for p in live_surface()}
+                swept = {str(p.relative_to(REPO)) for g in SCAN_GLOBS for p in REPO.glob(g)}
+                scope_checks = [
+                    ("scope: a gitignored scratch file is recognised as ignored", scratch in ign),
+                    ("scope: that scratch file really is under a swept glob", scratch in swept),
+                    ("scope: tracked live files are NOT treated as ignored", live_file not in ign),
+                    ("scope: the live sweep reaches knowledge-base/, even in a clone under projects/",
+                     live_file in live),
+                    ("scope: no gitignored file is left in the live sweep", scratch not in live),
+                ]
+                for label, good in scope_checks:
+                    if good:
+                        passed += 1
+                    else:
+                        failed += 1
+                    print(f"  {'✓ scope  ' if good else '✗ SCOPE  '}  {label}")
+        finally:
+            REPO = saved_repo
     print()
     if failed:
         print(f"SELFTEST FAILED: {failed} of {passed + failed} cases wrong")

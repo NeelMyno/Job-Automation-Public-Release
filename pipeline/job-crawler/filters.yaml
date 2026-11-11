@@ -1,8 +1,6 @@
-# ============================================================================
 # Job-crawler filters. This is the ONE file you edit to point the crawler at your
 # own role, in any industry. Honest by construction: this file only DECIDES WHICH
 # REAL POSTINGS TO KEEP. It never writes, invents, or embellishes anything about a job.
-# ============================================================================
 
 # Keep only postings published/updated within this window.
 lookback_hours: 72
@@ -23,37 +21,34 @@ include_titles: []
 # not required for a match, purely a ranking aid. Matches are ranked by this score, then by
 # title fit (exactly one of your titles, then whole words, then part of a word), then newest.
 # Left empty, the score is 0 for every match and plays no part (crawl.py's JSON says so).
-include_keywords: []           # e.g. ["sql", "python"] or ["icu", "pediatrics"]
+include_keywords: []           # e.g. ["sql", "python"] or ["autocad", "solidworks"]
 
-# ============================================================================
-# REJECT vs FLAG: two DIFFERENT gates. Keep them separate rather than merging one into
+# REJECT vs FLAG are two DIFFERENT gates. Keep them separate rather than merging one into
 # the other: exclude_patterns DROPS a posting outright (a hard wall you define), while
 # flag_patterns SURFACES a posting with a warning rather than hiding it (a soft caveat).
-# What belongs in which bucket depends entirely on YOUR OWN situation; there is no
+# What belongs in which bucket depends entirely on YOUR OWN situation: there is no
 # universal answer, which is why both ship empty/example here rather than pre-filled.
-# ============================================================================
 
 # HARD REJECT gate: DROP if title OR description contains any of these (case-insensitive
-# substring). Put here only what is a genuine dead end for you specifically, e.g. a role
-# family you don't do, or a hard legal requirement you can't meet.
+# substring). Put here only what is a genuine dead end for you specifically (e.g. a role
+# family you don't do, or a hard legal requirement you can't meet).
 #
 # Two worked examples, commented out, showing opposite real situations:
-#   - if you do NOT hold a security clearance and can't get one quickly, you might exclude
-#     "security clearance", "top secret", "ts/sci", "polygraph", "dod clearance"
-#   - if you DO hold a clearance or are eligible, you'd not only skip that exclusion, you
-#     might instead ADD those same terms to include_keywords so cleared roles rank higher
+#   - if you do NOT hold a license a posting demands and can't get one quickly, you might
+#     exclude it, e.g. "cpa required", "rn license required", "pe license required"
+#   - if you DO hold that license, you'd not only skip that exclusion, you might instead ADD
+#     the same terms to include_keywords so those postings rank higher
 # Work-authorization-specific walls (citizenship-only, green-card-only, no-sponsorship-ever)
 # belong here too, IF they're genuinely a hard wall for you; see
 # knowledge-base/02-work-authorization.md before deciding. They are NOT prefilled, because
 # assuming everyone needs this filter (or that nobody does) would be wrong for someone.
 #
 # Worth a look once you add boards.yaml entries on the broader ATS platforms (Workday,
-# SmartRecruiters, Workable): a bigger, more general ATS surfaces a wider mix of job families
-# than the smaller ones, so a title substring you'd expect
-# to be unambiguous in your own field can collide with an unrelated one elsewhere in a company's
-# full board (e.g. a broad word like "design" or "analyst" shows up in plenty of job families
-# that have nothing to do with what you're searching for). If you start seeing off-target matches
-# after adding one of those boards, this is the list to tighten.
+# SmartRecruiters, Workable): a bigger, more generic ATS surfaces a wider mix of postings than
+# Greenhouse/Lever/Ashby's tech-company-heavy user base, so a title substring you'd expect to be
+# unambiguous in your own field can collide with an unrelated one elsewhere in a company's full
+# board. If you start seeing off-target matches after adding one of those boards, this is the
+# list to tighten.
 exclude_patterns: []
 
 # SOFT FLAG gate: the posting says something you want surfaced with a caveat, not hidden.

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
-  /* ── Semantic tokens (role-named; see DESIGN.md) ─────────────────────
+  /* Semantic tokens (role-named; see DESIGN.md)
      Instrument-panel register: near-black neutral canvas (never green-tinted,
      never #000), ONE accent (Spring-Green) for live/selection only, status by
      dot+label, tabular numerals, hairlines over shadows. */
@@ -70,7 +70,7 @@
   :focus{outline:none}
   :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:6px}
 
-  /* ── Table. Fixed layout: a column may never be crushed by another's content. ── */
+  /* Table. Fixed layout: a column may never be crushed by another's content. */
   .frame{border:1px solid var(--line-soft); border-radius:var(--r); overflow:hidden; background:var(--surface)}
   .scroll{overflow-x:auto}          /* safety net only; the table is designed to fit its container */
   table{width:100%; border-collapse:collapse; table-layout:fixed}
@@ -250,6 +250,7 @@ const STATUS = {
   offer:    {label:"Offer",     c:"var(--status-live)", live:true},
   rejected: {label:"Rejected",  c:"var(--status-negative)"},
   passed:   {label:"Passed",    c:"var(--status-muted)"},
+  ghosted:  {label:"Ghosted",   c:"var(--status-muted)"},
 };
 const NET_STATUS = {
   lead:     {label:"To contact", c:"var(--status-attention)"},
@@ -320,7 +321,7 @@ function key(r){ return view==="apps" ? r.co+"|"+r.role : r.name; }
 
 function renderSummary(){
   const a=APPLICATIONS;
-  const inPlay=a.filter(r=>!["passed","rejected"].includes(r.status)).length;
+  const inPlay=a.filter(r=>!["passed","rejected","ghosted"].includes(r.status)).length;
   const live=a.filter(r=>["applied","active","interview","offer"].includes(r.status)).length;
   const leads=a.filter(r=>r.status==="lead").length;
   const refs=a.reduce((n,r)=>n+(r.refs||0),0);
@@ -388,7 +389,6 @@ function appRow(r,i){
       <dt>Posted</dt><dd>${val(r.posted)}</dd>
       <dt>Found via</dt><dd>${r.source?`<span class="src">${esc(r.source)}</span>`:dash}</dd>
       <dt>Sponsorship</dt><dd>${spon}</dd>
-      <dt>E-Verify</dt><dd>${r.everify&&r.everify!=="unknown"?esc(r.everify):dash}</dd>
       <dt>Referrals</dt><dd>${r.refs?esc(r.refs)+" contact"+(r.refs===1?"":"s"):dash}</dd>
     </dl><div class="det-links">${links||'<span class="none">No links yet</span>'}</div></div>
   </div></td></tr>`;

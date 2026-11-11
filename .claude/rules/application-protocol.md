@@ -135,17 +135,21 @@ without doing it is forgery.
 
 ### 13.6 The outreach doctrine
 
-## 🔴 THE THREE-PART HANDOVER: never hand over a person without all three
+## 🔴 THE THREE-PART HANDOVER: never hand over a person with a part missing
 
-Per person, every time, no exceptions:
-1. **The profile URL.**
-2. **The connection note**, under 300 chars. (Omit only for a contact recorded as already 1st-degree
-   connected.)
-3. **The direct message**, headed with an explicit `Use InMail: YES/NO` and the reason.
+Per person, every time:
+1. **The profile URL.** A person with no LinkedIn gets a `Profile:` line with another profile or
+   staff-page URL, or `Profile: none found (where you looked)`.
+2. **The connection note**, under 300 chars. (Omit for a contact recorded as already 1st-degree
+   connected, and for a person with no LinkedIn.)
+3. **The direct message**, headed with an explicit `Use InMail: YES/NO` and the reason. A person with
+   no LinkedIn has no InMail line; the handover names the gap and how the message goes instead.
+
+A posting with no req or job ID carries a `Req: none on posting` line in that person's block.
 
 Enforced by `python3 scripts/outreach_format.py`, run on every write to a `referrals.md`.
 
-**Delivery: the note goes now, the DM waits for the accept.** All three parts are drafted per person in
+**Delivery: the note goes now, the DM waits for the accept.** Every part is drafted per person in
 `referrals.md`, but the send file carries only the connection notes, for people nobody has contacted
 yet. The DMs sit in a second file and are handed over when you report who accepted, so you never open a
 profile whose request is still pending just to find there is nothing to send. Layout owner:
@@ -247,7 +251,8 @@ exactly that and move on.
 - Resume: <exact filename> (<bytes>)
 - Cover letter: <exact filename> (<bytes>), or the free-text field that carried it
 - <long free-text field>: (<char count>) <what it says>
-- <each work-authorization field, worded exactly as the form printed it>: <the answer §12 gives for that wording>
+- 🔴 Work-authorization field(s), worded EXACTLY as the form printed them:
+  - <each work-authorization field>: one line, indented under that label, in the shape `.claude/rules/records-format.md` §6 owns
 - EEO: <the §5b values used, or "not present on this form">
 ```
 
@@ -280,7 +285,7 @@ which `doctor.py --fill` also prints under "If your tool list has no browser too
 2. Claude Code: type `/mcp`; if `chrome-devtools` shows as disabled, enable it there. If you said
    no to the approval prompt earlier, quit, run `claude mcp reset-project-choices`, start `claude`
    again and approve `chrome-devtools`. Codex: trust this folder, or run
-   `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1`.
+   `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1 --no-usage-statistics`.
 3. Restart the session.
 
 With no browser tool in its session at all, the agent gives you these steps and stops at the form;
@@ -288,7 +293,9 @@ once you restart, it fills the form. It never asks you to fill the form by hand.
 
 **A paste kit is a last resort, for a named reason only.** The reasons: a CAPTCHA wall; a login only you
 may do and you decline to do it in the automation window; a site whose terms ban automated access; an
-ATS that rejects a submit coming from the automation browser; and LinkedIn Easy Apply or an apply-by-email
+ATS that rejects a submit coming from the automation browser; a site's bot check that walls the
+automation browser (the agent tries first; a system's name alone is never the reason, and no whole ATS
+is routed to a paste kit by default); and LinkedIn Easy Apply or an apply-by-email
 posting, which are always your hands (CLAUDE.md §0.2, and an email is an external send). Even then the agent fills and verifies
 everything it can up to that point, and the kit (in `application.md`: the direct form URL on its own
 line, then every field label with its exact value in form order, long answers in full, and the
@@ -302,7 +309,8 @@ turns into "here's the form, fill it yourself."
 **The five hard rules:**
 
 1. **Never click Submit.** The agent fills and verifies; **you review the open browser window and
-   submit.** Submitting an application is an irreversible external send.
+   submit.** Submitting an application is an irreversible external send. A form already submitted is
+   never opened again, and a tab that is gone is never refilled without asking (`/wave` stage 7 item 0c).
 2. **Never infer work-authorization answers: read the field's exact wording, find that wording in
    `knowledge-base/12-application-answers.md` §3, and type what it says.** Different employers phrase
    the same underlying question differently, and the honest answer can differ by phrasing. §3 is the
@@ -323,11 +331,13 @@ turns into "here's the form, fill it yourself."
    word X so I know you actually read this"): surface it and let you decide; never auto-comply and
    never silently strip it.
 
-**Free-text answers are filled, and thought through.** Optional free-text fields (about you, anything
-else, why us, additional context) are always filled, never skipped. Before drafting one: read the JD
-and `company-research.md`, pick the one specific true link between their work and yours (sourced from
-`knowledge-base/` or the dossier), then write it per `knowledge-base/17-writing.md`. A generic answer
-that could go to any company is not done.
+**Every field gets filled, and free text is thought through.** The agent writes free text of every kind
+(about you, anything else, why us, additional context, culture questions); none is skipped and none is
+handed back. The only blanks are the ones `/wave` stage 7 item 4 lists, asked once and then recorded.
+Before drafting one: read the JD and `company-research.md`, and read the label. Why THEM is about the
+company and why you want to be there; why YOU is your work (`knowledge-base/12-application-answers.md`
+§5.1a, §5.1b, gated by `scripts/why_check.py`). Then write it per `knowledge-base/17-writing.md`. A
+generic answer that could go to any company is not done.
 
 **Verify against the DOM, never against the tool's success string. The tool lies.** A `fill`/`click`
 call can report success for an operation that did not happen: a required checkbox that never
@@ -335,7 +345,8 @@ registered, a text field that reported success and stayed empty, line breaks sil
 
 Before handing any form over, assert in the DOM:
 - **text inputs**: the framework's own value tracker matches the rendered value (on React inputs,
-  `el._valueTracker.getValue() === el.value`; if it diverges, a submit sends an empty string)
+  `el._valueTracker.getValue() === el.value`; if it diverges, a submit sends an empty string), and
+  `scripts/form_persist.js` reports `mismatched: []` (the screen equals what the form stored)
 - **files**: the file input's selected file name and size match the real file on disk (some ATSs
   remove the input after upload and render the filename as text; verify it that way there)
 - **checkboxes / radios / button-style choices**: query `:checked` (or the selected class) and read
@@ -343,7 +354,8 @@ Before handing any form over, assert in the DOM:
 - **work-authorization, sponsorship and citizenship fields**: read the SELECTED VALUE back and assert
   it equals the answer §3 gives for that field's exact printed wording. Non-empty is not enough. The
   main agent does this read-back itself, never on a helper's word.
-- **finally**: count required inputs with no value; it must be zero.
+- **finally**: run `scripts/form_blanks.js`; no required field may be blank, and what remains is only
+  the blanks `/wave` stage 7 item 4 allows.
 
 Re-set anything that failed with the native value setter plus `input`/`change` events, then
 re-verify. Re-run the whole check on every open tab right before the handover: a check from earlier

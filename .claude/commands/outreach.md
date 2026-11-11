@@ -83,11 +83,16 @@ queue, the holds and the handover, and re-runs the step-6 gates on every returne
   YES/NO` with the one-line reason (balance from the InMail ledger if you track one). 1st-degree
   contacts: DM only.
 - **Shape:** paragraphed to the reference shape in `.claude/outreach-handover-format.md`; **every
-  referenced opening carries its exact title + req ID**, and never an invented one.
+  referenced opening carries its exact title + req ID**, and never an invented one. A posting with
+  no ID gets a `Req: none on posting` line in that person's block. A person with no LinkedIn gets a
+  `Profile:` line with another profile or staff-page URL, or `Profile: none found (where you
+  looked)`: no connection note or InMail verdict for them, and the handover names the gap. Find
+  profiles by web search only; no agent visits LinkedIn.
 - **Register is human:** reads like a person typed it; uneven sentences; the read-aloud test
   governs. Write per `knowledge-base/17-writing.md` (the read-aloud and the fresh-reviewer
-  step). **The card rule** (§13.2): name cards-in/cards-out in the
-  dossier.
+  step, and its lengths for a first cold message and a first reply). Build from
+  `knowledge-base/18-in-your-own-words.md` where it has something that fits; blank is fine, just say
+  less. **The card rule** (§13.2): name cards-in/cards-out in the dossier.
 - **Volume:** 5-8 verified-real people per company where they exist; an empty slot is a correct
   answer; never invent a person.
 - **Facts current:** tenure math and every biographical number comes from `knowledge-base/07` at
@@ -98,12 +103,14 @@ queue, the holds and the handover, and re-runs the step-6 gates on every returne
 **5. Follow-ups (same doctrine, smaller ask).** Default: **one nudge after 4+ days of silence, one
 ever** (the operator can override per thread). A nudge is two or three sentences anchored to the
 original thread, no new ask escalation. REPLIED threads never get automated nudges; surface them
-to the operator with a drafted reply instead.
+to the operator with a drafted reply instead, written per the first-reply and booking-note lines in
+`knowledge-base/17-writing.md`.
 
 **6. Gates, per touched dossier.** `python3 scripts/outreach_format.py "<dossier>/referrals.md"` →
 exit 0 · `python3 scripts/verify_claims.py "<dossier>"` → exit 0, quoting the `NOT checked:`
-line verbatim in the handover · `python3 scripts/voice_check.py --text "<each message>"` → exit 0. Then
-each message is read aloud as you and goes to a fresh reviewer, per `knowledge-base/17-writing.md`. A
+line verbatim in the handover · `python3 scripts/voice_check.py --text "<each message>"` → exit 0 ·
+`python3 scripts/slop_check.py --text "<each message>"` → nothing marked TO FIX (a "second look" is a
+re-read, never a failure). Then each message is read aloud as you and goes to a fresh reviewer, per `knowledge-base/17-writing.md`. A
 failing gate on a message: fix that message and re-run; never hand over copy that has not passed.
 
 **7. Hand over: the locked format, and no other.** State each company's basket (§13.7:

@@ -123,8 +123,8 @@ def _split_tokens(header):
 
 
 def _title_re(term):
-    # word-boundary match, tolerating a trailing plural 's' ("designers", "engineers"), so
-    # "design engineer" matches "design engineers" but NOT "design engineering".
+    # word-boundary match, tolerating a trailing plural 's' ("nurses", "engineers"), so
+    # "electrical engineer" matches "electrical engineers" but NOT "electrical engineering".
     return re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"s?(?![a-z0-9])", re.I)
 
 
@@ -196,7 +196,7 @@ def _company_and_location(tokens, role_token, F):
     company = ""
     role_is_first = bool(role_token) and tokens and role_token == tokens[0]
     if role_is_first:
-        # "Founding Designer at Acme | Remote": pull the company after 'at'/'@' if present,
+        # "Night Shift Nurse at Acme Clinic | Remote": pull the company after 'at'/'@' if present,
         # else the next non-location token; otherwise leave unknown (don't call the role a company).
         m = re.search(r"\b(?:at|@)\s+(.+)$", tokens[0], re.I)
         if m:
@@ -206,7 +206,7 @@ def _company_and_location(tokens, role_token, F):
     else:
         first = tokens[0]
         if _is_city_state(first) and len(tokens) > 1:
-            company = tokens[1]        # location was in slot 0 (the "Blaine, WA | CaseLight" case)
+            company = tokens[1]        # location was in slot 0 (the "Dayton, OH | Globex" case)
         else:
             company = first
     # location: header tokens that read as a place, minus whatever we used as company/role

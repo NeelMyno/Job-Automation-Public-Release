@@ -2,14 +2,12 @@
 """resume_gate.py: a rendered résumé is ONE page, and it FILLS that page.
 
 WHY THIS EXISTS
----------------
 Empty space on a one-page résumé is not restraint. It's unused evidence, and the failure mode
 that motivated this gate was a résumé that dropped the current employer entirely, listing it only
 as a line inside a projects section, so its Experience section read as though the person hadn't
 worked in years. Nothing mechanical caught that until this gate existed.
 
 WHAT THIS CHECKS
-----------------
   1. PAGES == 1.  A second page is a hard fail.
   2. FILL >= 88%. The last line of text must reach at least 88% of the page height. A near-miss
      (within a few points of the floor) is an ADVISORY. Further below the floor is an OPEN ITEM,
@@ -25,7 +23,6 @@ WHAT THIS CHECKS
      happens to sit above Experience in a particular layout.
 
 WHAT THIS DOES NOT CHECK
-------------------------
 Whether the content is TRUE (canon.py and verify_claims.py own that), whether it is well written,
 or whether it is tailored to the target. It measures shape and one structural omission.
 
@@ -34,7 +31,6 @@ or whether it is tailored to the target. It measures shape and one structural om
     python3 scripts/resume_gate.py --selftest            # self-contained, no real résumé required
 
 EXIT CODES
-----------
   0  every résumé passes (advisories may be printed; they are not failures)
   1  a hard failure: two pages, a missing employer, a retired claim, a wrong canonical fact
   2  no résumé found to check
@@ -46,6 +42,10 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+if __name__ == "__main__" and "--selftest" in sys.argv:  # a throwaway copy that holds none of your files
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -86,6 +86,8 @@ def _parse_required_employment(text: str) -> list[tuple[str, str, bool]]:
     Two line shapes are accepted, because the KB-07 template writes one and older files the other:
       `**Employer, Title** (Mon YYYY - Present)`     the shape knowledge-base/07 ships with
       `**Employer - Title** - Mon YYYY - Present`    the older shape, still read
+      `**Employer** (Mon YYYY - Present)`            several titles at one employer; plain title
+                                                     lines follow it and are not read here
     In the comma shape the employer is the text before the first comma; in the dash shape it is
     the text before the first spaced dash. Only top-level bold lines count; a blockquote or bullet
     line doesn't, which is what keeps a footnote about a *retired* employer claim from being read
@@ -225,6 +227,35 @@ def _near(flat: str, employer: str, token: str, span: int = 200) -> bool:
     return False
 
 
+# A date on a line, in the shapes a résumé prints: a heading with one of these is not a title group.
+_DATE_ON_LINE = re.compile(r"\b[A-Z][a-z]{2,8}\.?\s+\d{4}\b|\b(?:Present|Current)\b")
+_BULLET_START = re.compile("^[\u203a\u2022\u00b7\u25aa*>-]")
+_ROLE_ROW_WINDOW = 16      # lines after the heading: eight titles, each its title and its dates
+_ROLE_ROW_MAX_CHARS = 110  # a longer line is body text, not a title row
+
+
+def _in_role_rows(lines: list[str], emp: str, token: str, others: list[str]) -> bool:
+    """Several titles at one employer print as a heading that carries no date, then a row per title.
+
+    True when a line opens with `emp`, has no date of its own, and `token` sits in the title rows
+    directly under it. The rows end at the first bullet, section heading, long line or other
+    employer, so nothing further down the page can stand in for a deleted title.
+    """
+    wanted = re.compile(_loose(token), re.I)
+    for i, line in enumerate(lines):
+        head = line.strip()
+        if not head.lower().startswith(emp.lower()) or _DATE_ON_LINE.search(head):
+            continue
+        for row in (x.strip() for x in lines[i + 1: i + 1 + _ROLE_ROW_WINDOW]):
+            if (_BULLET_START.match(row) or len(row) > _ROLE_ROW_MAX_CHARS
+                    or (row.isupper() and not re.search(r"\d", row))
+                    or any(o.lower() in row.lower() for o in others)):
+                break
+            if row and wanted.search(row):
+                return True
+    return False
+
+
 def measure(pdf: Path) -> tuple[int, float, str] | None:
     """(page_count, fill_percent, page1_text). None if the PDF cannot be read."""
     try:
@@ -308,8 +339,9 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
         problems.append(
             "the required-employment list is EMPTY, so the employment check did not run. "
             "knowledge-base/07-master-resume.md must contain a line exactly `### WORK EXPERIENCE` "
-            "followed by `**Employer, Title** (Mon YYYY - Present)` entries (the older "
-            "`**Employer - Title** - Mon YYYY - Present` shape is read too). Fix the KB; do not trust "
+            "followed by `**Employer, Title** (Mon YYYY - Present)` entries (`**Employer** (Mon YYYY "
+            "- Present)` for several titles at one employer; the older `**Employer - Title** - Mon "
+            "YYYY - Present` shape is read too). Fix the KB; do not trust "
             "this résumé until this line disappears."
         )
 
@@ -341,11 +373,14 @@ def check_pdf(pdf: Path, required: list | None = None, facts: dict | None = None
     _PROJ = re.compile(r"^\s*(SELECTED\s+PROJECTS|PROJECTS)\s*$", re.I | re.M)
     _proj_at = next((i for i, b in enumerate(blocks) if _PROJ.search(b)), None)
     _emp_blocks = blocks if _proj_at is None else blocks[:_proj_at]
+    _emp_lines = [ln for b in _emp_blocks for ln in b.splitlines() if ln.strip()]
+    _all_emps = [r[0] for r in required]
 
     def _listed(emp: str, tok: str) -> bool:
         if blocks:
-            return any(emp.lower() in b.lower() and re.search(_loose(tok), b, re.I)
-                       for b in _emp_blocks)
+            return (any(emp.lower() in b.lower() and re.search(_loose(tok), b, re.I)
+                        for b in _emp_blocks)
+                    or _in_role_rows(_emp_lines, emp, tok, [o for o in _all_emps if o != emp]))
         return _near(re.sub(r"\s+", " ", text), emp, tok)   # no block info: fall back, never skip
 
     if text:
@@ -479,8 +514,18 @@ def _html_employment_problems(src: Path, required: list | None = None) -> list[s
     body = re.sub(r"<(script|head)[\s\S]*?</\1>", "", body)
     flat = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body))
     problems: list[str] = []
+    # The title rows under one employer heading can run past _near's span, so they are read as far
+    # as the employer's first bullet list.
+    def _in_rows(emp: str, token: str) -> bool:
+        for h in re.finditer(re.escape(emp), body, re.I):
+            end = re.search(r"<(?:ul|li)\b", body[h.end():])
+            rows = body[h.end(): h.end() + end.start()] if end else ""
+            if re.search(_loose(token), re.sub(r"<[^>]+>", " ", rows), re.I):
+                return True
+        return False
+
     for emp, start, is_current in (required_employment() if required is None else required):
-        if not _near(flat, emp, start):
+        if not _near(flat, emp, start) and not _in_rows(emp, start):
             problems.append(
                 f"{'the CURRENT job' if is_current else 'employment entry'} MISSING: {emp} "
                 f"({start}). Copy resume/resume.html and apply only the delta noted in this "
@@ -592,7 +637,7 @@ def targets(args: list[str]) -> list[Path]:
     return out
 
 
-# ── selftest: a fully self-contained fictional fixture, independent of any real résumé ──
+# selftest: a fully self-contained fictional fixture, independent of any real résumé
 #
 # Everything below is generated from FIXTURE_KB (never from the real knowledge-base/07 file),
 # so `--selftest` passes on a fresh clone before anyone has written a real résumé.
@@ -659,6 +704,26 @@ def selftest() -> int:
     ok &= _t0("[S2] the unfilled template line parses to nothing (so the gate says EMPTY, loudly)",
               _parse_required_employment("### WORK EXPERIENCE\n**[Employer Name], [Your Title]** "
                                          "([Mon YYYY] - Present)\n") == [])
+    # S6: several titles at one employer, one KB entry; the plain title lines are not employers.
+    _multi = _parse_required_employment(
+        "### WORK EXPERIENCE\n\n**Umbrella Logistics** (Mar 2017 - Present)\n"
+        "Regional Dispatch Lead (Jun 2021 - Present)\nDispatcher (Mar 2017 - May 2021)\n- x\n\n"
+        "**Globex, Driver** (Jan 2014 - Feb 2017)\n")
+    ok &= _t0("[S6] a multi-title entry parses as one employer at its first start date",
+              _multi == [("Umbrella Logistics", "Mar 2017", True), ("Globex", "Jan 2014", False)])
+    _rows = ["Umbrella Logistics \u00b7 Tulsa", "Regional Dispatch Lead", "Jun 2021 to Present",
+             "Dispatcher", "Mar 2017 to May 2021", "\u203a Ran the night board.", "Sep 2009 to Feb 2010"]
+    ok &= _t0("[S6] a title row's date counts for the heading above it",
+              _in_role_rows(_rows, "Umbrella Logistics", "Mar 2017", []))
+    ok &= _t0("[S6] an open date range in a title row counts", _in_role_rows(_rows, "Umbrella Logistics", "Present", []))
+    ok &= _t0("[S6] a date past the first bullet does not count",
+              not _in_role_rows(_rows, "Umbrella Logistics", "Sep 2009", []))
+    ok &= _t0("[S6] a date on the NEXT employer's row does not count",
+              not _in_role_rows(["Umbrella Logistics", "Hooli \u00b7 Driver", "Jan 2014 to Feb 2017"],
+                                "Umbrella Logistics", "Jan 2014", ["Hooli"]))
+    ok &= _t0("[S6] a heading that already has its own date is not a title group",
+              not _in_role_rows(["State University Aug 2014 to May 2016", "Nov 2018 to Sep 2022"],
+                                "State University", "Nov 2018", []))
     # S5: a portfolio domain in ANY top-level domain is read; code and file names are not.
     _pc = lambda t: _portfolio_candidates(t)
     ok &= _t0("[S5] a .org portfolio is read", _pc("Sam Lee · sam@acme.example · samlee.org") == ["samlee.org"])
@@ -699,13 +764,11 @@ def selftest() -> int:
     ok &= _t0("[S4] `accept: short-page` with no number records nothing",
               accepted_short_floor(_parse_canonical_facts(
                   "```canonical-facts\naccept: short-page | yes\n```\n")) is None)
-    # S4b: the shipped résumé templates use the standard CSS property, so weasyprint renders them
-    # without a deprecation warning.
-    for _h in (REPO / "resume" / "resume.html",
-               REPO / "applications" / "TEMPLATE-company-role" / "resume" / "resume.html"):
-        if _h.is_file():
-            ok &= _t0(f"[S4b] {_h.relative_to(REPO)} carries no -weasy- vendor property",
-                      "-weasy-" not in _h.read_text(encoding="utf-8", errors="replace"))
+    # S4b: the shipped résumé template uses the standard CSS property, so weasyprint renders it
+    # without a deprecation warning. A missing template is a failure, never a skipped case.
+    _h = REPO / "applications" / "TEMPLATE-company-role" / "resume" / "resume.html"
+    ok &= _t0(f"[S4b] {_h.relative_to(REPO)} is on disk and carries no -weasy- vendor property",
+              _h.is_file() and "-weasy-" not in _h.read_text(encoding="utf-8", errors="replace"))
     try:
         import fitz
     except ImportError:
@@ -842,7 +905,7 @@ def selftest() -> int:
              "the fixture text at the top of this file failed to parse: a bug in this script, "
              "not in any real résumé.")
 
-    # ── END-TO-END: every rule must be provably ALIVE, on a synthetic fixture built entirely
+    # END-TO-END: every rule must be provably ALIVE, on a synthetic fixture built entirely
     # in this function, never on whatever resume.html the real user has (or hasn't) written yet.
     import subprocess
     FIXTURE_HTML = f"""<html><body style="font-size:10pt; line-height:1.4; font-family:sans-serif;">
@@ -897,6 +960,57 @@ center program (2019-present).</p>
     ]
     with tempfile.TemporaryDirectory() as td:
         tdp = Path(td)
+
+        # S6: several titles at one employer, in the layout resume/resume.html documents. Built
+        # here, never read from the user's own résumé.
+        _mt_required = [("Umbrella Logistics", "Mar 2017", True), ("Globex", "Jan 2014", False)]
+        _mt_row = ('<div class="role" style="display:flex;justify-content:space-between">'
+                   '<div>{}</div><div>{}</div></div>')
+        _mt_rows = [("Regional Dispatch Operations Lead, Southern Territory", "Jun 2021 to Present"),
+                    ("Senior Dispatch Coordinator, Southern Territory", "Aug 2019 to May 2021"),
+                    ("Night Shift Dispatch Coordinator, Tulsa Terminal", "Jan 2018 to Jul 2019"),
+                    ("Dispatch Clerk, Tulsa Terminal", "Mar 2017 to Dec 2017")]
+
+        def _mt_html(rows) -> str:
+            return ('<html><body style="font-size:10pt"><h1>Sam Lee</h1><h2>EXPERIENCE</h2>'
+                    '<div class="job"><div>Umbrella Logistics · Tulsa</div>'
+                    + "".join(_mt_row.format(*r) for r in rows)
+                    + '<ul><li>Ran the overnight board for a fleet of forty trucks.</li></ul></div>'
+                    '<div class="job"><div>Globex · Driver   Jan 2014 to Feb 2017</div>'
+                    '<ul><li>Drove regional routes.</li></ul></div></body></html>')
+
+        def _mt_employment(html: str) -> list[str]:
+            """What check_pdf says about employment for this page (page fill is not the point here)."""
+            (tdp / "mt.html").write_text(html)
+            subprocess.run(["weasyprint", str(tdp / "mt.html"), str(tdp / "mt.pdf")], capture_output=True)
+            found = check_pdf(tdp / "mt.pdf", required=_mt_required, facts=dict(facts, never=[], number=[], exact=[]))
+            return [x for x in (found.problems if found else []) if "Umbrella" in x]
+
+        (tdp / "mt-src.html").write_text(_mt_html(_mt_rows))
+        ok &= _t("[S6] the HTML check finds the earliest title's date past a long list of rows",
+                 _html_employment_problems(tdp / "mt-src.html", required=_mt_required) == [])
+        (tdp / "mt-src.html").write_text(_mt_html(_mt_rows[:-1]))
+        ok &= _t("[S6] the HTML check catches a deleted earliest title",
+                 len(_html_employment_problems(tdp / "mt-src.html", required=_mt_required)) == 1)
+        import shutil as _shutil
+        # Installed is not working: a weasyprint missing its system libraries is a skip, not a failure.
+        _wp_ok = False
+        if _shutil.which("weasyprint"):
+            (tdp / "probe.html").write_text("<p>probe</p>")
+            _probe = subprocess.run(["weasyprint", str(tdp / "probe.html"), str(tdp / "probe.pdf")],
+                                    capture_output=True)
+            _wp_ok = _probe.returncode == 0 and (tdp / "probe.pdf").is_file()
+        if _wp_ok:
+            ok &= _t("[S6] several titles at one employer, rendered, count as employment",
+                     _mt_employment(_mt_html(_mt_rows)) == [],
+                     "A real promotion layout was refused.")
+            ok &= _t("[S6] rendered: the earliest title deleted is CAUGHT",
+                     bool(_mt_employment(_mt_html(_mt_rows[:-1]))))
+            ok &= _t("[S6] rendered: the open date range deleted on a current employer is CAUGHT",
+                     bool(_mt_employment(_mt_html(_mt_rows[1:] ))))
+        else:
+            print("  · [S6] rendered multi-title cases  -> SKIPPED (weasyprint not available)")
+
         for label, html in e2e:
             (tdp / "r.html").write_text(html)
             r = subprocess.run(["weasyprint", str(tdp / "r.html"), str(tdp / "r.pdf")],
@@ -992,21 +1106,6 @@ center program (2019-present).</p>
                 pass
         else:
             print("  · [e2e] fixture-based PDF checks  -> SKIPPED (weasyprint not available)")
-
-    # A bonus, non-blocking check: if the user has already written a real résumé, prove it passes
-    # its own gate too. This never gates selftest pass/fail: a fresh clone has no résumé yet.
-    for candidate in sorted(REPO.glob("resume/*.pdf")):
-        if candidate.is_file():
-            f = check_pdf(candidate)
-            if f and f.is_fail():
-                print(f"  · (bonus, non-blocking) your real résumé {candidate.name} currently fails "
-                      f"this gate -> {f.problems}")
-            elif f and f.advisories:
-                print(f"  · (bonus, non-blocking) your real résumé {candidate.name} passes this "
-                      f"gate (carries a page-fill advisory, not a failure)")
-            else:
-                print(f"  · (bonus, non-blocking) your real résumé {candidate.name} passes this gate")
-            break
 
     print(f"\n{'SELFTEST OK' if ok else 'SELFTEST FAILED'}: {len(cases) + 1}+ cases, fully self-contained")
     return 0 if ok else 1

@@ -3,17 +3,12 @@
 transcript again.
 
 ROOT CAUSE THIS CLOSES
------------------------
-A live interview round produces a real commitment -- the interviewer says they'll recommend
-advancing you, or that someone on their side will send a take-home, or that they'll get back to
-you by a certain day. That commitment is easy to write down in a call-notes file and easy to never
-look at again, because nothing structured carries it and nothing at the next session start
-surfaces it. The person, not the tool, ends up being the one who remembers to chase it -- which
-means the single most valuable thing a job search produces (a live interview's next step) has no
-mechanical guard at all. This script is that guard.
+Hiring steps end in loose promises: a scheduler will confirm a date, a skills test will arrive, a
+decision is due by some day. Left in free-form notes, a promise like that is seen once and then
+forgotten, since no structured field holds it and no session start shows it. This script gives
+every such promise a field, and reads that field back at the start of every session.
 
 THE MECHANISM
--------------
 An owed/awaited action is marked inline, inside the tracker fields that already exist, with a token:
 
     @OWED[<owner>|<chase-date>|<what>]
@@ -28,7 +23,6 @@ human-readable in the tracker AND machine-parseable here -- one field, no second
 maintained side-file is its own anti-pattern: it rots the moment anything else changes state).
 
 THE TEETH
----------
   1. EVERY status:"interview" (or "offer") APPLICATIONS row MUST carry >=1 @OWED[...] in `next:`.
      Missing  ->  CRITICAL "LIVE INTERVIEW, NO TRACKED NEXT-STEP" (the exact failure this exists
      to catch).
@@ -42,11 +36,16 @@ harness's session-start hook is a separate step; this script only computes and p
 
 Usage:  commitments.py [--selftest]
 Exit 0 = clean.  2 = at least one CRITICAL (a live interview with no tracked next-step) exists.
+3 = NOT CHECKED: there is no tracker yet (a warning, never a pass).
 """
 import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+
+if __name__ == "__main__" and "--selftest" in sys.argv:
+    import voice_check
+    voice_check.selftest_in_sandbox(__file__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
@@ -344,15 +343,15 @@ def selftest() -> int:
 
     # (a) A live interview row WITH a valid future-dated @OWED -- clean, no CRITICAL.
     good = ('var APPLICATIONS=[{co:"Globex", status:"interview", '
-            'next:"Interview round done 01-14. @OWED[them|2026-01-30|Riley to send the design take-home]", '
+            'next:"Panel with two unit managers held 01-13. @OWED[them|2026-01-29|HR to book the skills test]", '
             'folder:"applications/zzz-nope"}];\nvar NETWORK=[];')
     rg = build(good, today=T, check_calls=False)
     c("valid interview @OWED -> no CRITICAL", rg.critical, False)
     c("valid interview @OWED -> not overdue", len(rg.overdue), 0)
 
-    # (b) THE exact failure this exists to catch: a live interview row with NO @OWED -> CRITICAL fires.
+    # (b) What this exists to catch: a live interview row with NO @OWED -> CRITICAL fires.
     bad = ('var APPLICATIONS=[{co:"Globex", status:"interview", '
-           'next:"Interview round done 01-14, strongly positive, take-home next", '
+           'next:"Panel with two unit managers held 01-13, skills test expected", '
            'folder:"applications/zzz-nope"}];\nvar NETWORK=[];')
     rb = build(bad, today=T, check_calls=False)
     c("interview with NO @OWED -> CRITICAL", rb.critical, True)
@@ -360,29 +359,29 @@ def selftest() -> int:
 
     # (c) An overdue @OWED is caught.
     od = ('var APPLICATIONS=[{co:"Initech", status:"interview", '
-          'next:"@OWED[them|2025-12-28|round-2 decision]", folder:"applications/zzz"}];\nvar NETWORK=[];')
+          'next:"@OWED[them|2025-12-22|store manager decision]", folder:"applications/zzz"}];\nvar NETWORK=[];')
     ro = build(od, today=T, check_calls=False)
     c("past-dated @OWED -> overdue", len(ro.overdue), 1)
-    c("  overdue day-count correct", ro.overdue[0].days_over(T), 18)
+    c("  overdue day-count correct", ro.overdue[0].days_over(T), 24)
 
     # (d) An undated @OWED ('?') is flagged undated, not crashed.
     un = ('var APPLICATIONS=[{co:"Umbrella", status:"interview", '
-          'next:"@OWED[them|?|reschedule times]", folder:"applications/zzz"}];\nvar NETWORK=[];')
+          'next:"@OWED[them|?|new slot for the shop tour]", folder:"applications/zzz"}];\nvar NETWORK=[];')
     ru = build(un, today=T, check_calls=False)
     c("undated @OWED -> undated bucket", len(ru.undated), 1)
     c("undated @OWED -> not CRITICAL (it IS tracked)", ru.critical, False)
 
     # (e) A rejected/dead row with no @OWED is NOT a CRITICAL (only live statuses are required).
-    dead = ('var APPLICATIONS=[{co:"Wonka", status:"rejected", next:"REJECTED"}];\nvar NETWORK=[];')
+    dead = ('var APPLICATIONS=[{co:"Hooli", status:"rejected", next:"REJECTED"}];\nvar NETWORK=[];')
     rd = build(dead, today=T, check_calls=False)
     c("dead row with no @OWED -> no CRITICAL", rd.critical, False)
 
     # (f) Deadline regex: pull the ISO date next to application_deadline; ignore none/null/past-format.
-    m_dl = DEADLINE_RE.search("**Application deadline:** 2026-02-02 (`application_deadline` in the API)")
-    c("deadline regex pulls the ISO date", m_dl.group(1) if m_dl else None, "2026-02-02")
+    m_dl = DEADLINE_RE.search("**Application deadline:** 2026-02-09 (posted in the job page)")
+    c("deadline regex pulls the ISO date", m_dl.group(1) if m_dl else None, "2026-02-09")
     c("deadline regex ignores 'none listed'", bool(DEADLINE_RE.search("application_deadline: none listed")), False)
     c("deadline regex ignores null", bool(DEADLINE_RE.search("application_deadline: null (none set)")), False)
-    c("deadline regex ignores a non-ISO placeholder", bool(DEADLINE_RE.search("accepted until {7/10/2026}")), False)
+    c("deadline regex ignores a non-ISO placeholder", bool(DEADLINE_RE.search("accepted until {3/14/2031}")), False)
 
     # (g) Deadline STATUS SCOPING, driven end-to-end through deadlines() with real jd files. An
     #     'active' (built, fill-ready) dossier with an imminent deadline MUST surface; an
@@ -391,13 +390,13 @@ def selftest() -> int:
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         tdp = Path(td)
-        for nm in ("acme-active", "beta-interview"):
+        for nm in ("acme-active", "hooli-interview"):
             dd = tdp / "applications" / nm
             dd.mkdir(parents=True)
-            (dd / "jd-x.md").write_text("**Application deadline:** 2026-01-20\n")
+            (dd / "jd-x.md").write_text("**Application deadline:** 2026-01-23\n")
         dl_html = ('var APPLICATIONS=['
                    '{co:"AcmeActive", status:"active", next:"tailor, apply", folder:"applications/acme-active"},'
-                   '{co:"BetaInterview", status:"interview", next:"@OWED[them|2026-01-30|x]", folder:"applications/beta-interview"}'
+                   '{co:"HooliInterview", status:"interview", next:"@OWED[them|2026-01-29|x]", folder:"applications/hooli-interview"}'
                    '];\nvar NETWORK=[];')
         global REPO, TRACKER
         _saved_repo, _saved_tracker = REPO, TRACKER
@@ -406,7 +405,28 @@ def selftest() -> int:
         try:
             cos = {d.co for d in deadlines(dl_html, today=T, window=30)}
             c("an ACTIVE dossier w/ imminent deadline SURFACES", "AcmeActive" in cos, True)
-            c("an INTERVIEW dossier (already submitted) does NOT surface", "BetaInterview" in cos, False)
+            c("an INTERVIEW dossier (already submitted) does NOT surface", "HooliInterview" in cos, False)
+        finally:
+            REPO, TRACKER = _saved_repo, _saved_tracker
+
+    # (h) No tracker: said plainly and exit 3, never "0 live interview(s) tracked".
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        _saved_repo, _saved_tracker = REPO, TRACKER
+        REPO = Path(td)
+        TRACKER = Path(td) / "pipeline" / "tracker.html"
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main([])
+            c("no tracker: says not checked and exits 3", (rc, buf.getvalue().strip()), (3, NO_TRACKER))
+            TRACKER.parent.mkdir()
+            TRACKER.write_text("var APPLICATIONS=[\n];\nvar NETWORK=[\n];\n")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main([])
+            c("an empty tracker is checked and exits 0", (rc, "0 live interview(s) tracked" in buf.getvalue()), (0, True))
         finally:
             REPO, TRACKER = _saved_repo, _saved_tracker
 
@@ -414,9 +434,15 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
-if __name__ == "__main__":
-    if "--selftest" in sys.argv:
-        sys.exit(selftest())
+NO_TRACKER = "commitments: no tracker yet: not checked (pipeline/tracker.html is missing)"
+
+
+def main(argv: list) -> int:
+    if "--selftest" in argv:
+        return selftest()
+    if not TRACKER.is_file():
+        print(NO_TRACKER)
+        return 3
     r = build()
     t = _today()
     lines = session_lines(t)
@@ -427,7 +453,11 @@ if __name__ == "__main__":
     if r.critical:
         print(f"\n❌ CRITICAL: {len(r.missing_interviews)} live interview(s) with no tracked next-step: "
               f"{', '.join(r.missing_interviews)}")
-        sys.exit(2)
+        return 2
     print(f"\n✅ {len(r.interviews)} live interview(s) tracked · {len(r.overdue)} overdue · "
           f"{len(r.due_soon)} due-soon · {len(r.undated)} undated")
-    sys.exit(0)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

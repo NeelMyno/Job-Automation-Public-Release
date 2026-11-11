@@ -6,9 +6,8 @@
 
 `ops/decisions/` is where a locked decision gets recorded permanently, so a future session (yours
 or an agent's) doesn't have to re-litigate something you already decided. This file exists as a
-worked example of the shape (three sections, nothing more) and as a real fixture some of the
-repo's own gate scripts test against (see `scripts/visa_gate.py`'s `--selftest`, which references
-this exact ADR number). Leave it in place; add your own ADRs after it rather than replacing it.
+worked example of the shape (three sections, nothing more). Add your own ADRs after it, starting
+at 0002.
 
 ## Decision
 

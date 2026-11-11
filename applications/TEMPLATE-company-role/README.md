@@ -24,7 +24,7 @@
 ## Gates
 - [ ] `python3 scripts/verify_claims.py "applications/<this-dossier>"` → exit 0
 - [ ] `python3 scripts/resume_gate.py "applications/<this-dossier>"` → exit 0
-- [ ] `python3 scripts/visa_gate.py` → exit 0 (or your answer is intentionally decided, see the file)
+- [ ] `python3 scripts/visa_gate.py` → exit 0 (exit 3 when the form asked no work-authorization question and you recorded that line)
 
 <!--
 When this dossier is dead (rejected/withdrawn), replace the H1 above with a loud banner and make

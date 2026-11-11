@@ -50,7 +50,7 @@ Measure progress in interviews booked, not artifacts produced.
 **The agent does the work.** It finds the jobs, builds the materials and fills the application
 forms. You make the calls only you can make (what to apply to, a stretch claim, a message going out)
 and you click Submit and Send. An agent that tells you to fill a form by hand while a browser tool
-is available, or to hunt down company job-board links yourself, is not following this file.
+is available or can be switched on, or to hunt down company job-board links yourself, is not following this file.
 
 ### THE DEFINITION OF DONE = A COMMAND, NOT A CLAIM
 
@@ -67,15 +67,22 @@ it, this turn, not from memory:
 | "the copy is clean" | `python3 scripts/verify_claims.py "<dossier>"` → exit 0, and the agent quotes its `NOT checked:` line verbatim |
 | "the knowledge base is right" | `python3 scripts/canon.py` → exit 0 |
 | "the résumé is one full page" | `python3 scripts/resume_gate.py` → exit 0. Exit 3 is an open item (a short but honest page) that you decide, never padded and never a pass. Exit 2 means no résumé PDF is built yet, so nothing was checked. Exit 1 is a failure (rule owner: `resume/README.md`) |
-| "the work-authorization answers are right" | `python3 scripts/visa_gate.py` → exit 0, **plus** the DOM read-back (the gate reads the record, not the clicked radio button). Exit 3 means your answers are not filled in yet, so nothing was checked: never a pass |
-| "no over-reach role was filled" | `python3 scripts/seniority_gate.py --all --unsubmitted` → exit 0 and **0 unhandled** (exit 1 = unhandled ones remain), with `YOUR_YEARS_OF_EXPERIENCE` set in `scripts/config.py`. While it is unset the gate prints "NOT CHECKED" and exits 3; that is never proof, and the claim stays unverified. |
+| "the work-authorization answers are right" | `python3 scripts/visa_gate.py` → exit 0, **plus** the DOM read-back (the gate reads the record, not the clicked radio button). Exit 3 means nothing was checked (your §3 answers are not filled in yet, or no application records an answer yet): never a pass |
+| "no over-reach role was filled" | `python3 scripts/seniority_gate.py --all --unsubmitted` → exit 0 and **0 unhandled** (exit 1 = unhandled ones remain: show each to the user; on yes mark it `passed`, on no add `Seniority: KEPT YYYY-MM-DD` to its README), with `YOUR_YEARS_OF_EXPERIENCE` set in `scripts/config.py`. While it is unset, while an unsubmitted dossier has no `jd-*.md` with the posting's text, or while there is no dossier yet, the gate prints "NOT CHECKED" with its cause and exits 3; that is never proof, and the claim stays unverified. |
 | "the rules are consistent" | `python3 scripts/check_law.py` → exit 0 |
 | "the records are in format" | `python3 scripts/records_check.py` → exit 0 (shapes: `.claude/rules/records-format.md`) |
 | "nothing has gone cold unseen" | `python3 scripts/cold.py`: every cold class listed by name with its age |
 | "the crawl found jobs" | `crawl.py`'s own JSON: it lists every source that ran, how many jobs each returned, and every source skipped and why |
-| "the wave is done" | `python3 scripts/throughput.py` → zero `ready-but-never-sent` |
+| "the wave is done" | `python3 scripts/throughput.py` → zero `ready-but-never-sent` (exit 3 = no tracker yet, not checked) |
 | "the application bundle is complete" | `python3 scripts/throughput.py` → zero `cover-missing`. A cover letter PDF is mandatory in every bundle, exactly like the résumé. |
-| "no live interview lost its next-step" | `python3 scripts/commitments.py` → exit 0 (exit 2 = a live interview with no tracked next-step). Every `status:"interview"` row carries a dated `@OWED[owner\|date\|what]`. |
+| "the why-them answers are about them" | `python3 scripts/why_check.py "<dossier>"` → exit 0. Exit 1 is a finding. Exit 3 means there was no answer to check, or your employers and projects can't be read yet: never a pass |
+| "the work-history boxes match the résumé" | `python3 scripts/work_history_check.py --live <dir>` → exit 0, on what `scripts/form_answers.js` read off the live form. Exit 1 is a finding. Exit 3 means not checked: never a pass |
+| "the cover letter PDF is built" | `python3 scripts/render_cover.py "<dossier>" --meta "Company, Role, City, ST"` → exit 0 (rendered, one page). Exit 1 names the problem. Exit 3 means it rendered but the page count could not be read |
+| "the writing has no machine-made shapes" | `python3 scripts/slop_check.py "<dossier>"` → exit 0. Exit 1 is a TO FIX finding, exit 2 is wrong usage or a `--text`/`--letter` path that can't be read, exit 3 means nothing was checked (a missing folder included). A floor, not the voice test (§11) |
+| "every question on the form is answered" | `scripts/form_blanks.js` and `scripts/form_persist.js`, run through the browser tool on every open tab: empty `blanks`, empty `mismatched` (`.claude/commands/wave.md` stage 7) |
+| "no submitted form is still open" | `python3 scripts/open_tab_sweep.py --file <tabs>` → exit 0, on the tab list from the browser tool. Exit 1 is a submitted tab still open. Exit 3 means not checked |
+| "silent companies are closed out" | `python3 scripts/ghost.py --dry-run` → `0 to ghost` |
+| "no live interview lost its next-step" | `python3 scripts/commitments.py` → exit 0 (exit 2 = a live interview with no tracked next-step; exit 3 = no tracker yet, not checked). Every `status:"interview"` row carries a dated `@OWED[owner\|date\|what]`. |
 | "it's committed" | `git log -1` shows it, and `git status` is clean for those paths |
 
 If the command can't be named, the honest word is **"unverified"**: say that instead. A wrong
@@ -137,9 +144,15 @@ python3 scripts/verify_claims.py "applications/<company>-<role>"   # outbound co
 python3 scripts/canon.py                                          # the knowledge base : must exit 0
 python3 scripts/visa_gate.py                                      # work-auth answers  : must exit 0 (3 = not checked yet)
 python3 scripts/check_law.py                                      # the law itself      : must exit 0
+python3 scripts/slop_check.py "applications/<company>-<role>"     # machine-made shapes : 1 = to fix, 3 = not checked
+python3 scripts/why_check.py "applications/<company>-<role>"      # why-them answers    : 1 = finding, 3 = not checked
 python3 scripts/throughput.py     # finished work sitting unsent, a dossier contradicting itself,
                                   # a fill claimed without DOM evidence, commits held back
 ```
+
+`scripts/work_history_check.py` and the `scripts/form_*.js` helpers read the live form while it is
+being filled, and `scripts/open_tab_sweep.py` labels the open tabs (`.claude/commands/wave.md` stage
+7). `scripts/commit_guard.py` runs the record gates at commit time (§10).
 
 Each gate takes `--selftest`, and every selftest ships green out of the box: each is built from a
 generic, self-contained fictional fixture, not real personal data, so `--selftest` works the moment
@@ -285,8 +298,9 @@ is **your call, and it belongs in `knowledge-base/11-preferences-and-conventions
    `scripts/hooks.py --session-start`). On a fresh clone it says the knowledge base is empty and
    points at `/setup`. Once you're set up it prints your live application and network counts
    re-derived from `pipeline/tracker.html`, a **live-interviews block** first and loudest (every
-   `status:"interview"` row and its owed next-step), anything gone cold (`scripts/cold.py`), any ADR
-   debt, and the health of the gates it selftests. If it hasn't run, run it by hand:
+   `status:"interview"` row and its owed next-step), any company it just marked ghosted
+   (`scripts/ghost.py`), anything gone cold (`scripts/cold.py`), any ADR debt, and the health of the
+   gates it selftests. If it hasn't run, run it by hand:
    `python3 scripts/hooks.py --session-start`. Act on an overdue interview next-step before other
    task work: it is the §0 north star.
    > **The hook's numbers outrank every written record.** If `ops/HANDOFF.md` or `ops/STATE.md`
@@ -391,8 +405,13 @@ someone to refer you into it.
 │   ├── 14-positioning-and-visibility.md      # get found: referrals, visible work, don't just apply
 │   ├── 15-interview-story-bank.md            # reusable STAR-format interview stories
 │   ├── 16-the-senior-gap.md                  # how to research the seniority bar you're targeting
-│   └── 17-writing.md                         # THE one owner of how anything you send sounds
-├── scripts/                      # repo tooling: gates, hooks, doctor.py (health check), config.py
+│   ├── 17-writing.md                         # THE one owner of how anything you send sounds
+│   └── 18-in-your-own-words.md               # your real stories and reasons (optional, ships blank)
+├── scripts/                      # repo tooling: gates, hooks, doctor.py (health check), config.py,
+│                                 # ghost.py (marks silent companies), commit_guard.py (commit-time
+│                                 # record gates), why_check / work_history_check / slop_check (form
+│                                 # answers and letters), render_cover.py (cover letter PDF),
+│                                 # open_tab_sweep.py, form_*.js (read a live form in the browser tool)
 ├── pipeline/                     # crawler (job-crawler/: crawl, discover, sources), tracker, ledgers
 ├── ops/                          # this repo's own session record: see §7
 ├── applications/                 # ACTIVE per-job dossiers: one folder per job (§13.3)
@@ -428,6 +447,7 @@ ambiguous, record the best reading and flag it; never skip it.
 |---|---|
 | A submit confirmation | tracker row → status `applied` and its `applied:` date (§9) · the screenshot into `applications/<d>/correspondence/` · a `## SUBMITTED <date>` heading in that `application.md` |
 | A rejection, screen invite, interview, offer or any employer email | tracker row status + `next` + `@OWED` (§9) · the screenshot or text into the dossier's `correspondence/` |
+| A company goes silent, or a ghosted company replies | silent: status `ghosted` (your word, or `scripts/ghost.py` by itself once it is `GHOST_DAYS` past the chase date) with its `@OWED` and threads closed · a reply: the status set back, the reply recorded, a new `@OWED` (`.claude/rules/records-format.md` §1) |
 | A message you sent (DM, email, InMail, note) | a `pipeline/sent-ledger.md` row (InMails also `pipeline/inmail-ledger.md`) · the sent text into the dossier · the NETWORK row's `fu`, always (add the row if the person has none) |
 | A reply you received, or a person you met or named | the NETWORK row (add if new) + `fu` · the reply into the dossier's `correspondence/` |
 | A commitment, next step or deadline (yours or theirs) | `@OWED[...]` on the row (§9) |
@@ -498,7 +518,8 @@ reflex, without being asked.** Row shapes: `.claude/rules/records-format.md` §1
     capture it as `@OWED[owner|chase-date|what]` inside that row's `next:` (application) or `fu:`
     (network) field. `scripts/commitments.py` surfaces every live-interview next-step at session start
     and flags a `status:"interview"` row that carries none.
-- Bump the `UPDATED` date. Use the existing status vocabulary.
+- Bump the `UPDATED` date. Use the existing status vocabulary (`lead · active · applied · interview
+  · offer · rejected · passed · ghosted`; row shapes: `.claude/rules/records-format.md` §1-2).
 - **Honesty:** reflect only what you actually said or what the agent verifiably found: never invent
   a status or fact. After updating, confirm in one short line what changed.
 - **This reflex belongs to the main session only.** Subagents write only the paths their brief names.
@@ -520,10 +541,16 @@ Until you've recorded an explicit answer in `knowledge-base/11-preferences-and-c
 default is **commit locally, never push without asking**: the safe default for a template nobody has
 customized yet.
 
-**Commit messages and PR text carry no AI attribution:** no `Co-Authored-By: Claude` line and no
-"Generated with Claude Code" line, in any commit message or pull request description. The repo's
+**Commit your own files first. Never stash or `--autostash` a shared working tree:** stashing takes
+every uncommitted change in the folder, including another open session's, and a failed re-apply can
+leave the repo stuck mid-rebase. `scripts/commit_guard.py` holds this line: it refuses `--autostash`
+and commands that skip the commit hook, and at commit time it runs the record gates on what you
+staged, saying exactly what to fix. It checks commits only, so your choices above stay yours.
+
+**Commit messages and PR text carry no AI attribution:** no AI co-author trailer or tool-attribution
+line, in any commit message or pull request description. The repo's
 `.claude/settings.json` turns Claude Code's own attribution off (`"attribution": {"commit": "",
-"pr": ""}`); do not add the lines by hand either.
+"pr": ""}`); do not add such a line by hand either.
 
 **Footgun:** if your shell is zsh and a commit message you're about to run through `git commit -m
 "..."` contains a backtick, it is command substitution and gets silently executed and stripped.
@@ -540,8 +567,11 @@ actually write.
 
 The one test: read it out loud as you, to this one person, and fix whatever does not sound like
 you. For anything sendable, a fresh reviewer agent does the same with only 17-writing.md and your
-samples. `scripts/voice_check.py` checks only hard facts and the phrases you list as never-say;
-passing it says nothing about the voice. The truth rules (§0.1, §5) stay with their owners.
+samples. `knowledge-base/18-in-your-own-words.md` (optional, ships blank) holds your own stories and
+reasons, which letters and answers are built from. `scripts/voice_check.py` checks only hard facts
+and the phrases you list as never-say; passing it says nothing about the voice. `scripts/slop_check.py`
+flags sentence shapes that read as machine-made; passing it is a floor, not the voice. The truth
+rules (§0.1, §5) stay with their owners.
 
 ---
 

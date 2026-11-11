@@ -8,7 +8,8 @@ once, following `SETUP.md`, and every session after that starts grounded instead
 
 - **Every session, always:** this file + `11-preferences-and-conventions.md`.
 - **For a résumé or cover letter:** `01-profile-and-identity.md`, `02-work-authorization.md`,
-  `07-master-resume.md`, `08-application-playbook.md`.
+  `07-master-resume.md`, `08-application-playbook.md`, `17-writing.md`, and
+  `18-in-your-own-words.md` if you have filled it in.
 - **For an application form:** all of the above + `12-application-answers.md`.
 - **For interview prep:** `03-career-narrative.md`, `04-experience-detail.md`,
   `06-projects-portfolio.md`, `15-interview-story-bank.md`.
@@ -36,6 +37,7 @@ once, following `SETUP.md`, and every session after that starts grounded instead
 | ○ | `15-interview-story-bank.md` | Your reusable STAR-format interview stories | Recommended once you have a real interview scheduled |
 | ○ | `16-the-senior-gap.md` | A method for figuring out where you actually sit on a target company's ladder (years floor vs. quality bar) and setting `YOUR_YEARS_OF_EXPERIENCE` for `scripts/seniority_gate.py` | Optional, advanced |
 | ★ | `17-writing.md` | THE one owner of how anything you send sounds: the method, the principles, and your own voice samples and never-say list | **Yes for anything sendable: fill your voice samples during setup** |
+| ○ | `18-in-your-own-words.md` | Your real stories, reasons and opinions, in your words: what letters and "why us" answers are built from | Optional: blank is fine, letters just stay shorter. The more you add, the less they read like anyone's |
 
 **The ★ files are the minimum, and `/setup` fills them for you.** Four of them make the pipeline
 run end to end (01, 02, 07, 12: the résumé and cover-letter tailoring, the honesty gates, and form
